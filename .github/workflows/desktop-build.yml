@@ -10,6 +10,10 @@ name: Build Desktop
 # 触发方式:
 #   1. workflow_dispatch  手动触发（不发 release，只产 artifact）
 #   2. push tags 'v*'     自动构建并发布 GitHub Release
+#
+# 注意：项目 Taskfile 中 APP_NAME="ZPassDesktop"（保持与 wails 模板一致），
+# workflow 内对产物的引用都用 ZPassDesktop 这个真名。最终 release 资产名通过
+# 重命名步骤换成更短的 ZPass-<os>-<arch> 形式。
 # -----------------------------------------------------------------------------
 
 on:
@@ -83,9 +87,10 @@ jobs:
       # 在 CI 上必须显式设，否则生成的 .deb / .rpm 元数据里会出现空字符串
       GIT_COMMITTER_NAME: github-actions
       GIT_COMMITTER_EMAIL: github-actions@users.noreply.github.com
-      # nfpm.yaml 的 arch 字段引用了 ${GOARCH}
-      GOARCH: ${{ matrix.goarch }}
-      CGO_ENABLED: ${{ matrix.cgo }}
+      # ⚠️ 故意不在这里设 GOARCH。原因：wails3 install / npm 等步骤必须使用
+      # host 架构（windows-latest 是 AMD64，若 GOARCH=arm64 会编译出无法在
+      # host 上执行的 ARM64 wails3.exe）。GOARCH 只在 Build/Package step 内
+      # 设置，那时 Taskfile 已经收到了 ARCH=xxx 参数。
 
     defaults:
       run:
@@ -117,12 +122,10 @@ jobs:
           version: '3.x'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install Wails3 CLI
-        # Wails 3 仍在 alpha，跟着 v3-alpha 分支 latest 安装
-        # 项目 go.mod 当前锁定 v3.0.0-alpha.78
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@latest
-
-      # ---------- 2. 平台特定依赖 ----------
+      # ---------- 2. 平台特定依赖（必须在安装 wails3 CLI 之前） ----------
+      # wails3 alpha 的 internal/operatingsystem 包通过 CGO 链接 gtk+-3.0 和
+      # webkit2gtk-4.1，所以 Linux runner 上必须先装 -dev 包，否则连 wails3
+      # 自己都编译不出来
       - name: Install Linux build deps (GTK3 + WebKit2GTK 4.1 + rpm)
         if: matrix.goos == 'linux'
         shell: bash
@@ -141,42 +144,64 @@ jobs:
         shell: pwsh
         run: |
           choco install nsis -y --no-progress
+          # NSIS 装到 C:\Program Files (x86)\NSIS，但 GitHub Actions 不会自动
+          # 把这个目录加到 PATH，需要显式写入 $GITHUB_PATH 才能让后续 step 中
+          # 的 Task 调用 makensis
+          echo "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      # ---------- 3. 前端依赖（独立 npm install，让 setup-node 的 cache 生效） ----------
+      # ---------- 3. Wails3 CLI ----------
+      # 必须用 host 架构编译，否则 cross-compile 出来的 wails3.exe 在 host
+      # 上无法执行。显式 unset GOARCH（让 go 用默认 host arch）。
+      - name: Install Wails3 CLI
+        env:
+          GOARCH: ''      # 用 host 架构编译 wails3 binary
+          CGO_ENABLED: '1'  # Linux 上 wails3 自身需要 CGO（链接 GTK）
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@latest
+
+      # ---------- 4. 前端依赖（显式触发，让 setup-node 的 npm cache 生效） ----------
       - name: Install frontend dependencies
         working-directory: desktop/frontend
         run: npm ci
 
-      # ---------- 4. 构建二进制 ----------
-      # task build 会自动按链路跑：
+      # ---------- 5. 构建二进制 ----------
+      # task build 会按链路自动跑：
       #   common:go:mod:tidy → common:build:frontend → common:generate:icons → {windows|darwin|linux}:build:native → go build
       - name: Build binary
+        env:
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: ${{ matrix.cgo }}
         run: task build ARCH=${{ matrix.goarch }}
 
-      # ---------- 5. 打包 ----------
-      # task package 会按平台跑：
+      # ---------- 6. 打包 ----------
+      # task package 按平台跑：
       #   - windows: create:nsis:installer
       #   - darwin : create:app:bundle (.app)
       #   - linux  : create:appimage + create:deb + create:rpm + create:aur
       - name: Package
+        env:
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: ${{ matrix.cgo }}
         run: task package ARCH=${{ matrix.goarch }}
 
-      # ---------- 6. 整理产物 ----------
-      # macOS: .app 是目录，必须用 ditto 打包，普通 zip 会破坏 bundle 的符号链接和扩展属性
+      # ---------- 7. 整理产物（macOS 必须用 ditto） ----------
+      # .app 是目录，用 actions/upload-artifact 直接上传会破坏 bundle 的
+      # 符号链接和扩展属性，必须先用 ditto 打成 zip
       - name: Repack macOS .app to .zip (with ditto)
         if: matrix.goos == 'darwin'
         run: |
           cd bin
-          ditto -c -k --sequesterRsrc --keepParent "ZPass.app" "ZPass-macos-${{ matrix.goarch }}.zip"
+          ditto -c -k --sequesterRsrc --keepParent "ZPassDesktop.app" "ZPass-macos-${{ matrix.goarch }}.zip"
           echo "--- bin/ contents ---"
           ls -lah
 
-      # Windows: 顺便给 .exe 加上架构后缀，便于 release 资产命名清晰
-      - name: Rename Windows binary with arch suffix
+      - name: Rename Windows binary / installer
         if: matrix.goos == 'windows'
         run: |
-          cp "bin/ZPass.exe" "bin/ZPass-windows-${{ matrix.goarch }}.exe"
-          # NSIS 安装器命名也加上明确架构（项目模板默认输出 ZPassDesktop-<arch>-installer.exe）
+          # 裸 binary 加架构后缀
+          if [ -f "bin/ZPassDesktop.exe" ]; then
+            cp "bin/ZPassDesktop.exe" "bin/ZPass-windows-${{ matrix.goarch }}.exe"
+          fi
+          # NSIS 安装器（项目 NSIS 模板默认输出 ZPassDesktop-<arch>-installer.exe）
           if [ -f "bin/ZPassDesktop-${{ matrix.goarch }}-installer.exe" ]; then
             cp "bin/ZPassDesktop-${{ matrix.goarch }}-installer.exe" \
                "bin/ZPass-windows-${{ matrix.goarch }}-installer.exe"
@@ -184,22 +209,21 @@ jobs:
           echo "--- bin/ contents ---"
           ls -lah bin/
 
-      # Linux: 重命名裸 binary 添加 arch 后缀
-      - name: Rename Linux binary with arch suffix
+      - name: Rename Linux binary
         if: matrix.goos == 'linux'
         run: |
-          if [ -f "bin/ZPass" ]; then
-            cp "bin/ZPass" "bin/ZPass-linux-${{ matrix.goarch }}"
+          if [ -f "bin/ZPassDesktop" ]; then
+            cp "bin/ZPassDesktop" "bin/ZPass-linux-${{ matrix.goarch }}"
           fi
           echo "--- bin/ contents ---"
           ls -lah bin/
 
-      # ---------- 7. 上传 artifact ----------
+      # ---------- 8. 上传 artifact ----------
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: zpass-desktop-${{ matrix.target }}
-          # 用 if-no-files-found: ignore 容忍单平台没产某种格式（如 macOS 无 .deb）
+          # if-no-files-found: ignore 容忍单平台没产某种格式（如 macOS 无 .deb）
           path: |
             desktop/bin/ZPass-windows-${{ matrix.goarch }}.exe
             desktop/bin/ZPass-windows-${{ matrix.goarch }}-installer.exe
