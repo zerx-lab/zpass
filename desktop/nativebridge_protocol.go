@@ -9,7 +9,19 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+
+	"golang.org/x/net/publicsuffix"
 )
+
+// domainMatchBlacklist — base domain 匹配黑名单（对齐 Bitwarden
+// libs/common/src/platform/misc/utils.ts 中的 DomainMatchBlacklist）。
+//
+// 语义：key 是某个 registrable domain，其 value Set 里的 host 不能被当
+// 作该 domain 的合法子域。典型例：script.google.com 的页面可以代理任意
+// 账号，不应让保存为 google.com 的凭据被自动填在 script.google.com 上。
+var domainMatchBlacklist = map[string]map[string]struct{}{
+	"google.com": {"script.google.com": {}},
+}
 
 type nativeEnvelope struct {
 	ID      string          `json:"id"`
@@ -40,6 +52,18 @@ type loginSummaryNative struct {
 	Username   string `json:"username"`
 	DisplayURL string `json:"displayUrl"`
 	UpdatedAt  int64  `json:"updatedAt"`
+	// HasTotp 标记该条目是否带 OTP 秘钥。判定标准：fields["totp"] 非空字符串。
+	HasTotp bool `json:"hasTotp"`
+	// HasPassword 标记该条目是否有密码。判定标准：fields["password"] 非空。
+	// 前端据此决定 popup 点击行为：
+	//   - hasPassword + hasTotp → 填账密 + 自动复制 TOTP 到剪贴板
+	//   - hasPassword only      → 填账密
+	//   - hasTotp only          → 复制 TOTP 到剪贴板
+	HasPassword bool `json:"hasPassword"`
+	// ItemType 查询出的条目底层类型。queryLogins 现在同时收 ItemTypeLogin 和
+	// ItemTypeTOTP（「独立身份验证器」），前端需要区分以选择图标 / 提示文案。
+	// 取值与 desktop ItemType 一致："login" / "totp"。
+	ItemType string `json:"itemType"`
 }
 
 type queryLoginsResult struct {
@@ -48,11 +72,41 @@ type queryLoginsResult struct {
 	Items    []loginSummaryNative `json:"items"`
 }
 
+// loginSecretNative 是 revealLogin 返给扩展的完整凭据快照。
+//
+// 设计上与 Bitwarden Login cipher 对齐：username + password + totp 可同时存在于
+// 同一个条目。任何一个可为空串（password）或 null（totp），前端按形态分流。
+//
+// Totp 为指针是为了 JSON 里用 null 表「未带 TOTP」，避免与「带但算失败」混淆（
+// 后者未来可能加 Err 字段，现在静默 nil 同「未带」一致表现）。
 type loginSecretNative struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Username string `json:"username"`
-	Password string `json:"password"`
+	ID       string               `json:"id"`
+	Name     string               `json:"name"`
+	Username string               `json:"username"`
+	Password string               `json:"password"`
+	Totp     *loginTotpCodeNative `json:"totp,omitempty"`
+}
+
+// generateLoginTotpRequest 浏览器扩展请求生成指定 login 条目的 OTP 当前码。
+//
+// 与 revealLogin 同样做 origin 匹配检查：避免恶意页面通过扩展间接读取
+// 其它站点的 TOTP。
+type generateLoginTotpRequest struct {
+	pageContext
+	ItemID string `json:"itemId"`
+}
+
+// loginTotpCodeNative 是浏览器扩展拿到的 OTP 快照，字段语义与
+// totpservice.TOTPCode 完全一致；这里独立结构是为了把 native bridge
+// 协议与桌面前端 Wails binding 解耦（前者面向扩展，可独立演进）。
+type loginTotpCodeNative struct {
+	Code      string `json:"code"`
+	Type      string `json:"type"`
+	Period    int    `json:"period"`
+	Remaining int    `json:"remaining"`
+	Counter   uint64 `json:"counter"`
+	Algorithm string `json:"algorithm"`
+	Digits    int    `json:"digits"`
 }
 
 type passkeyListRequest struct {
@@ -148,6 +202,12 @@ func dispatchNativeVault(vault *VaultService, msg nativeEnvelope) (any, error) {
 			return nil, errors.New("Invalid passkey delete request.")
 		}
 		return nativeDeletePasskey(vault, req)
+	case "generateLoginTotp":
+		var req generateLoginTotpRequest
+		if err := json.Unmarshal(nonNullPayload(msg.Payload), &req); err != nil {
+			return nil, errors.New("Invalid totp request.")
+		}
+		return generateLoginTotp(vault, req)
 	default:
 		return nil, fmt.Errorf("Unknown native request: %s", msg.Type)
 	}
@@ -179,7 +239,9 @@ func queryLogins(vault *VaultService, ctx pageContext) (*queryLoginsResult, erro
 
 	items := make([]loginSummaryNative, 0)
 	for _, summary := range summaries {
-		if summary.Type != ItemTypeLogin {
+		// 同时收 login 和独立 TOTP 条目。与 Bitwarden 不同的是 ZPass 有独立的
+		// ItemTypeTOTP（未关联账密的「身份验证器」条目）；Bitwarden 全部走 Login 类型。
+		if summary.Type != ItemTypeLogin && summary.Type != ItemTypeTOTP {
 			continue
 		}
 		item, err := vault.GetItem(summary.ID)
@@ -187,11 +249,14 @@ func queryLogins(vault *VaultService, ctx pageContext) (*queryLoginsResult, erro
 			continue
 		}
 		items = append(items, loginSummaryNative{
-			ID:         item.ID,
-			Name:       item.Name,
-			Username:   nativeFieldString(item.Fields, "username", "email", "login"),
-			DisplayURL: firstDisplayURL(item.Fields),
-			UpdatedAt:  item.UpdatedAt,
+			ID:          item.ID,
+			Name:        item.Name,
+			Username:    nativeFieldString(item.Fields, "username", "email", "login", "account"),
+			DisplayURL:  firstDisplayURL(item.Fields),
+			UpdatedAt:   item.UpdatedAt,
+			HasTotp:     nativeFieldString(item.Fields, "totp") != "",
+			HasPassword: nativeFieldString(item.Fields, "password") != "",
+			ItemType:    string(item.Type),
 		})
 	}
 	sort.SliceStable(items, func(i, j int) bool {
@@ -200,6 +265,18 @@ func queryLogins(vault *VaultService, ctx pageContext) (*queryLoginsResult, erro
 	return &queryLoginsResult{Unlocked: true, Origin: origin.String(), Items: items}, nil
 }
 
+// revealLogin 返回指定条目的明文账密 + （可选）当前 TOTP 码。
+//
+// 软化与旧版的区别：
+//   - password 为空不再报错，返 password=""。前端据此决定是否填账密。
+//     原因：源于「如果是独立 TOTP 条目 / 只存了 username 的 login」场景，
+//     用户在 popup 点该条目应当能复制 TOTP 而不是看到报错。
+//   - 同时返 TotpCode：有 totp 秘钥时现场算码，为 popup 「填充账密 + 自动
+//     复制 TOTP」合并 1 次 RPC，减少往返。计算失败不阻断账密返回。
+//
+// 仍保留的校验：
+//   - origin 必须合法 + 与条目 URL 匹配（PSL base domain）
+//   - 条目类型必须是 Login 或 TOTP
 func revealLogin(vault *VaultService, req revealLoginRequest) (*loginSecretNative, error) {
 	origin, err := parseSafeOrigin(req.pageContext)
 	if err != nil {
@@ -215,18 +292,75 @@ func revealLogin(vault *VaultService, req revealLoginRequest) (*loginSecretNativ
 		}
 		return nil, errors.New("Unable to read this ZPass login.")
 	}
-	if item == nil || item.Type != ItemTypeLogin || !itemMatchesOrigin(item, origin) {
-		return nil, errors.New("This ZPass login does not match the current site.")
+	if item == nil || (item.Type != ItemTypeLogin && item.Type != ItemTypeTOTP) || !itemMatchesOrigin(item, origin) {
+		return nil, errors.New("This ZPass item does not match the current site.")
 	}
-	password := nativeFieldString(item.Fields, "password")
-	if password == "" {
-		return nil, errors.New("This ZPass login has no password.")
-	}
-	return &loginSecretNative{
+	result := &loginSecretNative{
 		ID:       item.ID,
 		Name:     item.Name,
-		Username: nativeFieldString(item.Fields, "username", "email", "login"),
-		Password: password,
+		Username: nativeFieldString(item.Fields, "username", "email", "login", "account"),
+		Password: nativeFieldString(item.Fields, "password"),
+	}
+	// 有 TOTP 秘钥时现场算码一起返，代价仅 1 次反序列化，Token 不遭传
+	// 两次。算失败不报错——可能是秘钥格式问题，不应该拖累账密填充。
+	if nativeFieldString(item.Fields, "totp") != "" {
+		if code, err := vault.GenerateTOTP(item.ID); err == nil && code != nil {
+			result.Totp = &loginTotpCodeNative{
+				Code:      code.Code,
+				Type:      code.Type,
+				Period:    code.Period,
+				Remaining: code.Remaining,
+				Counter:   code.Counter,
+				Algorithm: code.Algorithm,
+				Digits:    code.Digits,
+			}
+		}
+	}
+	return result, nil
+}
+
+// generateLoginTotp 给浏览器扩展返回指定 login 条目的当前 OTP 码。
+//
+// 流程：
+//  1. origin 校验（同 revealLogin，防越权读其它站点 TOTP）
+//  2. itemId 非空校验
+//  3. 校验条目存在 + 类型是 login + url 匹配当前页
+//  4. 委托 vault.GenerateTOTP —— TOTP/HOTP/Steam 三种算法分流由 totpservice 处理
+//
+// 错误：
+//   - 锁定 → "Unlock ZPass Desktop to use autofill."
+//   - 条目缺秘钥 / 秘钥无效 → 包装的 totpservice 错误（前端按当前码不可用提示）
+//   - origin 不匹配 → "This ZPass login does not match the current site."
+func generateLoginTotp(vault *VaultService, req generateLoginTotpRequest) (*loginTotpCodeNative, error) {
+	origin, err := parseSafeOrigin(req.pageContext)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(req.ItemID) == "" {
+		return nil, errors.New("Missing vault item id.")
+	}
+	item, err := vault.GetItem(req.ItemID)
+	if err != nil {
+		if errors.Is(err, ErrVaultLocked) {
+			return nil, errors.New("Unlock ZPass Desktop to use autofill.")
+		}
+		return nil, errors.New("Unable to read this ZPass login.")
+	}
+	if item == nil || (item.Type != ItemTypeLogin && item.Type != ItemTypeTOTP) || !itemMatchesOrigin(item, origin) {
+		return nil, errors.New("This ZPass item does not match the current site.")
+	}
+	code, err := vault.GenerateTOTP(req.ItemID)
+	if err != nil {
+		return nil, err
+	}
+	return &loginTotpCodeNative{
+		Code:      code.Code,
+		Type:      code.Type,
+		Period:    code.Period,
+		Remaining: code.Remaining,
+		Counter:   code.Counter,
+		Algorithm: code.Algorithm,
+		Digits:    code.Digits,
 	}, nil
 }
 
@@ -416,6 +550,19 @@ func itemURLs(fields map[string]any) []string {
 	return out
 }
 
+// urlMatchesOrigin 判定保存的凭据 URL 是否匹配当前页面 origin。
+//
+// 策略与 Bitwarden UriMatchStrategy.Domain (默认) 对齐：取两者的
+// **registrable domain**（PSL eTLD+1）后比较。
+//
+// 与旧版 strings.HasSuffix 的区别：
+//   - 旧版：保存 `openai.com` 能匹 `auth.openai.com`（sub-of），但保存
+//     `auth.openai.com` 不能匹 `chat.openai.com`（反方向）。
+//   - 新版：两者只要 PSL 算出同一个 registrable domain (openai.com)
+//     就匹配。对 OAuth/SSO 跳子域场景不再踩坑。
+//
+// blacklist：DomainMatchBlacklist 与 Bitwarden 同步，防止
+// script.google.com 这种「用户可控脚本托管」子域被误认为 google.com。
 func urlMatchesOrigin(candidate string, origin *url.URL) bool {
 	parsed, err := parseCredentialURL(candidate)
 	if err != nil {
@@ -429,7 +576,46 @@ func urlMatchesOrigin(candidate string, origin *url.URL) bool {
 	if credentialHost == "" || pageHost == "" {
 		return false
 	}
-	return pageHost == credentialHost || strings.HasSuffix(pageHost, "."+credentialHost)
+
+	// 精确同 host 直接返 true，不走 PSL（适配 localhost / IP / 独立域名场景）
+	if pageHost == credentialHost {
+		return true
+	}
+
+	credentialDomain := registrableDomain(credentialHost)
+	pageDomain := registrableDomain(pageHost)
+	if credentialDomain == "" || pageDomain == "" {
+		// PSL 抽不出可注册域（例如 IP / localhost / 企业内网名）——
+		// 退回旧版 子域算法作保底，保证本地项目不会都跟不上。
+		return pageHost == credentialHost || strings.HasSuffix(pageHost, "."+credentialHost)
+	}
+	if credentialDomain != pageDomain {
+		return false
+	}
+
+	// 黑名单：同一 registrable domain 但页面 host 在不可信子域集中 → 不匹配
+	if denied, ok := domainMatchBlacklist[credentialDomain]; ok {
+		if _, blocked := denied[pageHost]; blocked {
+			return false
+		}
+	}
+	return true
+}
+
+// registrableDomain 调用 PSL 抽取 eTLD+1。IP / localhost / PSL 未覆盖的内网名
+// 返空串，调用方需退回到子域策略。
+func registrableDomain(host string) string {
+	if host == "" || host == "localhost" {
+		return ""
+	}
+	if net.ParseIP(host) != nil {
+		return ""
+	}
+	domain, err := publicsuffix.EffectiveTLDPlusOne(host)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(domain)
 }
 
 func parseCredentialURL(raw string) (*url.URL, error) {

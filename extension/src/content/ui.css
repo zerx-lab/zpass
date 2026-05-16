@@ -158,11 +158,18 @@
   }
 }
 
+/*
+ * 菜单项布局：
+ *   grid 三列 - icon 固定 24px / body 1fr (名称+账号) / action 可选
+ *   gap 10px、上下填充 11px，与 Bitwarden popup row 高度手感一致
+ */
 .zpass-menu-item {
   display: grid;
-  gap: 2px;
+  grid-template-columns: 24px 1fr auto;
+  align-items: center;
+  gap: 10px;
   width: 100%;
-  padding: 9px 12px;
+  padding: 11px 12px;
   border: 0;
   border-bottom: 1px solid var(--zp-line-soft);
   background: transparent;
@@ -187,24 +194,76 @@
   box-shadow: inset 2px 0 0 var(--zp-accent);
 }
 
-.zpass-menu-item strong,
-.zpass-menu-item span {
+/* icon 列 */
+.zpass-menu-item-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: var(--zp-text-2);
+}
+.zpass-menu-item-icon svg {
   display: block;
+  width: 16px;
+  height: 16px;
+}
+.zpass-menu-item:hover .zpass-menu-item-icon,
+.zpass-menu-item:focus-visible .zpass-menu-item-icon {
+  color: var(--zp-accent);
+}
+
+/* body 列（名称 + meta 双行） */
+.zpass-menu-item-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0; /* 允许 ellipsis 生效 */
+}
+.zpass-menu-item-body strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--zp-text);
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zpass-menu-item-sub {
+  display: block;
+  font-family: var(--zp-mono);
+  font-size: 11.5px;
+  color: var(--zp-text-3);
+  line-height: 1.3;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.zpass-menu-item strong {
-  font-size: 13px;
+/* 右侧动作标签（仅 TOTP 模式） */
+.zpass-menu-item-action {
+  flex-shrink: 0;
+  padding: 3px 7px;
+  border: 1px solid var(--zp-line);
+  border-radius: var(--zp-radius-sm);
+  font-family: var(--zp-mono);
+  font-size: 10.5px;
   font-weight: 500;
-  color: var(--zp-text);
+  letter-spacing: 0.4px;
+  color: var(--zp-text-2);
+  text-transform: uppercase;
+  background: var(--zp-bg-elev);
+  white-space: nowrap;
+}
+.zpass-menu-item:hover .zpass-menu-item-action,
+.zpass-menu-item:focus-visible .zpass-menu-item-action {
+  color: var(--zp-accent);
+  border-color: var(--zp-accent);
 }
 
-.zpass-menu-item span {
-  font-family: var(--zp-mono);
-  font-size: 11px;
-  color: var(--zp-text-3);
+/* TOTP 模式整体柠一下菜单宽（默认 280px，TOTP 有额外动作标签需多点空间） */
+.zpass-menu[data-mode="totp"] {
+  width: 320px;
 }
 
 .zpass-notice {

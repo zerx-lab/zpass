@@ -1,6 +1,8 @@
 import {
   NATIVE_HOST_NAME,
+  type GenerateLoginTotpRequest,
   type LoginSecret,
+  type LoginTotpCode,
   type NativeRequest,
   type NativeResponse,
   type PageContext,
@@ -14,7 +16,7 @@ import {
   type PasskeySignRequest,
   type QueryLoginsResult,
   type RevealLoginRequest,
-  type VaultStatus
+  type VaultStatus,
 } from "../shared/messages";
 
 type Pending = {
@@ -46,7 +48,9 @@ export class NativeBridge {
     return this.send("passkeyList", payload);
   }
 
-  async passkeyCreate(payload: PasskeyCreateRequest): Promise<PasskeyCredential> {
+  async passkeyCreate(
+    payload: PasskeyCreateRequest,
+  ): Promise<PasskeyCredential> {
     return this.send("passkeyCreate", payload);
   }
 
@@ -54,13 +58,21 @@ export class NativeBridge {
     return this.send("passkeySign", payload);
   }
 
-  async passkeyDelete(payload: PasskeyDeleteRequest): Promise<PasskeyDeleteResult> {
+  async passkeyDelete(
+    payload: PasskeyDeleteRequest,
+  ): Promise<PasskeyDeleteResult> {
     return this.send("passkeyDelete", payload);
+  }
+
+  async generateLoginTotp(
+    payload: GenerateLoginTotpRequest,
+  ): Promise<LoginTotpCode> {
+    return this.send("generateLoginTotp", payload);
   }
 
   private send<TResult, TPayload = unknown>(
     type: NativeRequest<TPayload>["type"],
-    payload?: TPayload
+    payload?: TPayload,
   ): Promise<TResult> {
     const port = this.ensurePort();
     const id = `${Date.now().toString(36)}-${++this.seq}`;
@@ -77,7 +89,7 @@ export class NativeBridge {
       this.pending.set(id, {
         resolve: (value) => resolve(value as TResult),
         reject,
-        timer
+        timer,
       });
       port.postMessage(message);
     });
@@ -89,7 +101,9 @@ export class NativeBridge {
     port.onMessage.addListener((raw: unknown) => this.handleMessage(raw));
     port.onDisconnect.addListener(() => {
       this.port = null;
-      const error = new Error(browser.runtime.lastError?.message ?? "ZPass Desktop disconnected.");
+      const error = new Error(
+        browser.runtime.lastError?.message ?? "ZPass Desktop disconnected.",
+      );
       for (const [id, pending] of this.pending) {
         globalThis.clearTimeout(pending.timer);
         pending.reject(error);
@@ -110,7 +124,9 @@ export class NativeBridge {
     if (response.ok) {
       pending.resolve(response.result);
     } else {
-      pending.reject(new Error(response.error || "ZPass Desktop request failed."));
+      pending.reject(
+        new Error(response.error || "ZPass Desktop request failed."),
+      );
     }
   }
 }

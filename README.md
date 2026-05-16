@@ -1,29 +1,33 @@
 <div align="center">
 
-# ZPass / Drawer
+<img src="./assets/logo.png" alt="ZPass" width="160" />
 
-**零知识架构 · 跨平台密码管理器**
+# ZPass
 
-端到端加密 · 本地解密 · 支持自托管 · 开源 MIT
+**Zero-knowledge password manager. Everywhere you are.**
+
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-1f2328?style=flat-square&labelColor=000)](./LICENSE)
+[![Desktop](https://img.shields.io/badge/Desktop-Wails_3-1f2328?style=flat-square&labelColor=000)](./desktop)
+[![Extension](https://img.shields.io/badge/Extension-Chrome_·_Firefox-1f2328?style=flat-square&labelColor=000)](./extension)
+[![Mobile](https://img.shields.io/badge/Mobile-Expo_RN-1f2328?style=flat-square&labelColor=000)](./phone)
+
+English · [简体中文](./README.zh-CN.md)
 
 </div>
 
 ---
 
-## 关于 ZPass
+End-to-end encrypted. Decrypted only on your device. Self-hostable. Fully open source.
 
-ZPass 是一款以**零知识**为核心理念的密码管理器。
+## Modules
 
-在零知识架构下，你的主密码永远不会离开本地设备，服务端只保存无法解读的密文。即便服务被攻破、数据被拖库，攻击者拿到的也只是一堆无意义的字节。所有加解密过程在你的设备上完成，ZPass 自己也看不到你的任何数据。
+| Path | What it is |
+|---|---|
+| [`desktop/`](./desktop) | Desktop app — Wails 3 (Go + React) |
+| [`extension/`](./extension) | Browser extension — Chrome / Firefox autofill |
+| [`phone/`](./phone) | Mobile app — Expo React Native |
+| [`website/`](./website) | Marketing site — Astro static |
 
-除此之外，ZPass 追求**平静、诚实、可控**的使用体验：
+## License
 
-- **平静**——默认中性配色，不让品牌色喧宾夺主
-- **诚实**——用线条分隔而非投影堆砌，密度由内容决定
-- **可控**——主题、口音色、密度、字体、语言均可实时切换
-- **跨平台**——桌面端与移动端共享同一套视觉语言
-- **开源**——代码、设计、文档全部公开，欢迎审计
-
-## 许可证
-
-源码 MIT · 设计与文案版权归 ZPass 项目所有。
+[AGPL-3.0](./LICENSE) © ZPass

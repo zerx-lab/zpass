@@ -12,6 +12,7 @@ import { Colors } from "@/constants/theme";
 import { ThemeProvider, useTheme } from "@/contexts/theme-context";
 import { VaultProvider, useVault } from "@/contexts/vault-context";
 import { LockOverlay } from "@/components/lock-overlay";
+import { OnboardingOverlay } from "@/components/onboarding-overlay";
 
 export const unstable_settings = {
   anchor: "(tabs)",
@@ -22,7 +23,7 @@ export const unstable_settings = {
  */
 function RootLayoutNav() {
   const { scheme } = useTheme();
-  const { locked } = useVault();
+  const { locked, mode } = useVault();
 
   const navTheme = useMemo(() => {
     const base = scheme === "dark" ? DarkTheme : DefaultTheme;
@@ -54,6 +55,7 @@ function RootLayoutNav() {
         />
       </Stack>
       {locked && <LockOverlay />}
+      {!mode && <OnboardingOverlay />}
       <StatusBar style={scheme === "dark" ? "light" : "dark"} />
     </NavThemeProvider>
   );

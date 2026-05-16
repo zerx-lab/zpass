@@ -7,9 +7,10 @@ require (
 	github.com/makiuchi-d/gozxing v0.1.1
 	github.com/pquerna/otp v1.5.0
 	github.com/wailsapp/wails/v3 v3.0.0-alpha.78
-	golang.org/x/crypto v0.50.0
+	golang.org/x/crypto v0.51.0
 	golang.org/x/image v0.35.0
-	golang.org/x/sys v0.43.0
+	golang.org/x/net v0.54.0
+	golang.org/x/sys v0.44.0
 	modernc.org/sqlite v1.50.0
 )
 
@@ -51,8 +52,7 @@ require (
 	github.com/skeema/knownhosts v1.3.2 // indirect
 	github.com/wailsapp/go-webview2 v1.0.23 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
-	golang.org/x/net v0.52.0 // indirect
-	golang.org/x/text v0.36.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	modernc.org/libc v1.72.0 // indirect

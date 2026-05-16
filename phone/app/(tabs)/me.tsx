@@ -17,6 +17,7 @@ import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useTheme, type ThemeMode } from "@/contexts/theme-context";
 import { useVault } from "@/contexts/vault-context";
+import { exportVault, pickAndParseImport } from "@/lib/transfer";
 
 const MONO = Platform.select({ ios: "ui-monospace", default: "monospace" });
 
@@ -311,13 +312,103 @@ export default function MeScreen() {
 
   // 主题切换上下文（system / dark / light）
   const { mode: themeMode, setMode: setThemeMode } = useTheme();
-  const { lock, items, breaches } = useVault();
+  const { lock, items, breaches, mode, setMode, importItems, clearAll } =
+    useVault();
 
   const [bioEnabled, setBioEnabled] = React.useState(false);
 
   const activeBreaches = breaches.filter(
     (b) => b.status === "new" || b.status === "open",
   ).length;
+
+  // ── 导出：明文备份 → 系统分享 ──
+  const handleExport = React.useCallback(() => {
+    if (items.length === 0) {
+      Alert.alert("保险库为空", "暂无可导出的条目");
+      return;
+    }
+    Alert.alert(
+      "导出明文备份",
+      `备份文件将包含全部 ${items.length} 个条目的明文内容（含密码、密钥、TOTP 等）。请妥善保管，切勿上传到不可信的位置。`,
+      [
+        { text: "取消", style: "cancel" },
+        {
+          text: "继续导出",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const r = await exportVault(items);
+              if (!r.shared) {
+                Alert.alert("已生成备份", `已写入：${r.path}`);
+              }
+            } catch (e) {
+              Alert.alert("导出失败", e instanceof Error ? e.message : String(e));
+            }
+          },
+        },
+      ],
+    );
+  }, [items]);
+
+  // ── 导入：选择 ZPass 导出 JSON → 追加入库 ──
+  const handleImport = React.useCallback(async () => {
+    const res = await pickAndParseImport();
+    if (!res.ok) {
+      if (res.reason === "cancelled") return;
+      Alert.alert(
+        "导入失败",
+        res.reason === "empty"
+          ? "文件中没有可识别的条目"
+          : "无法解析文件，请选择有效的 ZPass 导出 JSON",
+      );
+      return;
+    }
+    Alert.alert(
+      "确认导入",
+      `已从「${res.fileName}」解析到 ${res.items.length} 个条目，全部追加到本地保险库？`,
+      [
+        { text: "取消", style: "cancel" },
+        {
+          text: "导入",
+          onPress: () => {
+            const n = importItems(res.items);
+            Alert.alert("导入完成", `已导入 ${n} 个条目`);
+          },
+        },
+      ],
+    );
+  }, [importItems]);
+
+  // ── 清空保险库（移除演示数据 / 重置） ──
+  const handleClearAll = React.useCallback(() => {
+    if (items.length === 0) {
+      Alert.alert("保险库已为空");
+      return;
+    }
+    Alert.alert(
+      "清空保险库",
+      `将永久删除全部 ${items.length} 个条目，此操作不可撤销。建议先导出备份。`,
+      [
+        { text: "取消", style: "cancel" },
+        { text: "清空", style: "destructive", onPress: () => clearAll() },
+      ],
+    );
+  }, [items.length, clearAll]);
+
+  // ── 切换运行模式 ──
+  const handleSwitchMode = React.useCallback(() => {
+    const next = mode === "local" ? "cloud" : "local";
+    Alert.alert(
+      "切换存储模式",
+      next === "local"
+        ? "切换到本地模式：数据仅保存在本设备。"
+        : "切换到云端模式：跨设备同步即将推出，当前仍以本地存储运行。",
+      [
+        { text: "取消", style: "cancel" },
+        { text: "切换", onPress: () => setMode(next) },
+      ],
+    );
+  }, [mode, setMode]);
 
   // 当前主题在「主题」行右侧显示的文案
   const themeValueLabel = React.useMemo(() => {
@@ -388,14 +479,31 @@ export default function MeScreen() {
 
   const dataRows: MenuRowConfig[] = [
     {
-      key: "import",
-      label: "导入密码",
+      key: "mode",
+      label: "存储模式",
+      value: mode === "cloud" ? "云端模式" : "本地模式",
       showChevron: true,
+      onPress: handleSwitchMode,
+    },
+    {
+      key: "import",
+      label: "导入数据",
+      value: "ZPass JSON",
+      showChevron: true,
+      onPress: handleImport,
     },
     {
       key: "export",
       label: "导出备份",
+      value: `${items.length} 项`,
       showChevron: true,
+      onPress: handleExport,
+    },
+    {
+      key: "clear",
+      label: "清空保险库",
+      showChevron: true,
+      onPress: handleClearAll,
     },
     {
       key: "scan",

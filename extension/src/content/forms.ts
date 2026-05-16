@@ -1,4 +1,5 @@
 import type { LoginSecret } from "../shared/messages";
+import { isTotpField } from "./totp-fields";
 
 export interface LoginForm {
   username: HTMLInputElement | null;
@@ -21,6 +22,17 @@ export function fillLoginForm(form: LoginForm, secret: LoginSecret): void {
     simulateUserFill(form.username, secret.username);
   }
   simulateUserFill(form.password, secret.password);
+}
+
+/**
+ * 填充 TOTP 输入框。复用与 password 同一套 simulateUserFill,保证 React/Vue
+ * 受控组件能正确收到 onChange(详 forms.ts 里 valueTracker 注释)。
+ *
+ * 为什么不走 fillLoginForm:TOTP 填充不涉及 username/password,也不变动
+ * 表单结构检查,另起一个函数表达意图更清晰。
+ */
+export function fillTotpInput(input: HTMLInputElement, code: string): void {
+  simulateUserFill(input, code);
 }
 
 export function findLoginFormForInput(
@@ -46,7 +58,16 @@ export function isLoginCandidate(
   if (!(input instanceof HTMLInputElement)) return false;
   if (input.disabled || input.readOnly || !isVisible(input)) return false;
   const type = (input.getAttribute("type") ?? "").toLowerCase();
-  return type === "password" || USERNAME_TYPES.has(type);
+  if (type !== "password" && !USERNAME_TYPES.has(type)) return false;
+  // TOTP / one-time-code 输入框不能被当成 login candidate。
+  // 典型场景：OpenAI 等站点的验证码页只有一个 `<input type="text"
+  // autocomplete="one-time-code" name="code">`，没有 password 字段。不排除的话
+  // `isLoginCandidate` 会返 true → handleFocusin 走 login 分支 → belongsToLoginForm
+  // 找不到 password input → scheduleHide → 按钮永远不出。
+  // 与 Bitwarden inline-menu-field-qualification.service.ts 中
+  // isUsernameField/isPasswordField 里都先调 this.isTotpField(field) 一致。
+  if (isTotpField(input)) return false;
+  return true;
 }
 
 function findUsernameInput(

@@ -1,6 +1,7 @@
 import {
   type LoginSecret,
   type LoginSummary,
+  type LoginTotpCode,
   type PasskeyDescriptor,
   type PasskeyListResult,
   type QueryLoginsResult,
@@ -16,11 +17,13 @@ import {
 } from "../src/content/ui";
 import {
   fillLoginForm,
+  fillTotpInput,
   findLoginFormForInput,
   findLoginForms,
   isLoginCandidate,
   type LoginForm,
 } from "../src/content/forms";
+import { isTotpCandidate } from "../src/content/totp-fields";
 
 export default defineContentScript({
   matches: ["http://*/*", "https://*/*"],
@@ -78,11 +81,13 @@ export default defineContentScript({
     });
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") closeCredentialMenus();
-      if (
-        event.key === "ArrowDown" &&
-        isLoginCandidate(document.activeElement)
-      ) {
-        void controller.openInlineForTarget(document.activeElement);
+      if (event.key === "ArrowDown") {
+        const active = document.activeElement;
+        if (isLoginCandidate(active)) {
+          void controller.openInlineForTarget(active);
+        } else if (isTotpCandidate(active)) {
+          void controller.openTotpInlineForTarget(active);
+        }
       }
     });
   },
@@ -392,6 +397,14 @@ class AutofillController {
   private readonly button: HTMLButtonElement;
   /** 当前按钮锚定的 input；null 表示按钮处于隐藏状态 */
   private currentAnchor: HTMLInputElement | null = null;
+  /**
+   * 当前锚定上下文是 login 还是 totp。为了在按钮被点击后，以及
+   * performFill 末尾重新 handleFocusin 时能走对的装配路径。
+   * - "login": 走 username/password下拉菜单 → revealLogin → fillLoginForm
+   * - "totp":  走 hasTotp 过滤后菜单 → generateLoginTotp → fillTotpInput
+   * - null:    按钮隐藏中
+   */
+  private currentMode: "login" | "totp" | null = null;
   /** 锚定 input 的尺寸 / 位置变化监听器 */
   private positionWatcher: ResizeObserver | null = null;
   /** 失焦延迟隐藏的 timer */
@@ -450,30 +463,47 @@ class AutofillController {
   }
 
   /**
-   * focusin handler — 聚焦 login candidate 时：
-   *   1) 按钮跟随出现在 input 旁
-   *   2) 同时自动弹出账户下拉菜单（与 Bitwarden / 1Password 设计一致）
-   *      — 除非本次是 performFill 末尾触发的（suppressAutoMenuOnce）
+   * focusin handler — 依次判定（TOTP 优先于 login）：
+   *   1) totp candidate (autocomplete=one-time-code 或 OTP 关键字) → mode=totp,
+   *      弹 hasTotp 过滤过的菜单。优先于 login 是因为 OTP input 常常同时
+   *      是 type=text（与 USERNAME_TYPES 重叠），必须先拦截，避免被误路由。
+   *      另 isLoginCandidate 内部也已排除 TOTP，这里属于双重防护。
+   *   2) login candidate (username/password) → mode=login, 弹凭据菜单
+   *   3) 都不是 → 调度隐藏按钮
+   * suppressAutoMenuOnce 场景下只更新按钮位置，不自动弹菜单。
    */
   handleFocusin(target: EventTarget | null): void {
     if (this.filling) return;
-    if (!isLoginCandidate(target)) {
-      this.scheduleHide();
+
+    if (isTotpCandidate(target)) {
+      const input = target as HTMLInputElement;
+      this.cancelHide();
+      this.attachTo(input, "totp");
+      if (this.suppressAutoMenuOnce) {
+        this.suppressAutoMenuOnce = false;
+        return;
+      }
+      void this.openTotpInlineForTarget(input);
       return;
     }
-    const input = target as HTMLInputElement;
-    if (!this.belongsToLoginForm(input)) {
-      this.scheduleHide();
+
+    if (isLoginCandidate(target)) {
+      const input = target as HTMLInputElement;
+      if (!this.belongsToLoginForm(input)) {
+        this.scheduleHide();
+        return;
+      }
+      this.cancelHide();
+      this.attachTo(input, "login");
+      if (this.suppressAutoMenuOnce) {
+        this.suppressAutoMenuOnce = false;
+        return;
+      }
+      void this.openInlineForTarget(input);
       return;
     }
-    this.cancelHide();
-    this.attachTo(input);
-    // 只跟随按钮 / 不自动弹菜单的一次性跳过（performFill 末尾场景）
-    if (this.suppressAutoMenuOnce) {
-      this.suppressAutoMenuOnce = false;
-      return;
-    }
-    void this.openInlineForTarget(input);
+
+    this.scheduleHide();
   }
 
   /** focusout handler — 延迟隐藏给用户机会移到按钮上 */
@@ -503,6 +533,57 @@ class AutofillController {
     });
   }
 
+  /**
+   * TOTP 场景下的 inline 菜单。与 openInlineForTarget 并列：
+   *   - 显示所有匹配当前 origin 的条目（不过滤 hasTotp，对齐 Bitwarden）。
+   *     原因：用户可能有个账号没上 TOTP 但需要看到在 popup 手工复制，菜单过滤
+   *     会让他以为该账号不存在。
+   *   - 点击有 hasTotp 的 → 调 generateLoginTotp 要码，拿到填入 input
+   *   - 点击没 hasTotp 的 → 提示“该凭据未存 TOTP”（不报错、不填）
+   *   - 空列表时不会弹（避免遮担用户输入）
+   */
+  async openTotpInlineForTarget(target: EventTarget | null): Promise<void> {
+    if (this.filling) return;
+    if (!isTotpCandidate(target)) return;
+    const result = await this.queryLogins(target);
+    if (!result) return;
+    if (result.items.length === 0) return;
+    showCredentialMenu(
+      target,
+      result.items,
+      async (item) => {
+        if (!item.hasTotp) {
+          showTransientNotice(
+            target as HTMLInputElement,
+            "该凭据未存验证码秘钥。",
+          );
+          return;
+        }
+        const code = await requestTotpCode(item);
+        if (!code) return;
+        this.performTotpFill(target as HTMLInputElement, code);
+      },
+      "totp",
+    );
+  }
+
+  /**
+   * TOTP 填充。与 performFill 同样使用 filling 守卫——TOTP input 上 focusin
+   * 反复弹菜单的问题与 password 场景一致，复用同一套机制。
+   */
+  performTotpFill(input: HTMLInputElement, code: LoginTotpCode): void {
+    this.filling = true;
+    try {
+      fillTotpInput(input, code.code);
+    } finally {
+      window.setTimeout(() => {
+        this.filling = false;
+        this.suppressAutoMenuOnce = true;
+        this.handleFocusin(document.activeElement);
+      }, 0);
+    }
+  }
+
   private belongsToLoginForm(input: HTMLInputElement): boolean {
     const forms = findLoginForms(document);
     return forms.some(
@@ -510,18 +591,22 @@ class AutofillController {
     );
   }
 
-  private attachTo(input: HTMLInputElement): void {
+  private attachTo(input: HTMLInputElement, mode: "login" | "totp"): void {
     this.currentAnchor = input;
+    this.currentMode = mode;
     this.positionWatcher?.disconnect();
     this.positionWatcher = new ResizeObserver(() => this.repositionIfVisible());
     this.positionWatcher.observe(input);
     positionButton(this.button, input);
     this.button.setAttribute("data-state", "visible");
+    this.button.setAttribute("data-mode", mode);
   }
 
   private hide(): void {
     this.button.removeAttribute("data-state");
+    this.button.removeAttribute("data-mode");
     this.currentAnchor = null;
+    this.currentMode = null;
     this.positionWatcher?.disconnect();
     this.positionWatcher = null;
   }
@@ -538,8 +623,15 @@ class AutofillController {
     }
   }
 
+  /**
+   * 点击浮动 Z 按钮时的入口。根据 currentMode 分流到 login 菜单或 TOTP 菜单。
+   */
   private async openMenuOnAnchor(): Promise<void> {
     if (!this.currentAnchor) return;
+    if (this.currentMode === "totp") {
+      await this.openTotpMenu(this.currentAnchor, this.button);
+      return;
+    }
     const form = findLoginFormForInput(this.currentAnchor);
     if (!form) return;
     await this.openMenu(form, this.button);
@@ -557,6 +649,37 @@ class AutofillController {
       if (!secret) return;
       this.performFill(form, secret);
     });
+  }
+
+  /**
+   * 点击浮动 Z 按钮时的 TOTP 路径。与 openTotpInlineForTarget 不同的是
+   * 这里 anchor 是按钮本身（菜单弹在按钮下方），填充目标仍是当前 input。
+   * 同样不过滤 hasTotp，与 Bitwarden 对齐。
+   */
+  private async openTotpMenu(
+    input: HTMLInputElement,
+    anchor: HTMLElement,
+  ): Promise<void> {
+    const result = await this.queryLogins(anchor);
+    if (!result) return;
+    if (result.items.length === 0) {
+      showTransientNotice(anchor, "当前站点没有匹配的 ZPass 条目。");
+      return;
+    }
+    showCredentialMenu(
+      anchor,
+      result.items,
+      async (item) => {
+        if (!item.hasTotp) {
+          showTransientNotice(anchor, "该凭据未存验证码秘钥。");
+          return;
+        }
+        const code = await requestTotpCode(item);
+        if (!code) return;
+        this.performTotpFill(input, code);
+      },
+      "totp",
+    );
   }
 
   private async queryLogins(
@@ -595,10 +718,23 @@ async function reveal(item: LoginSummary): Promise<LoginSecret | null> {
 }
 
 /**
- * 按钮定位策略（优先级从高到低）：
- *   1) 输入框外右侧 4px 处（不遮挡原生「显示密码」眼睛图标）
- *   2) 视口右侧空间不足时，退回输入框内部右侧 8px（与旧行为兼容）
- *   3) input 不可见时（width/height = 0 或 display:none），按钮一并隐藏
+ * 请求指定 login 条目的当前 OTP 码。失败返 null，调用方自行静默；
+ * 包装后端错误为 toast 是 openTotpMenu / openTotpInlineForTarget 的职责，
+ * 由于这里拿不到 anchor，仍然在外部控制路径里选择是否提示。
+ */
+async function requestTotpCode(
+  item: LoginSummary,
+): Promise<LoginTotpCode | null> {
+  const response = await browser.runtime.sendMessage({
+    type: "zpass.generateLoginTotp",
+    itemId: item.id,
+  });
+  if (!response?.ok) return null;
+  return response.result as LoginTotpCode;
+}
+
+/**
+ * input 不可见时 (width/height = 0 / display:none) 隐藏按钮，避免浮游位置错误。
  */
 function positionButton(button: HTMLElement, input: HTMLInputElement): void {
   const rect = input.getBoundingClientRect();
@@ -609,16 +745,16 @@ function positionButton(button: HTMLElement, input: HTMLInputElement): void {
   button.style.display = "";
 
   const BUTTON_SIZE = 24;
-  const GAP = 4;
-  const VP_MARGIN = 6;
+  // 距输入框右边的内边距。取 8px 是与 Bitwarden / Chrome 默认 password
+  // manager 图标同位置。为了让按钮与可能存在的原生 icon 错开，本可以检测
+  // input 内部是否有同肳兄弟中的 button/svg，但 v1 先保持简单。
+  const INSIDE_PADDING = 8;
 
-  // 优先放在 input 外右侧（让出宿主页面的 eye / clear 等原生 icon 空间）
-  const outsideLeft = rect.right + GAP;
-  const fitsOutside =
-    outsideLeft + BUTTON_SIZE <= window.innerWidth - VP_MARGIN;
-  const left = fitsOutside ? outsideLeft : rect.right - BUTTON_SIZE - 8;
+  // 水平：压入输入框内部右侧
+  const left = rect.right - BUTTON_SIZE - INSIDE_PADDING;
+  // 垂直：与输入框中线对齐
+  const top = rect.top + (rect.height - BUTTON_SIZE) / 2;
 
-  const top = rect.top + Math.max(0, (rect.height - BUTTON_SIZE) / 2);
   button.style.left = `${window.scrollX + left}px`;
   button.style.top = `${window.scrollY + top}px`;
 }

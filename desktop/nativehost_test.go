@@ -6,16 +6,27 @@ import "testing"
 
 func TestNativeURLMatchesOrigin(t *testing.T) {
 	tests := []struct {
-		name      string
+		name       string
 		credential string
-		origin    string
-		want      bool
+		origin     string
+		want       bool
 	}{
 		{name: "exact host", credential: "https://example.com/login", origin: "https://example.com", want: true},
 		{name: "subdomain", credential: "example.com", origin: "https://app.example.com", want: true},
 		{name: "different suffix", credential: "ample.com", origin: "https://example.com", want: false},
 		{name: "different site", credential: "https://example.org", origin: "https://example.com", want: false},
 		{name: "reject extension url", credential: "chrome-extension://abc", origin: "https://example.com", want: false},
+		// PSL base domain 跨子域匹配（新增）——OpenAI 场景:
+		//   保存 chat.openai.com 的条目，在 auth.openai.com 上应该被匹中
+		//   (两者 PSL eTLD+1 都是 openai.com)。旧版制 strings.HasSuffix 不覆盖该反方向。
+		{name: "psl cross-subdomain same registrable", credential: "https://chat.openai.com", origin: "https://auth.openai.com", want: true},
+		{name: "psl deep subdomain to leaf", credential: "https://platform.openai.com", origin: "https://chat.openai.com", want: true},
+		{name: "psl etld different registrable", credential: "https://openai.io", origin: "https://openai.com", want: false},
+		// google.com 黑名单：保存 google.com 不应被填到 script.google.com
+		{name: "blacklist script.google.com", credential: "https://google.com", origin: "https://script.google.com", want: false},
+		{name: "blacklist allows mail.google.com", credential: "https://google.com", origin: "https://mail.google.com", want: true},
+		// IP / localhost 退回旧版 子域策略
+		{name: "localhost exact", credential: "http://localhost:8080", origin: "http://localhost", want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

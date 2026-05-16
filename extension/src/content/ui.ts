@@ -1,7 +1,15 @@
 import type { LoginSummary, PasskeyDescriptor } from "../shared/messages";
-import { zMatrixIcon } from "../shared/icons";
+import { keyIcon, zMatrixIcon } from "../shared/icons";
 import { el, trapFocus } from "../shared/dom";
 import "./ui.css";
+
+/**
+ * 时钟 / 定时器图标 — 与 shared/icons.ts 同风格（stroke 1.75 lucide 风）。
+ * 放在这里不放 shared：仅 inline menu 的 TOTP 模式用。
+ */
+function clockIcon(size = 15): string {
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`;
+}
 
 /* ============================================================================
  * Content Script 内浮层 UI
@@ -42,26 +50,58 @@ export function createAutofillButton(): HTMLButtonElement {
   return button;
 }
 
-/** 在 anchor 下方弹出凭据菜单 */
+/**
+ * 在 anchor 下方弹出凭据菜单。
+ *
+ * mode 控制副标题 + 动作指示：
+ *   - "login"（默认）：显示 username/account，走账密填充路径
+ *   - "totp"：动作提示「填充验证码」，选择后去 generateLoginTotp
+ *
+ * 行布局（与 Bitwarden popup 风格对齐）：
+ *   [图标]  条目名                            · 右边预留指示区
+ *           username/account
+ *
+ * 图标选择：
+ *   - itemType="totp" → 时钟图标（「独立身份验证器」）
+ *   - 其他 → 钥匙图标
+ *
+ * onSelect 由调用方插入不同后续动作。
+ */
 export function showCredentialMenu(
   anchor: HTMLElement,
   items: LoginSummary[],
   onSelect: (item: LoginSummary) => Promise<void>,
+  mode: "login" | "totp" = "login",
 ): void {
   closeMenus();
 
   const menu = el("div", {
     class: "zpass-menu",
-    attrs: { role: "menu" },
+    attrs: { role: "menu", "data-mode": mode },
   }) as CleanupHost;
 
   items.forEach((item) => {
+    const iconHtml = item.itemType === "totp" ? clockIcon(16) : keyIcon(16);
+    const meta = item.username || item.displayUrl;
     const option = el("button", {
       class: "zpass-menu-item",
       attrs: { type: "button", role: "menuitem" },
       children: [
-        el("strong", { text: item.name || item.displayUrl }),
-        el("span", { text: item.username || item.displayUrl }),
+        el("span", { class: "zpass-menu-item-icon", html: iconHtml }),
+        el("span", {
+          class: "zpass-menu-item-body",
+          children: [
+            el("strong", { text: item.name || item.displayUrl }),
+            el("span", {
+              class: "zpass-menu-item-sub",
+              text: meta,
+            }),
+          ],
+        }),
+        // 右侧动作标签：TOTP 模式下提示「验证码」；login 模式下隐藏
+        mode === "totp"
+          ? el("span", { class: "zpass-menu-item-action", text: "验证码" })
+          : null,
       ],
     });
     option.addEventListener("click", () => {

@@ -404,12 +404,36 @@ function filterEntries(entries: ListEntry[], query: string): ListEntry[] {
   });
 }
 
+/**
+ * 渲染单条凭据行。与 Bitwarden popup 行为对齐：
+ *
+ *   点击整行：
+ *     - hasPassword + hasTotp → 填账密 + 自动复制 TOTP，关闭 popup
+ *     - hasPassword only      → 填账密，关闭 popup
+ *     - hasTotp only          → 复制 TOTP 到剪贴板，不关闭 popup
+ *     - 都没 (理论上不会发生) → 提示“条目为空”
+ *
+ *   右边 mini 按钮按存在的字段按需出现：
+ *     - username 非空 → 复制用户名
+ *     - hasPassword → 复制密码
+ *     - hasTotp → 复制当前验证码
+ *
+ *   图标依 itemType 区分（独立 TOTP 条目用时钟，login 用钥匙），
+ *   在混合条目（login + totp）上仍用钥匙图标（与 Bitwarden 一致，主身份
+ *   仍是账号类，TOTP 是附加能力）。
+ */
 function renderLoginRow(item: LoginSummary): HTMLElement {
+  const iconHtml = item.itemType === "totp" ? clockIcon(15) : keyIcon(15);
   const row = el("button", {
     class: "zp-row",
-    attrs: { type: "button", "data-kind": "login", role: "listitem" },
+    attrs: {
+      type: "button",
+      "data-kind": "login",
+      "data-item-type": item.itemType,
+      role: "listitem",
+    },
     children: [
-      el("span", { class: "zp-row-icon", html: keyIcon(15) }),
+      el("span", { class: "zp-row-icon", html: iconHtml }),
       el("span", { class: "zp-row-name", text: item.name || item.displayUrl }),
       el("span", {
         class: "zp-row-meta",
@@ -421,17 +445,54 @@ function renderLoginRow(item: LoginSummary): HTMLElement {
           item.username
             ? miniCopyButton("复制用户名", item.username, "已复制用户名")
             : null,
-          miniRevealPasswordButton(item),
+          item.hasPassword ? miniRevealPasswordButton(item) : null,
+          item.hasTotp ? miniRevealTotpButton(item) : null,
         ],
       }),
     ],
   });
   row.addEventListener("click", (event) => {
-    // 防止子按钮的 click 冒泡触发"填充整行"
+    // 防止子按钮的 click 冒泡触发「填充整行」
     if ((event.target as HTMLElement).closest(".zp-mini-btn")) return;
-    void fillActiveTab(item);
+    void handleRowClick(item);
   });
   return row;
+}
+
+/**
+ * 行点击总调度。按条目形态分流，与 Bitwarden 「doAutoFill + shouldAutoCopyTotp」逻辑对齐。
+ *
+ * 返回：仅错误场景可能 showInlineToast，不抩出错误。
+ */
+async function handleRowClick(item: LoginSummary): Promise<void> {
+  // 独立 TOTP 条目（或仅存 TOTP 没存密码的 login）→ 复制验证码，不关闭 popup
+  if (!item.hasPassword) {
+    if (!item.hasTotp) {
+      showInlineToast("该条目为空。");
+      return;
+    }
+    await copyTotpToClipboard(item);
+    return;
+  }
+  // 有密码 → 填账密；如同时有 TOTP 则自动复制到剪贴板（Bitwarden 默认行为）
+  await fillActiveTab(item);
+}
+
+/**
+ * 调 background 生成该条目的当前 TOTP 码并复制。错误静默提示。
+ */
+async function copyTotpToClipboard(item: LoginSummary): Promise<void> {
+  const response = (await browser.runtime.sendMessage({
+    type: "zpass.generateLoginTotp",
+    itemId: item.id,
+  })) as
+    | { ok?: boolean; result?: { code?: string }; error?: string }
+    | undefined;
+  if (!response?.ok || !response.result?.code) {
+    showInlineToast(response?.error ?? "无法生成验证码");
+    return;
+  }
+  await copyToClipboard(response.result.code, "已复制验证码");
 }
 
 function renderPasskeyRow(item: PasskeyDescriptor): HTMLElement {
@@ -494,6 +555,42 @@ function miniRevealPasswordButton(item: LoginSummary): HTMLElement {
     flashCopied(button);
   });
   return button;
+}
+
+/**
+ * 复制当前 TOTP 验证码的 mini 按钮。与「复制密码」同一风格，但走 generateLoginTotp
+ * 获取现场潮。点击不关闭 popup（跟「复制密码」一致）。
+ */
+function miniRevealTotpButton(item: LoginSummary): HTMLElement {
+  const button = el("button", {
+    class: "zp-mini-btn",
+    attrs: { type: "button", "aria-label": "复制验证码", title: "复制验证码" },
+    html: clockIcon(13),
+  });
+  button.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    const response = (await browser.runtime.sendMessage({
+      type: "zpass.generateLoginTotp",
+      itemId: item.id,
+    })) as
+      | { ok?: boolean; result?: { code?: string }; error?: string }
+      | undefined;
+    if (!response?.ok || !response.result?.code) {
+      showInlineToast(response?.error ?? "无法生成验证码");
+      return;
+    }
+    await copyToClipboard(response.result.code, "已复制验证码");
+    flashCopied(button);
+  });
+  return button;
+}
+
+/**
+ * 时钟图标 — 与 shared/icons.ts 同风（stroke 1.75 lucide 风）。未提到 shared
+ * 是因为现阶段仅 popup 用。
+ */
+function clockIcon(size = 13): string {
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`;
 }
 
 function flashCopied(button: HTMLElement): void {
@@ -587,14 +684,40 @@ function getRpId(url: string): string | null {
   }
 }
 
+/**
+ * 填充当前标签页的账密 + （可选）自动复制 TOTP。
+ *
+ * background 返回中会携带 totpCode（有 totp 秘钥的账号）。只要 totpCode 非空，
+ * 在 popup 关闭前同步复制到剪贴板——这是 Bitwarden enableAutoTotpCopy=true
+ * 默认行为。Toast 在复制后短暂提示 600ms 再关 popup，让用户看到反馈。
+ *
+ * 与原状区别：仅能处理 hasPassword 场景（handleRowClick 已提前准出）。
+ */
 async function fillActiveTab(item: LoginSummary): Promise<void> {
-  const response = await browser.runtime.sendMessage({
+  const response = (await browser.runtime.sendMessage({
     type: "zpass.fillActiveTab",
     itemId: item.id,
-  });
+  })) as
+    | {
+        ok?: boolean;
+        result?: { filled?: boolean; totpCode?: string | null };
+        error?: string;
+      }
+    | undefined;
   if (!response?.ok) {
     showInlineToast(response?.error ?? "ZPass 无法填充当前页面。");
     return;
+  }
+  const totpCode = response.result?.totpCode;
+  if (totpCode) {
+    try {
+      await navigator.clipboard.writeText(totpCode);
+      showInlineToast("已填充账密 · 验证码已复制");
+      window.setTimeout(() => window.close(), 700);
+      return;
+    } catch {
+      // 剪贴板失败不抩提示——账密填充仍是主动作。快速关 popup。
+    }
   }
   window.close();
 }

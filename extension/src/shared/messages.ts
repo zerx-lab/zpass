@@ -14,7 +14,8 @@ export interface ExtensionRequest {
     | "zpass.passkeyList"
     | "zpass.passkeyCreate"
     | "zpass.passkeySign"
-    | "zpass.passkeyDelete";
+    | "zpass.passkeyDelete"
+    | "zpass.generateLoginTotp";
   itemId?: string;
   payload?: unknown;
 }
@@ -34,7 +35,8 @@ export interface NativeRequest<TPayload = unknown> {
     | "passkeyList"
     | "passkeyCreate"
     | "passkeySign"
-    | "passkeyDelete";
+    | "passkeyDelete"
+    | "generateLoginTotp";
   payload?: TPayload;
 }
 
@@ -66,6 +68,31 @@ export interface LoginSummary {
   username: string;
   displayUrl: string;
   updatedAt: number;
+  /**
+   * 该条目是否带 OTP 秘钥。后端判定：fields["totp"] != ""。
+   *
+   * 与 Bitwarden 不同，我们 **不** 用 hasTotp 过滤 OTP input 的下拉菜单（用
+   * 户可能需要看到没 totp 的凭据然后手动手输），但 popup 点击行为依赖该字段
+   * 决定是否自动复制 TOTP 到剪贴板。
+   */
+  hasTotp: boolean;
+  /**
+   * 该条目是否有密码。后端判定：fields["password"] != ""。
+   *
+   * popup 点击行为：
+   *   - hasPassword + hasTotp → 填账密 + 自动复制 TOTP 到剪贴板（Bitwarden 默认行为）
+   *   - hasPassword only      → 填账密
+   *   - hasTotp only          → 复制 TOTP 到剪贴板（独立验证器条目、或未存密码的 login）
+   *   - 都没有                → 不可点（理论上 queryLogins 不会返这种，但前端谨慎检查）
+   */
+  hasPassword: boolean;
+  /**
+   * 条目底层类型。取值："login" / "totp"。前端据此选择图标：
+   *   - login: 钥匙图标
+   *   - totp:  时钟图标
+   * 这与 hasPassword/hasTotp 不冲突：有 ItemTypeLogin + 仅填 totp 字段的条目仍是 login 类型。
+   */
+  itemType: "login" | "totp";
 }
 
 export interface QueryLoginsResult {
@@ -78,7 +105,47 @@ export interface LoginSecret {
   id: string;
   name: string;
   username: string;
+  /**
+   * 明文密码。对「独立 TOTP 条目」/「只存了 username 的 login」这种场景会是空串。
+   * 调用方需手动判空后决定是否跳过填密码的环节（旧版后端会报错，现软化返空串）。
+   */
   password: string;
+  /**
+   * 对应 desktop revealLogin 返回的 totp 快照。
+   * - 未存 totp 秘钥 → undefined
+   * - 有秘钥但生成失败 → undefined (不足以阻断账密填充的主流程)
+   * - 成功 → 全部字段填齐
+   *
+   * popup “填账密 + 自动复制 TOTP” 复用同一个 RPC 拿完，减少往返。
+   */
+  totp?: LoginTotpCode;
+}
+
+/**
+ * LoginTotpCode — desktop 生成的当前 OTP 快照，与 Go 側 loginTotpCodeNative 严格对齐。
+ *
+ * 用法：浏览器扩展在用户点击 TOTP 下拉项后拿到 code，仅拿 code 填入
+ * input；period/remaining 可选用于未来的「还有 N 秒」提示（本期不一定用）。
+ *
+ * type 取值："totp" / "hotp" / "steam"。对填充逻辑均表现为“拿 code 填入”，
+ * 不需在扩展侧区分。
+ */
+export interface LoginTotpCode {
+  code: string;
+  type: string;
+  period: number;
+  remaining: number;
+  counter: number;
+  algorithm: string;
+  digits: number;
+}
+
+/**
+ * generateLoginTotp 请求负载——pageContext 由 background 全部根据 sender 补齐，
+ * content script 只需传 itemId。
+ */
+export interface GenerateLoginTotpRequest extends PageContext {
+  itemId: string;
 }
 
 export interface PasskeyPageRequest extends PageContext {
@@ -117,7 +184,8 @@ export interface PasskeyCreatePayload {
   name?: string;
 }
 
-export interface PasskeyCreateRequest extends PageContext, PasskeyCreatePayload {}
+export interface PasskeyCreateRequest
+  extends PageContext, PasskeyCreatePayload {}
 
 export interface PasskeyCredential {
   itemId: string;
@@ -154,7 +222,8 @@ export interface PasskeyDeletePayload {
   credentialId?: string;
 }
 
-export interface PasskeyDeleteRequest extends PageContext, PasskeyDeletePayload {}
+export interface PasskeyDeleteRequest
+  extends PageContext, PasskeyDeletePayload {}
 
 export interface PasskeyDeleteResult {
   deleted: boolean;
@@ -173,7 +242,8 @@ export interface PasskeyAssertion {
 export function getHttpOrigin(url: string): string | null {
   try {
     const parsed = new URL(url);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:")
+      return null;
     return parsed.origin;
   } catch {
     return null;

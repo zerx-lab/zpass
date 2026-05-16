@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!--
+  ZPass Extension Icon — 7x7 圆点矩阵字母 "Z" (OTP FEEL 品牌标识)
+  与 desktop 端 desktop/build/appicon.icon/Assets/wails_icon_vector.svg
+  和 website 端 website/src/components/Brandmark.astro 同源。
+
+  视觉结构 (参考 ZPass/assets/logo.png):
+    顶部 2 行  Z 上横 (7 列实心)
+    中间 3 行  Z 对角线 (右上 至 左下, 每行 2 个实心点)
+    底部 2 行  Z 下横 (7 列实心)
+    中间 3 行的非对角线位置以低透明度灰点保留,
+    构成完整 7x7 网格底纹 (呼应 OTP 验证码刻度的设计语义)
+
+  坐标网格 (与 Brandmark.astro 一致, 便于栅格化为 16~128px PNG):
+    viewBox 14x14, 每格 2px, 圆心 cx = col*2+1, cy = row*2+1, 半径 r = 0.85
+  颜色: 纯黑 #000000.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14">
+  <g fill="#000000">
+    <g opacity="0.18">
+      <circle cx="1"  cy="5" r="0.85"/>
+      <circle cx="3"  cy="5" r="0.85"/>
+      <circle cx="5"  cy="5" r="0.85"/>
+      <circle cx="7"  cy="5" r="0.85"/>
+      <circle cx="13" cy="5" r="0.85"/>
+      <circle cx="1"  cy="7" r="0.85"/>
+      <circle cx="3"  cy="7" r="0.85"/>
+      <circle cx="5"  cy="7" r="0.85"/>
+      <circle cx="11" cy="7" r="0.85"/>
+      <circle cx="13" cy="7" r="0.85"/>
+      <circle cx="1"  cy="9" r="0.85"/>
+      <circle cx="3"  cy="9" r="0.85"/>
+      <circle cx="9"  cy="9" r="0.85"/>
+      <circle cx="11" cy="9" r="0.85"/>
+      <circle cx="13" cy="9" r="0.85"/>
+    </g>
+
+    <circle cx="1"  cy="1" r="0.85"/>
+    <circle cx="3"  cy="1" r="0.85"/>
+    <circle cx="5"  cy="1" r="0.85"/>
+    <circle cx="7"  cy="1" r="0.85"/>
+    <circle cx="9"  cy="1" r="0.85"/>
+    <circle cx="11" cy="1" r="0.85"/>
+    <circle cx="13" cy="1" r="0.85"/>
+
+    <circle cx="1"  cy="3" r="0.85"/>
+    <circle cx="3"  cy="3" r="0.85"/>
+    <circle cx="5"  cy="3" r="0.85"/>
+    <circle cx="7"  cy="3" r="0.85"/>
+    <circle cx="9"  cy="3" r="0.85"/>
+    <circle cx="11" cy="3" r="0.85"/>
+    <circle cx="13" cy="3" r="0.85"/>
+
+    <circle cx="9"  cy="5" r="0.85"/>
+    <circle cx="11" cy="5" r="0.85"/>
+
+    <circle cx="7"  cy="7" r="0.85"/>
+    <circle cx="9"  cy="7" r="0.85"/>
+
+    <circle cx="5"  cy="9" r="0.85"/>
+    <circle cx="7"  cy="9" r="0.85"/>
+
+    <circle cx="1"  cy="11" r="0.85"/>
+    <circle cx="3"  cy="11" r="0.85"/>
+    <circle cx="5"  cy="11" r="0.85"/>
+    <circle cx="7"  cy="11" r="0.85"/>
+    <circle cx="9"  cy="11" r="0.85"/>
+    <circle cx="11" cy="11" r="0.85"/>
+    <circle cx="13" cy="11" r="0.85"/>
+
+    <circle cx="1"  cy="13" r="0.85"/>
+    <circle cx="3"  cy="13" r="0.85"/>
+    <circle cx="5"  cy="13" r="0.85"/>
+    <circle cx="7"  cy="13" r="0.85"/>
+    <circle cx="9"  cy="13" r="0.85"/>
+    <circle cx="11" cy="13" r="0.85"/>
+    <circle cx="13" cy="13" r="0.85"/>
+  </g>
+</svg>

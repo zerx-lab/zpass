@@ -25,6 +25,10 @@ import {
 } from "@/data/vault";
 
 const STORAGE_KEY = "zpass.vault.items.v1";
+const STORAGE_KEY_MODE = "zpass.vault.mode.v1";
+
+/** 客户端运行模式：本地（纯离线）或云端（同步，规划中） */
+export type VaultMode = "local" | "cloud";
 
 /** 分配律 Omit —— 在联合类型每个成员上分别 Omit，避免退化为公共字段 */
 type DistributiveOmit<T, K extends keyof any> = T extends unknown
@@ -42,6 +46,8 @@ interface VaultContextValue {
   breaches: Breach[];
   activity: ActivityEntry[];
   locked: boolean;
+  /** 运行模式；null 表示用户尚未在引导页选择 */
+  mode: VaultMode | null;
   /** 数据是否已从持久化存储完成首次加载 */
   hydrated: boolean;
 
@@ -50,7 +56,12 @@ interface VaultContextValue {
   updateItem: (id: string, patch: ItemPatch) => void;
   deleteItem: (id: string) => void;
   toggleFavorite: (id: string) => void;
+  /** 批量导入条目（分配新 id 避免冲突），返回成功导入数量 */
+  importItems: (incoming: VaultItem[]) => number;
+  /** 清空所有条目（用于移除演示数据 / 重置保险库） */
+  clearAll: () => void;
 
+  setMode: (mode: VaultMode) => void;
   lock: () => void;
   unlock: () => void;
 }
@@ -66,17 +77,25 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const [breaches] = useState<Breach[]>(SEED_BREACHES);
   const [activity] = useState<ActivityEntry[]>(SEED_ACTIVITY);
   const [locked, setLocked] = useState(false);
+  const [mode, setModeState] = useState<VaultMode | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
-  // 首次挂载：从持久化存储恢复条目
+  // 首次挂载：从持久化存储恢复条目与运行模式
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY);
-        if (alive && raw) {
-          const parsed = JSON.parse(raw) as VaultItem[];
+        const [rawItems, rawMode] = await AsyncStorage.multiGet([
+          STORAGE_KEY,
+          STORAGE_KEY_MODE,
+        ]);
+        if (!alive) return;
+        if (rawItems[1]) {
+          const parsed = JSON.parse(rawItems[1]) as VaultItem[];
           if (Array.isArray(parsed) && parsed.length > 0) setItems(parsed);
+        }
+        if (rawMode[1] === "local" || rawMode[1] === "cloud") {
+          setModeState(rawMode[1]);
         }
       } catch {
         // 解析失败时保留种子数据
@@ -130,6 +149,22 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  const importItems = useCallback((incoming: VaultItem[]) => {
+    if (incoming.length === 0) return 0;
+    const fresh = incoming.map(
+      (it) => ({ ...it, id: genId(), modified: Date.now() }) as VaultItem,
+    );
+    setItems((prev) => [...fresh, ...prev]);
+    return fresh.length;
+  }, []);
+
+  const clearAll = useCallback(() => setItems([]), []);
+
+  const setMode = useCallback((next: VaultMode) => {
+    setModeState(next);
+    AsyncStorage.setItem(STORAGE_KEY_MODE, next).catch(() => {});
+  }, []);
+
   const lock = useCallback(() => setLocked(true), []);
   const unlock = useCallback(() => setLocked(false), []);
 
@@ -139,12 +174,16 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       breaches,
       activity,
       locked,
+      mode,
       hydrated,
       getItem,
       addItem,
       updateItem,
       deleteItem,
       toggleFavorite,
+      importItems,
+      clearAll,
+      setMode,
       lock,
       unlock,
     }),
@@ -153,12 +192,16 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       breaches,
       activity,
       locked,
+      mode,
       hydrated,
       getItem,
       addItem,
       updateItem,
       deleteItem,
       toggleFavorite,
+      importItems,
+      clearAll,
+      setMode,
       lock,
       unlock,
     ],
