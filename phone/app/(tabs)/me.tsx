@@ -11,9 +11,12 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { router } from "expo-router";
+
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useTheme, type ThemeMode } from "@/contexts/theme-context";
+import { useVault } from "@/contexts/vault-context";
 
 const MONO = Platform.select({ ios: "ui-monospace", default: "monospace" });
 
@@ -308,8 +311,13 @@ export default function MeScreen() {
 
   // 主题切换上下文（system / dark / light）
   const { mode: themeMode, setMode: setThemeMode } = useTheme();
+  const { lock, items, breaches } = useVault();
 
   const [bioEnabled, setBioEnabled] = React.useState(false);
+
+  const activeBreaches = breaches.filter(
+    (b) => b.status === "new" || b.status === "open",
+  ).length;
 
   // 当前主题在「主题」行右侧显示的文案
   const themeValueLabel = React.useMemo(() => {
@@ -393,7 +401,12 @@ export default function MeScreen() {
       key: "scan",
       label: "扫描泄露",
       showChevron: true,
-      badge: { text: "3", color: "danger" },
+      value: `${items.length} 项`,
+      badge:
+        activeBreaches > 0
+          ? { text: String(activeBreaches), color: "danger" }
+          : undefined,
+      onPress: () => router.push("/(tabs)/security" as any),
     },
   ];
 
@@ -449,11 +462,7 @@ export default function MeScreen() {
           onPress={() =>
             Alert.alert("锁定 ZPass", "确认要锁定 ZPass 吗？", [
               { text: "取消", style: "cancel" },
-              {
-                text: "锁定",
-                style: "destructive",
-                onPress: () => Alert.alert("功能开发中", "锁定功能尚未实现"),
-              },
+              { text: "锁定", style: "destructive", onPress: () => lock() },
             ])
           }
           style={[styles.lockButton, { borderColor: c.danger + "88" }]}

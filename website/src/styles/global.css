@@ -183,18 +183,18 @@ a {
 	letter-spacing: -0.01em;
 	font-size: 15px;
 }
+/* 品牌图标：7×7 圆点矩阵字母 Z（SVG 通过父级 color 控制颜色，自适应主题） */
 .brand .logo {
-	width: 24px;
-	height: 24px;
-	border-radius: 5px;
-	background: var(--text);
-	color: var(--bg);
+	width: 22px;
+	height: 22px;
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	font-family: var(--font-mono);
-	font-weight: 600;
-	font-size: 13px;
+	color: var(--text);
+	flex-shrink: 0;
+}
+.brand .logo svg {
+	display: block;
 }
 .brand .tag {
 	margin-left: 2px;

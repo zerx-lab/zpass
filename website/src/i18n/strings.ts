@@ -32,21 +32,14 @@ export interface SiteStrings {
 	hero_cta_primary: string;
 	hero_availability: string;
 
-	// subscribe (替代原 install 区块)
-	subscribe_eyebrow: string;
-	subscribe_title: string;
-	subscribe_sub: string;
-	subscribe_placeholder: string;
-	subscribe_cta: string;
-	subscribe_note: string;
-	subscribe_success: string;
-	subscribe_success_optin: string;
-	subscribe_pending: string;
-	subscribe_error: string;
-	subscribe_invalid: string;
-	subscribe_already_confirmed: string;
+	// release (取代原 subscribe 区块：“即将发布” 状态卡)
+	release_eyebrow: string;
+	release_title: string;
+	release_headline: string;
+	release_sub: string;
+	release_note: string;
 
-	// build status 卡（Subscribe 区块右侧）
+	// build status 卡（Release 区块右侧）
 	build_status_title: string;
 	build_status_tag: string;
 	build_status_comment_desktop: string;
@@ -281,7 +274,7 @@ export interface SiteStrings {
 const en: SiteStrings = {
 	nav_features: "Features",
 	nav_security: "Security",
-	nav_download: "Subscribe",
+	nav_download: "Release",
 	nav_pricing: "Pricing",
 	nav_docs: "Docs",
 	nav_signin: "Sign in",
@@ -294,7 +287,7 @@ const en: SiteStrings = {
 	hero_title_2: "Only you hold the key.",
 	hero_sub:
 		"ZPass keeps your logins, passkeys and 2FA codes encrypted on your own devices. We never see them in plain text — not in transit, not at rest, not anywhere on our servers. Native apps for every platform you use.",
-	hero_cta_primary: "Get release updates",
+	hero_cta_primary: "See release status",
 	hero_availability: "macOS · Windows · Linux · iOS · Android · Browser ext.",
 
 	build_status_title: "build status",
@@ -302,28 +295,18 @@ const en: SiteStrings = {
 	build_status_comment_desktop: "// desktop client",
 	build_status_comment_mobile: "// mobile",
 	build_status_comment_extension: "// extension",
-	build_status_macos: "macOS · in development",
-	build_status_windows: "Windows · in development",
-	build_status_linux: "Linux · in development",
-	build_status_browser_ext: "Chrome / Firefox / Safari · planned",
+	build_status_macos: "macOS · launching soon",
+	build_status_windows: "Windows · launching soon",
+	build_status_linux: "Linux · launching soon",
+	build_status_browser_ext: "Chrome / Firefox / Safari · launching soon",
 
-	subscribe_eyebrow: "EARLY ACCESS",
-	subscribe_title: "ZPass is in active development.",
-	subscribe_sub:
-		"We're putting the finishing touches on the first public release. Leave your email and we'll let you know the moment it's ready — no other mail, ever.",
-	subscribe_placeholder: "you@example.com",
-	subscribe_cta: "Notify me",
-	subscribe_note:
-		"One-tap unsubscribe. We never share your address. No marketing.",
-	subscribe_success:
-		"You're on the list. We'll email you the moment ZPass ships.",
-	subscribe_success_optin:
-		"Almost there — we just sent a confirmation link to your inbox. Click it to finish subscribing.",
-	subscribe_pending: "Sending…",
-	subscribe_error: "Something went wrong. Please try again in a moment.",
-	subscribe_invalid: "Please enter a valid email address.",
-	subscribe_already_confirmed:
-		"Looks like you're already subscribed and confirmed. We'll notify you when ZPass ships!",
+	release_eyebrow: "LAUNCHING SOON",
+	release_title: "ZPass is almost ready.",
+	release_headline: "The first public release is just around the corner.",
+	release_sub:
+		"We're finalizing builds for every platform. If you have a question, a partnership idea or a security disclosure, reach out below — we read every message.",
+	release_note:
+		"No mailing list, no marketing, no waitlist sign-up. Just ship.",
 
 	section_features: "Features",
 	section_features_sub:
@@ -466,7 +449,7 @@ const en: SiteStrings = {
 
 	section_pricing: "Pricing",
 	section_pricing_sub:
-		"Indicative pricing — final numbers will be confirmed at launch. Join the waitlist to lock in early-access rates.",
+		"Indicative pricing — final numbers will be confirmed at launch. ZPass is shipping soon; reach out if you need details before then.",
 	pricing_solo: {
 		name: "Free",
 		price: "$0",
@@ -477,7 +460,7 @@ const en: SiteStrings = {
 			"TOTP, passkeys, hardware keys",
 			"Local-first encrypted vault",
 		],
-		cta: "Join waitlist",
+		cta: "Get notified",
 	},
 	pricing_personal: {
 		name: "Personal",
@@ -490,7 +473,7 @@ const en: SiteStrings = {
 			"Encrypted file attachments (1 GB)",
 			"Emergency access",
 		],
-		cta: "Join waitlist",
+		cta: "Get notified",
 	},
 	pricing_family: {
 		name: "Family",
@@ -502,7 +485,7 @@ const en: SiteStrings = {
 			"Per-member permissions",
 			"50 GB pooled storage",
 		],
-		cta: "Join waitlist",
+		cta: "Get notified",
 	},
 	pricing_team: {
 		name: "Team",
@@ -542,7 +525,7 @@ const en: SiteStrings = {
 	roadmap_m05_notes:
 		"Extensions for Chrome, Firefox and Safari. Protocol spec and threat model go public for external review at the same time.",
 	roadmap_m06_notes:
-		"Closed beta opens to waitlist subscribers. Public release follows once the audit completes and any critical findings are resolved.",
+		"Final QA pass and audit follow-up. Public release rolls out once the audit completes and any critical findings are resolved.",
 
 	section_faq: "FAQ",
 	faq_1_q: "What happens if I forget my master password?",
@@ -550,7 +533,7 @@ const en: SiteStrings = {
 		"Without your master password, nobody — including us — can decrypt your vault. That's the whole point of zero-knowledge. To cover that case, ZPass gives you three safety nets: a trusted emergency contact, a printable recovery kit you can store offline, and the option to enroll a hardware key as a second unlock factor.",
 	faq_2_q: "When will ZPass be available?",
 	faq_2_a:
-		"We're deep in development. Desktop and mobile apps are both well underway, and we'll run a closed beta with waitlist subscribers before the public launch. Drop your email below and we'll let you know the moment it ships.",
+		"Very soon. Desktop, mobile and the browser extension are all in their final QA pass — the public release is just around the corner. If you need an exact timeline for a partnership or integration, reach out through the contact form.",
 	faq_3_q: "Can I import from 1Password, Bitwarden or LastPass?",
 	faq_3_a:
 		"Yes. The importer supports 1PUX, Bitwarden JSON, LastPass CSV, Chrome / Firefox / Safari browser exports, and KeePass KDBX. Everything runs locally on your device — nothing is uploaded during the migration.",
@@ -613,7 +596,7 @@ const en: SiteStrings = {
 const zh: SiteStrings = {
 	nav_features: "功能",
 	nav_security: "安全",
-	nav_download: "订阅",
+	nav_download: "发布",
 	nav_pricing: "价格",
 	nav_docs: "文档",
 	nav_signin: "登录",
@@ -626,7 +609,7 @@ const zh: SiteStrings = {
 	hero_title_2: "只有你拿得到钥匙。",
 	hero_sub:
 		"ZPass 把你的登录信息、通行密钥和两步验证码统一加密存放在本地设备。未经加密的明文不会进入网络、不会落到磁盘、也不会出现在我们的服务器上——我们看不到，任何第三方也看不到。覆盖你日常使用的每一个平台。",
-	hero_cta_primary: "订阅发布通知",
+	hero_cta_primary: "查看发布状态",
 	hero_availability: "macOS · Windows · Linux · iOS · Android · 浏览器扩展",
 
 	build_status_title: "构建状态",
@@ -634,26 +617,17 @@ const zh: SiteStrings = {
 	build_status_comment_desktop: "// 桌面客户端",
 	build_status_comment_mobile: "// 移动端",
 	build_status_comment_extension: "// 浏览器扩展",
-	build_status_macos: "macOS · 开发中",
-	build_status_windows: "Windows · 开发中",
-	build_status_linux: "Linux · 开发中",
-	build_status_browser_ext: "Chrome / Firefox / Safari · 已规划",
+	build_status_macos: "macOS · 即将发布",
+	build_status_windows: "Windows · 即将发布",
+	build_status_linux: "Linux · 即将发布",
+	build_status_browser_ext: "Chrome / Firefox / Safari · 即将发布",
 
-	subscribe_eyebrow: "抢先体验",
-	subscribe_title: "ZPass 正在紧张研发中。",
-	subscribe_sub:
-		"我们正在为首个公开版本做最后打磨。留下你的邮箱，发布时第一时间通知你——除此之外不会发任何邮件。",
-	subscribe_placeholder: "you@example.com",
-	subscribe_cta: "通知我",
-	subscribe_note: "一键退订。我们绝不分享你的地址，绝无营销邮件。",
-	subscribe_success: "已加入名单。ZPass 发布时我们会第一时间邮件告知你。",
-	subscribe_success_optin:
-		"就差一步——我们刚刚向你的邮箱发送了一封确认邮件，请点击其中的链接完成订阅。",
-	subscribe_pending: "发送中…",
-	subscribe_error: "出现了一点问题，请稍后再试一次。",
-	subscribe_invalid: "请填写有效的邮箱地址。",
-	subscribe_already_confirmed:
-		"你已经订阅并完成了确认，ZPass 发布时我们会第一时间通知你！",
+	release_eyebrow: "即将发布",
+	release_title: "ZPass 即将与你见面。",
+	release_headline: "首个公开版本即将上线。",
+	release_sub:
+		"各平台的构建包正在做最后收尾。如有任何问题、合作意向或安全披露，欢迎通过下方联系我们——每一条消息我们都会认真看。",
+	release_note: "没有邮件名单、没有营销、没有候补注册。只为了发布。",
 
 	section_features: "功能",
 	section_features_sub: "该有的都有，多余的一样没有，默认设置不玩套路。",
@@ -795,7 +769,7 @@ const zh: SiteStrings = {
 
 	section_pricing: "价格",
 	section_pricing_sub:
-		"以下为预估价格，最终以正式发布时公布的为准。加入候补名单即可锁定早期体验价。",
+		"以下为预估价格，最终以正式发布时公布的为准。ZPass 即将发布，如需提前了解请通过页面上的「联系我们」与我们沟通。",
 	pricing_solo: {
 		name: "免费版",
 		price: "¥0",
@@ -806,7 +780,7 @@ const zh: SiteStrings = {
 			"TOTP、通行密钥、硬件密钥",
 			"本地优先的加密密码库",
 		],
-		cta: "加入候补",
+		cta: "了解发布",
 	},
 	pricing_personal: {
 		name: "个人版",
@@ -819,14 +793,14 @@ const zh: SiteStrings = {
 			"加密文件附件（1 GB）",
 			"应急访问",
 		],
-		cta: "加入候补",
+		cta: "了解发布",
 	},
 	pricing_family: {
 		name: "家庭版",
 		price: "¥38",
 		unit: "/月 · 至多 6 人",
 		bullets: ["包含个人版全部", "家庭共享文件夹", "成员权限", "50 GB 共享存储"],
-		cta: "加入候补",
+		cta: "了解发布",
 	},
 	pricing_team: {
 		name: "团队版",
@@ -866,7 +840,7 @@ const zh: SiteStrings = {
 	roadmap_m05_notes:
 		"Chrome、Firefox、Safari 浏览器扩展上线。协议规范与威胁模型同步公开，接受外部研究者审阅。",
 	roadmap_m06_notes:
-		"面向候补名单订阅者开放封闭测试。安全审计完成、关键问题修复之后，正式公开发布。",
+		"发布前的最后一轮 QA 与审计复测。安全审计完成、关键问题修复之后，正式公开发布。",
 
 	section_faq: "常见问题",
 	faq_1_q: "如果忘记主密码怎么办？",
@@ -874,7 +848,7 @@ const zh: SiteStrings = {
 		"没有主密码，任何人——包括我们——都无法解密你的密码库，这正是零知识架构的代价，也是它存在的意义。为此 ZPass 提供了三道保险：指定一位可信联系人作为应急联系人、导出一份可离线打印保存的恢复套件、或把硬件密钥注册为第二解锁因素。",
 	faq_2_q: "ZPass 什么时候发布？",
 	faq_2_a:
-		"目前正在紧张开发中。桌面端和移动端都已进展过半，我们会在正式发布之前，先面向候补名单用户开放一轮封闭测试。留下邮箱，我们会在它可以下载的那一天第一时间通知你。",
+		"即将发布。桌面端、移动端与浏览器扩展都已进入发布前的最后一轮 QA——首个公开版本就在眼前。如果你是合作者或集成方，需要一个准确的时间表，欢迎通过页面上的「联系我们」表单联系我们。",
 	faq_3_q: "可以从 1Password、Bitwarden、LastPass 迁移过来吗？",
 	faq_3_a:
 		"可以。导入器支持 1PUX、Bitwarden JSON、LastPass CSV、Chrome / Firefox / Safari 浏览器导出以及 KeePass KDBX 等常见格式。整个导入过程都在你的设备上完成，迁移期间不会有任何数据被上传。",

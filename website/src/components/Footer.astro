@@ -8,6 +8,7 @@
 // ============================================================================
 
 import type { SiteStrings } from "../i18n/strings";
+import Brandmark from "./Brandmark.astro";
 
 export interface Props {
 	t: SiteStrings;
@@ -21,7 +22,7 @@ const { t } = Astro.props;
 		<div class="foot-lite">
 			<div class="foot-lite-brand">
 				<div class="brand">
-					<span class="logo">Z</span>
+					<span class="logo"><Brandmark size={22} /></span>
 					<span>ZPass</span>
 				</div>
 				<div class="foot-tagline">{t.footer_tagline}</div>

@@ -6,8 +6,8 @@
 //        Security → Pricing → Changelog → FAQ → Footer。
 // 文案来自 src/i18n/strings.ts 中的 `zh` 集合。
 //
-// 注：前期开发期版本——
-//   - 用 Subscribe(邮件订阅) 区块替代原 Install(curl 安装命令) 区块
+// 注：发布前版本——
+//   - 用 Release(“即将发布” 状态区块) 替代原 Subscribe(邮件订阅) 区块
 //   - Live(实时演示 iframe) 默认 show=false 隐藏,产品尚未发布
 //   - 页面 SEO 描述去掉了"开源 / 自托管"等表述
 // ============================================================================
@@ -15,7 +15,7 @@
 import BaseLayout from "../../layouts/BaseLayout.astro";
 import Nav from "../../components/Nav.astro";
 import Hero from "../../components/Hero.astro";
-import Subscribe from "../../components/Subscribe.astro";
+import Release from "../../components/Release.astro";
 import Features from "../../components/Features.astro";
 import How from "../../components/How.astro";
 import Live from "../../components/Live.astro";
@@ -34,7 +34,7 @@ const t = getStrings(locale);
 
 const pageTitle = "ZPass — 一款不打扰你的密码管理器";
 const pageDesc =
-	"ZPass 是一款基于零知识架构的跨平台密码管理器。端到端加密、零知识——目前正在紧张研发中。订阅邮箱,发布时第一时间通知你。macOS · Windows · Linux · iOS · Android · 浏览器扩展。";
+	"ZPass 是一款基于零知识架构的跨平台密码管理器。端到端加密、零知识——即将发布。macOS · Windows · Linux · iOS · Android · 浏览器扩展。";
 ---
 
 <BaseLayout
@@ -48,7 +48,7 @@ const pageDesc =
 
 	<main>
 		<Hero t={t} locale={locale} />
-		<Subscribe t={t} />
+		<Release t={t} />
 		<Features t={t} />
 		<How t={t} />
 		<Live t={t} />

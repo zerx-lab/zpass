@@ -1,21 +1,23 @@
 ---
 // ============================================================================
 // Nav — 顶部导航栏
-// 与设计稿一致：左侧品牌(Z + ZPass + 版本 tag),中部锚点链接,
-// 右侧语言切换 + Subscribe CTA。
+// 与设计稿一致：左侧品牌(7×7 点阵 Z + ZPass + 版本 tag),中部锚点链接,
+// 右侧语言切换 + Release CTA(指向 #download Release 区块)。
 // 语言切换是真实的链接,跳转到对应 locale 的当前页面。
 //
-// 注:前期开发期版本——
-//   - 版本徽标默认显示 "preview"(产品尚未发布)
+// 注:即将发布版本——
+//   - 版本徽标默认显示 "preview"(产品尚未正式发布)
 //   - 移除原 "Sign in" 按钮(尚无账号体系)
 //   - 移除 nav-links 中的 "demo" 项(Live 区块默认隐藏,锚点会断)
-//   - 右侧主 CTA 文案统一为订阅(t.nav_download = "Subscribe / 订阅")
+//   - 右侧主 CTA 文案统一为"Release / 发布"(t.nav_download),点击跳转到
+//     #download(原 Subscribe 区块,现为 Release“即将发布”状态卡)
 //   - ≤860px 汉堡菜单展开所有锚点 + 语言切换 + 联系我们
 // ============================================================================
 
 import type { SiteStrings, Locale } from "../i18n/strings";
 import { localizePath } from "../i18n/strings";
 import ThemeToggle from "./ThemeToggle.astro";
+import Brandmark from "./Brandmark.astro";
 
 export interface Props {
 	t: SiteStrings;
@@ -44,7 +46,7 @@ const zhPath = localizePath(pathname, "zh");
 <nav class="nav">
 	<div class="wrap nav-inner">
 		<a href={homeBase} class="brand" aria-label="ZPass — 首页">
-			<span class="logo">Z</span>
+			<span class="logo"><Brandmark size={22} /></span>
 			<span>ZPass</span>
 			<span class="tag mono">{version}</span>
 		</a>

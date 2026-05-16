@@ -12,6 +12,7 @@
 // ============================================================================
 
 import type { SiteStrings } from "../i18n/strings";
+import Brandmark from "./Brandmark.astro";
 
 export interface Props {
 	t: SiteStrings;
@@ -191,7 +192,7 @@ const platforms: string[] = [
 						<!-- ---- Sidebar ---- -->
 						<aside class="dw-sidebar">
 							<div class="dw-brand">
-								<div class="dw-logo">Z</div>
+								<div class="dw-logo"><Brandmark size={18} /></div>
 								<div class="dw-brandname">ZPass</div>
 								<div class="dw-tag mono">
 									{t.desktop_ui_brand_tag}
@@ -643,15 +644,14 @@ const platforms: string[] = [
 	.dw-logo {
 		width: 22px;
 		height: 22px;
-		border-radius: 5px;
-		background: var(--text);
-		color: var(--bg);
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		font-family: var(--font-mono);
-		font-weight: 700;
-		font-size: 12px;
+		color: var(--text);
+		flex-shrink: 0;
+	}
+	.dw-logo svg {
+		display: block;
 	}
 	.dw-brandname {
 		font-weight: 600;

@@ -5,17 +5,17 @@ import {
   Text,
   TouchableOpacity,
   ScrollView,
-  Alert,
-  Clipboard,
-  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { router } from "expo-router";
 // 主题：useColorScheme 已桥接到 ThemeContext，自动响应「我的 → 主题」的手动切换
 import * as Haptics from "expo-haptics";
 
 import { Colors, Fonts } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { IconSymbol } from "@/components/ui/icon-symbol";
+import { useVault } from "@/contexts/vault-context";
+import { copyText } from "@/lib/clipboard";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -261,6 +261,7 @@ function ToggleCard({ label, sub, value, onToggle, c }: ToggleCardProps) {
 export default function GeneratorScreen() {
   const scheme = useColorScheme() ?? "dark";
   const c = Colors[scheme];
+  const { addItem } = useVault();
 
   const [mode, setMode] = useState<Mode>("password");
   const [len, setLen] = useState(20);
@@ -303,15 +304,22 @@ export default function GeneratorScreen() {
 
   const handleCopy = async () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    Clipboard.setString(password);
+    await copyText(password);
     setCopied(true);
     if (copyTimer.current) clearTimeout(copyTimer.current);
     copyTimer.current = setTimeout(() => setCopied(false), 1500);
   };
 
+  // 把生成的密码作为新登录条目存入保险库，并跳转到编辑页补全信息
   const handleSave = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Alert.alert("保存功能", "保存功能需要解锁密码库");
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const created = addItem({
+      type: "login",
+      name: "新登录条目",
+      username: "",
+      password,
+    });
+    router.push(`/item/${created.id}` as any);
   };
 
   const toggleOpt = (key: keyof Options) => {

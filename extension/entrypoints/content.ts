@@ -3,7 +3,7 @@ import {
   type LoginSummary,
   type PasskeyDescriptor,
   type PasskeyListResult,
-  type QueryLoginsResult
+  type QueryLoginsResult,
 } from "../src/shared/messages";
 import {
   choosePasskeyCredential,
@@ -12,14 +12,14 @@ import {
   createAutofillButton,
   showCredentialMenu,
   showPageToast,
-  showTransientNotice
+  showTransientNotice,
 } from "../src/content/ui";
 import {
   fillLoginForm,
   findLoginFormForInput,
   findLoginForms,
   isLoginCandidate,
-  type LoginForm
+  type LoginForm,
 } from "../src/content/forms";
 
 export default defineContentScript({
@@ -28,26 +28,37 @@ export default defineContentScript({
   runAt: "document_idle",
   main() {
     const controller = new AutofillController();
-    controller.scan();
 
-    const observer = new MutationObserver(() => controller.scheduleScan());
-    observer.observe(document.documentElement, { childList: true, subtree: true });
+    // 窗口 scroll / resize 时同步按钮位置（仅在按钮可见时重定位）
+    window.addEventListener("scroll", () => controller.repositionIfVisible(), {
+      passive: true,
+      capture: true,
+    });
+    window.addEventListener("resize", () => controller.repositionIfVisible(), {
+      passive: true,
+    });
 
     browser.runtime.onMessage.addListener(async (message: unknown) => {
       const msg = message as { type?: string; secret?: LoginSecret };
       if (msg.type !== "zpass.fillLogin" || !msg.secret) return undefined;
       try {
-        const activeForm = findLoginFormForInput(document.activeElement as HTMLInputElement);
+        const activeForm = findLoginFormForInput(
+          document.activeElement as HTMLInputElement,
+        );
         const form = activeForm ?? findLoginForms(document)[0];
         if (!form) {
-          return { ok: false, error: "No fillable login form found in this frame." };
+          return {
+            ok: false,
+            error: "No fillable login form found in this frame.",
+          };
         }
-        fillLoginForm(form, msg.secret);
+        // 走 controller.performFill 不是裸调 fillLoginForm，让 filling 守卫生效
+        controller.performFill(form, msg.secret);
         return { ok: true };
       } catch (error) {
         return {
           ok: false,
-          error: error instanceof Error ? error.message : String(error)
+          error: error instanceof Error ? error.message : String(error),
         };
       }
     });
@@ -58,23 +69,34 @@ export default defineContentScript({
       void relayPasskeyRequest(message);
     });
 
+    // 跟随光标焦点 — 按钮只在 login candidate input 获焦时出现
     document.addEventListener("focusin", (event) => {
-      void controller.openInlineForTarget(event.target);
+      controller.handleFocusin(event.target);
+    });
+    document.addEventListener("focusout", () => {
+      controller.handleFocusout();
     });
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") closeCredentialMenus();
-      if (event.key === "ArrowDown" && isLoginCandidate(document.activeElement)) {
+      if (
+        event.key === "ArrowDown" &&
+        isLoginCandidate(document.activeElement)
+      ) {
         void controller.openInlineForTarget(document.activeElement);
       }
     });
-  }
+  },
 });
 
 interface PageBridgeRequest {
   source: "zpass-page";
   channel: "passkey";
   id: string;
-  type: "zpass.passkeyList" | "zpass.passkeyCreate" | "zpass.passkeySign" | "zpass.passkeyChoose";
+  type:
+    | "zpass.passkeyList"
+    | "zpass.passkeyCreate"
+    | "zpass.passkeySign"
+    | "zpass.passkeyChoose";
   payload?: unknown;
 }
 
@@ -112,14 +134,24 @@ async function relayPasskeyRequest(message: PageBridgeRequest): Promise<void> {
 
     const response = await sendExtensionRequest({
       type: message.type,
-      payload: message.payload
+      payload: message.payload,
     });
     if (response?.ok) {
       showPasskeySuccessToast(message.type);
     }
-    postPasskeyResponse(message.id, !!response?.ok, response?.result, response?.error);
+    postPasskeyResponse(
+      message.id,
+      !!response?.ok,
+      response?.result,
+      response?.error,
+    );
   } catch (error) {
-    postPasskeyResponse(message.id, false, undefined, error instanceof Error ? error.message : String(error));
+    postPasskeyResponse(
+      message.id,
+      false,
+      undefined,
+      error instanceof Error ? error.message : String(error),
+    );
   }
 }
 
@@ -127,22 +159,37 @@ async function handlePasskeyCreate(message: PageBridgeRequest): Promise<void> {
   const info = passkeyPromptInfo(message.payload);
   const listResponse = await sendExtensionRequest<PasskeyListResult>({
     type: "zpass.passkeyList",
-    payload: { rpId: info.rpId }
+    payload: { rpId: info.rpId },
   });
   if (!listResponse?.ok) {
-    postPasskeyResponse(message.id, false, undefined, listResponse?.error ?? "无法读取现有 Passkey。");
+    postPasskeyResponse(
+      message.id,
+      false,
+      undefined,
+      listResponse?.error ?? "无法读取现有 Passkey。",
+    );
     return;
   }
   const list = listResponse.result;
   if (!list?.unlocked) {
-    postPasskeyResponse(message.id, false, undefined, "请先解锁 ZPass Desktop，再保存 Passkey。");
+    postPasskeyResponse(
+      message.id,
+      false,
+      undefined,
+      "请先解锁 ZPass Desktop，再保存 Passkey。",
+    );
     return;
   }
 
   const existing = findSamePasskeyAccount(list.items, message.payload);
   const action = await confirmPasskeyCreate(info, existing);
   if (action === "cancel") {
-    postPasskeyResponse(message.id, false, undefined, "用户已取消保存 Passkey。");
+    postPasskeyResponse(
+      message.id,
+      false,
+      undefined,
+      "用户已取消保存 Passkey。",
+    );
     return;
   }
 
@@ -150,10 +197,15 @@ async function handlePasskeyCreate(message: PageBridgeRequest): Promise<void> {
     for (const item of existing) {
       const deleteResponse = await sendExtensionRequest({
         type: "zpass.passkeyDelete",
-        payload: { rpId: list.rpId, itemId: item.itemId }
+        payload: { rpId: list.rpId, itemId: item.itemId },
       });
       if (!deleteResponse?.ok) {
-        postPasskeyResponse(message.id, false, undefined, deleteResponse?.error ?? "无法替换现有 Passkey。");
+        postPasskeyResponse(
+          message.id,
+          false,
+          undefined,
+          deleteResponse?.error ?? "无法替换现有 Passkey。",
+        );
         return;
       }
     }
@@ -161,12 +213,17 @@ async function handlePasskeyCreate(message: PageBridgeRequest): Promise<void> {
 
   const createResponse = await sendExtensionRequest({
     type: "zpass.passkeyCreate",
-    payload: message.payload
+    payload: message.payload,
   });
   if (createResponse?.ok) {
     showPasskeySuccessToast("zpass.passkeyCreate");
   }
-  postPasskeyResponse(message.id, !!createResponse?.ok, createResponse?.result, createResponse?.error);
+  postPasskeyResponse(
+    message.id,
+    !!createResponse?.ok,
+    createResponse?.result,
+    createResponse?.error,
+  );
 }
 
 async function handlePasskeyChoose(message: PageBridgeRequest): Promise<void> {
@@ -174,26 +231,46 @@ async function handlePasskeyChoose(message: PageBridgeRequest): Promise<void> {
   const rpId = stringValue(payload.rpId) || window.location.hostname;
   const listResponse = await sendExtensionRequest<PasskeyListResult>({
     type: "zpass.passkeyList",
-    payload: { rpId }
+    payload: { rpId },
   });
   if (!listResponse?.ok) {
-    postPasskeyResponse(message.id, false, undefined, listResponse?.error ?? "无法读取 Passkey。");
+    postPasskeyResponse(
+      message.id,
+      false,
+      undefined,
+      listResponse?.error ?? "无法读取 Passkey。",
+    );
     return;
   }
   const list = listResponse.result;
   if (!list?.unlocked) {
-    postPasskeyResponse(message.id, false, undefined, "请先解锁 ZPass Desktop，再使用 Passkey 登录。");
+    postPasskeyResponse(
+      message.id,
+      false,
+      undefined,
+      "请先解锁 ZPass Desktop，再使用 Passkey 登录。",
+    );
     return;
   }
 
-  const items = filterAllowedPasskeys(list.items, payload).sort((a, b) => b.updatedAt - a.updatedAt);
+  const items = filterAllowedPasskeys(list.items, payload).sort(
+    (a, b) => b.updatedAt - a.updatedAt,
+  );
   if (items.length === 0) {
     postPasskeyResponse(message.id, true, null);
     return;
   }
-  const selected = items.length === 1 ? items[0] : await choosePasskeyCredential(items, list.rpId);
+  const selected =
+    items.length === 1
+      ? items[0]
+      : await choosePasskeyCredential(items, list.rpId);
   if (!selected) {
-    postPasskeyResponse(message.id, false, undefined, "用户已取消使用 Passkey。");
+    postPasskeyResponse(
+      message.id,
+      false,
+      undefined,
+      "用户已取消使用 Passkey。",
+    );
     return;
   }
   postPasskeyResponse(message.id, true, selected);
@@ -204,7 +281,9 @@ function sendExtensionRequest<T = unknown>(message: {
   payload?: unknown;
   itemId?: string;
 }): Promise<ExtensionRuntimeResponse<T>> {
-  return browser.runtime.sendMessage(message) as Promise<ExtensionRuntimeResponse<T>>;
+  return browser.runtime.sendMessage(message) as Promise<
+    ExtensionRuntimeResponse<T>
+  >;
 }
 
 function showPasskeySuccessToast(type: PageBridgeRequest["type"]): void {
@@ -216,7 +295,12 @@ function showPasskeySuccessToast(type: PageBridgeRequest["type"]): void {
   }
 }
 
-function postPasskeyResponse(id: string, ok: boolean, result?: unknown, error?: string): void {
+function postPasskeyResponse(
+  id: string,
+  ok: boolean,
+  result?: unknown,
+  error?: string,
+): void {
   window.postMessage(
     {
       source: "zpass-extension",
@@ -224,9 +308,9 @@ function postPasskeyResponse(id: string, ok: boolean, result?: unknown, error?: 
       id,
       ok,
       result,
-      error
+      error,
     },
-    window.location.origin
+    window.location.origin,
   );
 }
 
@@ -252,7 +336,10 @@ function passkeyPromptInfo(payload: unknown): {
   return info;
 }
 
-function findSamePasskeyAccount(items: PasskeyDescriptor[], payload: unknown): PasskeyDescriptor[] {
+function findSamePasskeyAccount(
+  items: PasskeyDescriptor[],
+  payload: unknown,
+): PasskeyDescriptor[] {
   const data = passkeyPayload(payload);
   const userId = stringValue(data.userId);
   const userName = stringValue(data.userName);
@@ -263,56 +350,199 @@ function findSamePasskeyAccount(items: PasskeyDescriptor[], payload: unknown): P
   });
 }
 
-function filterAllowedPasskeys(items: PasskeyDescriptor[], payload: Record<string, unknown>): PasskeyDescriptor[] {
+function filterAllowedPasskeys(
+  items: PasskeyDescriptor[],
+  payload: Record<string, unknown>,
+): PasskeyDescriptor[] {
   const allowCredentialIds = payload.allowCredentialIds;
   if (!Array.isArray(allowCredentialIds) || allowCredentialIds.length === 0) {
     return items;
   }
-  const allowed = new Set(allowCredentialIds.filter((value): value is string => typeof value === "string" && value.length > 0));
+  const allowed = new Set(
+    allowCredentialIds.filter(
+      (value): value is string => typeof value === "string" && value.length > 0,
+    ),
+  );
   return items.filter((item) => allowed.has(item.credentialId));
 }
 
 function passkeyPayload(payload: unknown): Record<string, unknown> {
-  return payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+  return payload && typeof payload === "object"
+    ? (payload as Record<string, unknown>)
+    : {};
 }
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+/* ============================================================================
+ * AutofillController — 单按钮跟随光标焦点模型
+ * ----------------------------------------------------------------------------
+ * 替代旧版「每个 password input 永久挂一个按钮」的设计：
+ *   - 全局只创建 1 个浮动 Z 按钮
+ *   - 监听 focusin / focusout，按钮跟随当前光标所在的 login input
+ *     （username 或 password 均可触发，与 1Password / Bitwarden 一致）
+ *   - 失焦后延迟 180ms 隐藏，给用户从 input 移到按钮的过渡时间
+ *   - 鼠标 hover 按钮时保持显示
+ *   - 填充进行中通过 filling 守卫禁用 focusin 反复弹菜单
+ * ========================================================================== */
 class AutofillController {
-  private readonly seen = new WeakSet<HTMLInputElement>();
-  private scanTimer: number | undefined;
+  /** 全局唯一浮动按钮 */
+  private readonly button: HTMLButtonElement;
+  /** 当前按钮锚定的 input；null 表示按钮处于隐藏状态 */
+  private currentAnchor: HTMLInputElement | null = null;
+  /** 锚定 input 的尺寸 / 位置变化监听器 */
+  private positionWatcher: ResizeObserver | null = null;
+  /** 失焦延迟隐藏的 timer */
+  private hideTimer: number | undefined;
   private cachedLogins: QueryLoginsResult | null = null;
   private cachedAt = 0;
+  /** 填充进行中标记 — 期间禁止 focusin 反复弹菜单（详 performFill） */
+  private filling = false;
+  /**
+   * 一次性标记：下一次 handleFocusin 只更新按钮位置，不自动弹下拉菜单。
+   * 用于 performFill 末尾：填充后按钮需要跟随到 password 旁，但用户并未希望
+   * 填完又弹个菜单出来遮住。
+   */
+  private suppressAutoMenuOnce = false;
 
-  scheduleScan(): void {
-    if (this.scanTimer !== undefined) return;
-    this.scanTimer = window.setTimeout(() => {
-      this.scanTimer = undefined;
-      this.scan();
-    }, 250);
+  constructor() {
+    this.button = createAutofillButton();
+    this.button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void this.openMenuOnAnchor();
+    });
+    // mousedown 阻止 default 焦点切换：保留 input 焦点，避免触发站点的 onBlur 验证
+    this.button.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+    });
+    // hover 按钮时取消隐藏调度，避免用户从 input 移到按钮过程中按钮消失
+    this.button.addEventListener("mouseenter", () => this.cancelHide());
+    this.button.addEventListener("mouseleave", () => this.scheduleHide());
+    document.documentElement.append(this.button);
   }
 
-  scan(): void {
-    for (const form of findLoginForms(document)) {
-      if (this.seen.has(form.password)) continue;
-      this.seen.add(form.password);
-      const button = createAutofillButton();
-      button.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        void this.openMenu(form, button);
-      });
-      document.documentElement.append(button);
-      positionButton(button, form.password);
-      window.addEventListener("scroll", () => positionButton(button, form.password), {
-        passive: true
-      });
-      window.addEventListener("resize", () => positionButton(button, form.password), {
-        passive: true
-      });
+  isFilling(): boolean {
+    return this.filling;
+  }
+
+  /**
+   * 统一的填充入口：inline menu / Z button menu / popup fillLogin 三条路径皆走此。
+   * filling 守卫期间禁止 focusin 自动弹新菜单，本次填充末尾以 setTimeout(0)
+   * 释放（含义：让 fillLoginForm 同步触发的所有 focus / focusin / await microtask
+   * 跟完）。释放后主动 handleFocusin 一遍，让按钮跟随到填充末尾的 active input 旁。
+   */
+  performFill(form: LoginForm, secret: LoginSecret): void {
+    this.filling = true;
+    try {
+      fillLoginForm(form, secret);
+    } finally {
+      window.setTimeout(() => {
+        this.filling = false;
+        // focus() 在 already-focused 元素上不 fire focusin，手动重新评估
+        // 同时打上 suppressAutoMenuOnce：只跟随按钮，不自动重新弹菜单
+        this.suppressAutoMenuOnce = true;
+        this.handleFocusin(document.activeElement);
+      }, 0);
     }
+  }
+
+  /**
+   * focusin handler — 聚焦 login candidate 时：
+   *   1) 按钮跟随出现在 input 旁
+   *   2) 同时自动弹出账户下拉菜单（与 Bitwarden / 1Password 设计一致）
+   *      — 除非本次是 performFill 末尾触发的（suppressAutoMenuOnce）
+   */
+  handleFocusin(target: EventTarget | null): void {
+    if (this.filling) return;
+    if (!isLoginCandidate(target)) {
+      this.scheduleHide();
+      return;
+    }
+    const input = target as HTMLInputElement;
+    if (!this.belongsToLoginForm(input)) {
+      this.scheduleHide();
+      return;
+    }
+    this.cancelHide();
+    this.attachTo(input);
+    // 只跟随按钮 / 不自动弹菜单的一次性跳过（performFill 末尾场景）
+    if (this.suppressAutoMenuOnce) {
+      this.suppressAutoMenuOnce = false;
+      return;
+    }
+    void this.openInlineForTarget(input);
+  }
+
+  /** focusout handler — 延迟隐藏给用户机会移到按钮上 */
+  handleFocusout(): void {
+    if (this.filling) return;
+    this.scheduleHide();
+  }
+
+  /** 窗口 scroll / resize / ResizeObserver 触发时调用 */
+  repositionIfVisible(): void {
+    if (this.currentAnchor) {
+      positionButton(this.button, this.currentAnchor);
+    }
+  }
+
+  async openInlineForTarget(target: EventTarget | null): Promise<void> {
+    if (this.filling) return;
+    if (!isLoginCandidate(target)) return;
+    const form = findLoginFormForInput(target);
+    if (!form) return;
+    const result = await this.queryLogins(target);
+    if (!result || result.items.length === 0) return;
+    showCredentialMenu(target, result.items, async (item) => {
+      const secret = await reveal(item);
+      if (!secret) return;
+      this.performFill(form, secret);
+    });
+  }
+
+  private belongsToLoginForm(input: HTMLInputElement): boolean {
+    const forms = findLoginForms(document);
+    return forms.some(
+      (form) => form.password === input || form.username === input,
+    );
+  }
+
+  private attachTo(input: HTMLInputElement): void {
+    this.currentAnchor = input;
+    this.positionWatcher?.disconnect();
+    this.positionWatcher = new ResizeObserver(() => this.repositionIfVisible());
+    this.positionWatcher.observe(input);
+    positionButton(this.button, input);
+    this.button.setAttribute("data-state", "visible");
+  }
+
+  private hide(): void {
+    this.button.removeAttribute("data-state");
+    this.currentAnchor = null;
+    this.positionWatcher?.disconnect();
+    this.positionWatcher = null;
+  }
+
+  private scheduleHide(): void {
+    this.cancelHide();
+    this.hideTimer = window.setTimeout(() => this.hide(), 180);
+  }
+
+  private cancelHide(): void {
+    if (this.hideTimer !== undefined) {
+      window.clearTimeout(this.hideTimer);
+      this.hideTimer = undefined;
+    }
+  }
+
+  private async openMenuOnAnchor(): Promise<void> {
+    if (!this.currentAnchor) return;
+    const form = findLoginFormForInput(this.currentAnchor);
+    if (!form) return;
+    await this.openMenu(form, this.button);
   }
 
   private async openMenu(form: LoginForm, anchor: HTMLElement): Promise<void> {
@@ -322,37 +552,26 @@ class AutofillController {
       showTransientNotice(anchor, "当前站点没有匹配的 ZPass 登录项。");
       return;
     }
-
     showCredentialMenu(anchor, result.items, async (item) => {
       const secret = await reveal(item);
       if (!secret) return;
-      fillLoginForm(form, secret);
+      this.performFill(form, secret);
     });
   }
 
-  async openInlineForTarget(target: EventTarget | null): Promise<void> {
-    if (!isLoginCandidate(target)) return;
-    const form = findLoginFormForInput(target);
-    if (!form) return;
-    const result = await this.queryLogins(target);
-    if (!result || result.items.length === 0) return;
-    showCredentialMenu(target, result.items, async (item) => {
-      const secret = await reveal(item);
-      if (!secret) return;
-      fillLoginForm(form, secret);
-    });
-  }
-
-  private async queryLogins(anchor: HTMLElement): Promise<QueryLoginsResult | null> {
+  private async queryLogins(
+    anchor: HTMLElement,
+  ): Promise<QueryLoginsResult | null> {
     if (this.cachedLogins && Date.now() - this.cachedAt < 5000) {
       return this.cachedLogins;
     }
-    const response = await browser.runtime.sendMessage({ type: "zpass.queryLogins" });
+    const response = await browser.runtime.sendMessage({
+      type: "zpass.queryLogins",
+    });
     if (!response?.ok) {
       showTransientNotice(anchor, response?.error ?? "ZPass 当前不可用。");
       return null;
     }
-
     const result = response.result as QueryLoginsResult;
     if (!result.unlocked) {
       showTransientNotice(anchor, "请先解锁 ZPass Desktop，再使用自动填充。");
@@ -367,7 +586,7 @@ class AutofillController {
 async function reveal(item: LoginSummary): Promise<LoginSecret | null> {
   const response = await browser.runtime.sendMessage({
     type: "zpass.revealLogin",
-    itemId: item.id
+    itemId: item.id,
   });
   if (!response?.ok) {
     return null;
@@ -375,13 +594,31 @@ async function reveal(item: LoginSummary): Promise<LoginSecret | null> {
   return response.result as LoginSecret;
 }
 
+/**
+ * 按钮定位策略（优先级从高到低）：
+ *   1) 输入框外右侧 4px 处（不遮挡原生「显示密码」眼睛图标）
+ *   2) 视口右侧空间不足时，退回输入框内部右侧 8px（与旧行为兼容）
+ *   3) input 不可见时（width/height = 0 或 display:none），按钮一并隐藏
+ */
 function positionButton(button: HTMLElement, input: HTMLInputElement): void {
   const rect = input.getBoundingClientRect();
   if (rect.width <= 0 || rect.height <= 0) {
-    button.hidden = true;
+    button.style.display = "none";
     return;
   }
-  button.hidden = false;
-  button.style.left = `${window.scrollX + rect.right - 34}px`;
-  button.style.top = `${window.scrollY + rect.top + Math.max(3, (rect.height - 28) / 2)}px`;
+  button.style.display = "";
+
+  const BUTTON_SIZE = 24;
+  const GAP = 4;
+  const VP_MARGIN = 6;
+
+  // 优先放在 input 外右侧（让出宿主页面的 eye / clear 等原生 icon 空间）
+  const outsideLeft = rect.right + GAP;
+  const fitsOutside =
+    outsideLeft + BUTTON_SIZE <= window.innerWidth - VP_MARGIN;
+  const left = fitsOutside ? outsideLeft : rect.right - BUTTON_SIZE - 8;
+
+  const top = rect.top + Math.max(0, (rect.height - BUTTON_SIZE) / 2);
+  button.style.left = `${window.scrollX + left}px`;
+  button.style.top = `${window.scrollY + top}px`;
 }

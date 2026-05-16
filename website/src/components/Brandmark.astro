@@ -1,0 +1,94 @@
+---
+// ============================================================================
+// Brandmark — ZPass 7×7 圆点矩阵字母 "Z"（OTP FEEL 品牌标识）
+// ---------------------------------------------------------------------------
+// 与 desktop 端 `desktop/build/appicon.icon/Assets/wails_icon_vector.svg`
+// 同源的品牌图形，使用 SVG `currentColor` 渲染，方便父元素通过 `color`
+// 控制点的颜色（明暗主题自适应）。
+//
+// 视觉结构（参考 ZPass/assets/logo.png）：
+//   · 顶部 2 行  →  Z 上横（7 列实心）
+//   · 中间 3 行  →  Z 对角线（右上 → 左下，每行 2 个实心点）
+//   · 底部 2 行  →  Z 下横（7 列实心）
+//   · 中间 3 行的非对角线位置以低透明度灰点保留，
+//     构成完整 7×7 网格底纹（呼应 OTP 验证码刻度的设计语义）
+//
+// 坐标网格（紧凑版，便于在 16~80px 尺寸下清晰显示）：
+//   viewBox 14×14，每格 2px，圆心 cx = col*2+1，cy = row*2+1
+//   圆点半径 r = 0.85（紧实但不重叠）
+// ============================================================================
+
+export interface Props {
+	/** 渲染尺寸（像素），默认 24，按比例缩放 */
+	size?: number;
+	/** 灰底点的透明度，默认 0.18 */
+	dimOpacity?: number;
+	/** 附加 class，便于父级布局控制 */
+	class?: string;
+	/** ARIA 标签；如果是装饰性图标则会被 aria-hidden 替代 */
+	ariaLabel?: string;
+}
+
+const {
+	size = 24,
+	dimOpacity = 0.18,
+	class: className,
+	ariaLabel,
+} = Astro.props;
+
+// 圆点中心坐标：col、row 都是 0..6
+const cx = (col: number) => col * 2 + 1;
+const cy = (row: number) => row * 2 + 1;
+const R = 0.85;
+
+// Z 字主体（实心点）位置 [row, col]
+const SOLID: Array<[number, number]> = [
+	// 行 0 — 上横
+	[0, 0], [0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6],
+	// 行 1 — 上横
+	[1, 0], [1, 1], [1, 2], [1, 3], [1, 4], [1, 5], [1, 6],
+	// 行 2 — 对角线右侧 cols 4,5
+	[2, 4], [2, 5],
+	// 行 3 — 对角线中间 cols 3,4
+	[3, 3], [3, 4],
+	// 行 4 — 对角线左侧 cols 2,3
+	[4, 2], [4, 3],
+	// 行 5 — 下横
+	[5, 0], [5, 1], [5, 2], [5, 3], [5, 4], [5, 5], [5, 6],
+	// 行 6 — 下横
+	[6, 0], [6, 1], [6, 2], [6, 3], [6, 4], [6, 5], [6, 6],
+];
+
+// 灰底点（中间 3 行的非对角线位置）
+const DIM: Array<[number, number]> = [
+	// 行 2 — cols 0,1,2,3,6
+	[2, 0], [2, 1], [2, 2], [2, 3], [2, 6],
+	// 行 3 — cols 0,1,2,5,6
+	[3, 0], [3, 1], [3, 2], [3, 5], [3, 6],
+	// 行 4 — cols 0,1,4,5,6
+	[4, 0], [4, 1], [4, 4], [4, 5], [4, 6],
+];
+
+const role = ariaLabel ? "img" : undefined;
+---
+
+<svg
+	xmlns="http://www.w3.org/2000/svg"
+	viewBox="0 0 14 14"
+	width={size}
+	height={size}
+	class={className}
+	role={role}
+	aria-label={ariaLabel}
+	aria-hidden={ariaLabel ? undefined : "true"}
+	focusable="false"
+>
+	<g fill="currentColor">
+		<!-- 灰底点（OTP 网格刻度感） -->
+		<g opacity={dimOpacity}>
+			{DIM.map(([r, c]) => <circle cx={cx(c)} cy={cy(r)} r={R} />)}
+		</g>
+		<!-- Z 字主体 -->
+		{SOLID.map(([r, c]) => <circle cx={cx(c)} cy={cy(r)} r={R} />)}
+	</g>
+</svg>

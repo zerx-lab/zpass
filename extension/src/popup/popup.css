@@ -1,102 +1,487 @@
-:root {
-  color-scheme: dark;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #101114;
-  color: #f7f7f8;
+@import "../styles/tokens.css";
+
+/* ============================================================================
+ * ZPass Extension Popup
+ * ----------------------------------------------------------------------------
+ * 结构：[Header(持久)] → [Context bar] → [Search?] → [List | StateView]
+ * 关键设计：
+ *   - 状态切换不再整段重渲染，header 持久化，主区域 id="zp-main" 内替换
+ *   - 5 种状态（Checking / Disconnected / Setup / Locked / Matches）
+ *   - 多项时显示搜索框，单项时省略
+ *   - 每行末尾提供「复制用户名 / 复制密码」mini button
+ * ========================================================================== */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
 }
 
 body {
-  width: 320px;
-  margin: 0;
-  background: #101114;
+  width: 360px;
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 .panel {
-  min-height: 132px;
+  display: grid;
+  min-height: 220px;
 }
 
-header {
+/* ============ Header（持久层） ============ */
+.zp-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 10px;
   padding: 12px 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
 }
 
-header strong {
-  font-size: 14px;
+.zp-header-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  color: var(--accent);
 }
 
-header span {
-  color: rgba(247, 247, 248, 0.62);
-  font-size: 12px;
+.zp-header-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
 }
 
-.list {
+.zp-header-spacer {
+  flex: 1;
+}
+
+.zp-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+  text-transform: uppercase;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.zp-status-pill::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.zp-status-pill[data-state="ok"]::before {
+  background: var(--ok);
+}
+.zp-status-pill[data-state="warn"]::before {
+  background: var(--info);
+}
+.zp-status-pill[data-state="err"]::before {
+  background: var(--danger);
+}
+.zp-status-pill[data-state="locked"]::before {
+  background: var(--accent);
+}
+
+.zp-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  padding: 0;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.zp-icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.zp-icon-btn:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+/* ============ Main 区（状态动态替换） ============ */
+.zp-main {
   display: grid;
 }
 
-.login {
+/* ============ Context bar ============ */
+.zp-context {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line-soft);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.zp-context-host {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+}
+
+.zp-context-count {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
+/* ============ Search ============ */
+.zp-search {
+  position: relative;
+  margin: 10px 14px 2px;
+}
+
+.zp-search input {
+  width: 100%;
+  padding: 7px 10px 7px 30px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.zp-search input::placeholder {
+  color: var(--text-3);
+}
+
+.zp-search input:focus {
+  border-color: var(--accent);
+}
+
+.zp-search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-3);
+  pointer-events: none;
+  display: inline-flex;
+}
+
+/* ============ List ============ */
+.zp-list {
   display: grid;
-  gap: 3px;
-  padding: 11px 14px;
+  padding: 6px 0 10px;
+}
+
+.zp-section-title {
+  padding: 10px 14px 4px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.zp-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-rows: auto auto;
+  grid-template-areas:
+    "icon name actions"
+    "icon meta actions";
+  column-gap: 10px;
+  row-gap: 1px;
+  padding: 9px 14px;
   border: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   background: transparent;
   color: inherit;
+  font: inherit;
   text-align: left;
   cursor: pointer;
+  transition: background-color 0.12s ease;
+  width: 100%;
 }
 
-.passkey {
-  display: grid;
-  gap: 3px;
-  padding: 11px 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+.zp-row[data-kind="passkey"] {
+  cursor: default;
 }
 
-.login:hover,
-.login:focus {
-  background: rgba(255, 255, 255, 0.08);
+.zp-row:hover {
+  background: var(--bg-hover);
+}
+
+.zp-row:focus-visible {
   outline: none;
+  background: var(--bg-hover);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
-.login strong,
-.login span,
-.passkey strong,
-.passkey span {
+.zp-row-icon {
+  grid-area: icon;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: var(--text-2);
+  border: 1px solid var(--line-soft);
+}
+
+.zp-row[data-kind="passkey"] .zp-row-icon {
+  color: var(--accent);
+  border-color: var(--line);
+}
+
+.zp-row-name {
+  grid-area: name;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.login span,
-.passkey span,
-.empty p {
-  color: rgba(247, 247, 248, 0.62);
+.zp-row-meta {
+  grid-area: meta;
+  font-size: 11.5px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.section-title {
-  padding: 9px 14px 6px;
-  color: rgba(247, 247, 248, 0.48);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0;
-  text-transform: uppercase;
+.zp-row-actions {
+  grid-area: actions;
+  align-self: center;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
 }
 
-.empty {
+.zp-row:hover .zp-row-actions,
+.zp-row:focus-within .zp-row-actions {
+  opacity: 1;
+}
+
+.zp-mini-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+  color: var(--text-2);
+  cursor: pointer;
+  padding: 0;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.zp-mini-btn:hover {
+  background: var(--bg-elev-2);
+  color: var(--text);
+  border-color: var(--text-4);
+}
+
+.zp-mini-btn:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.zp-mini-btn[data-copied="true"] {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+/* ============ 状态视图 ============ */
+.zp-state {
   display: grid;
-  gap: 5px;
-  padding: 20px 14px;
+  gap: 12px;
+  padding: 32px 24px;
+  text-align: center;
+  justify-items: center;
 }
 
-.empty b,
-.empty p {
+.zp-state-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-elev);
+  color: var(--text-2);
+  border: 1px solid var(--line);
+}
+
+.zp-state[data-tone="locked"] .zp-state-icon {
+  color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent) 40%, var(--line));
+}
+
+.zp-state[data-tone="warn"] .zp-state-icon {
+  color: var(--info);
+}
+
+.zp-state[data-tone="err"] .zp-state-icon {
+  color: var(--danger);
+  border-color: color-mix(in oklab, var(--danger) 32%, var(--line));
+}
+
+.zp-state-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
   margin: 0;
 }
 
-.empty p {
+.zp-state-desc {
+  font-size: 12px;
+  color: var(--text-2);
+  margin: 0;
+  max-width: 280px;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.zp-state-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.zp-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.zp-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--text-4);
+}
+
+.zp-btn:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 32%, transparent);
+}
+
+.zp-btn-primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+
+.zp-btn-primary:hover {
+  filter: brightness(1.08);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.zp-btn-primary:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 50%, transparent);
+}
+
+/* ============ 内联 toast（仅 popup 内使用） ============ */
+.zp-toast-inline {
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  padding: 8px 14px;
+  background: var(--bg-elev-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 11.5px;
+  box-shadow: var(--shadow-card);
+  animation: zp-fade-up 0.18s ease;
+  pointer-events: none;
+  z-index: 10;
+}
+
+@keyframes zp-fade-up {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+/* ============ 减少动效偏好 ============ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
 }

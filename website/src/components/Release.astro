@@ -1,0 +1,126 @@
+---
+// ============================================================================
+// Release — “即将发布” 状态区块（id=download）
+// ---------------------------------------------------------------------------
+// 替换原 Subscribe（邮件订阅）区块。产品已进入发布前最后阶段，不再收集邮箱，
+// 改为：
+//   - 左卡：大字号 “即将发布” 标语 + 简短说明 + “联系我们” 次级 CTA
+//   - 右卡：保留原 build status 列表（各平台构建状态）
+//
+// 保留 <section id="download"> 锚点，确保 Nav / Hero / Pricing / Mobile /
+// Desktop 中所有 #download 链接仍能落到正确位置。
+// ============================================================================
+
+import type { SiteStrings } from "../i18n/strings";
+
+export interface Props {
+	t: SiteStrings;
+}
+
+const { t } = Astro.props;
+---
+
+<section class="install" id="download">
+	<div class="wrap">
+		<div class="install-grid">
+			<!-- ===== 卡片 1：即将发布 ===== -->
+			<div class="install-card reveal">
+				<div class="head">
+					<span class="t">{t.release_title}</span>
+					<span class="tag">{t.release_eyebrow}</span>
+				</div>
+
+				<div class="body release-body">
+					<p class="release-headline">{t.release_headline}</p>
+					<p class="release-sub">{t.release_sub}</p>
+
+					<div class="release-cta-row">
+						<button
+							type="button"
+							class="btn primary release-contact-btn"
+							data-contact-open
+						>
+							{t.contact_trigger} <span class="arrow">→</span>
+						</button>
+					</div>
+				</div>
+
+				<div class="desc">{t.release_note}</div>
+			</div>
+
+			<!-- ===== 卡片 2：构建状态（静态） ===== -->
+			<div class="install-card reveal">
+				<div class="head">
+					<span class="n">●</span>
+					<span class="t">{t.build_status_title}</span>
+					<span class="tag">{t.build_status_tag}</span>
+				</div>
+				<div class="body">
+					<div class="comment">{t.build_status_comment_desktop}</div>
+					<div class="cmd">
+						<span style="color: var(--accent);">●</span> {t.build_status_macos}
+					</div>
+					<div class="cmd">
+						<span style="color: var(--accent);">●</span> {
+							t.build_status_windows
+						}
+					</div>
+					<div class="cmd">
+						<span style="color: var(--accent);">●</span> {t.build_status_linux}
+					</div>
+					<div class="comment" style="margin-top: 8px;">
+						{t.build_status_comment_mobile}
+					</div>
+					<div class="cmd">
+						<span style="color: var(--accent);">●</span> {t.mobile_status_ios}
+					</div>
+					<div class="cmd">
+						<span style="color: var(--accent);">●</span> {
+							t.mobile_status_android
+						}
+					</div>
+					<div class="comment" style="margin-top: 8px;">
+						{t.build_status_comment_extension}
+					</div>
+					<div class="cmd">
+						<span style="color: var(--accent);">●</span> {
+							t.build_status_browser_ext
+						}
+					</div>
+				</div>
+				<div class="desc">{t.release_eyebrow}</div>
+			</div>
+		</div>
+	</div>
+</section>
+
+<style>
+	.release-body {
+		font-family: var(--font-sans);
+		justify-content: space-between;
+	}
+	.release-headline {
+		margin: 0;
+		font-size: 22px;
+		line-height: 1.3;
+		font-weight: 500;
+		letter-spacing: -0.01em;
+		color: var(--text);
+	}
+	.release-sub {
+		margin: 12px 0 0;
+		font-size: 14px;
+		line-height: 1.6;
+		color: var(--text-2);
+	}
+	.release-cta-row {
+		margin-top: auto;
+		padding-top: 20px;
+		display: flex;
+		gap: 10px;
+		flex-wrap: wrap;
+	}
+	.release-contact-btn {
+		font-size: 13px;
+	}
+</style>

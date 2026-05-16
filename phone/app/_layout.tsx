@@ -10,6 +10,8 @@ import "react-native-reanimated";
 
 import { Colors } from "@/constants/theme";
 import { ThemeProvider, useTheme } from "@/contexts/theme-context";
+import { VaultProvider, useVault } from "@/contexts/vault-context";
+import { LockOverlay } from "@/components/lock-overlay";
 
 export const unstable_settings = {
   anchor: "(tabs)",
@@ -20,6 +22,7 @@ export const unstable_settings = {
  */
 function RootLayoutNav() {
   const { scheme } = useTheme();
+  const { locked } = useVault();
 
   const navTheme = useMemo(() => {
     const base = scheme === "dark" ? DarkTheme : DefaultTheme;
@@ -41,15 +44,16 @@ function RootLayoutNav() {
 
   return (
     <NavThemeProvider value={navTheme}>
-      <Stack>
+      <Stack screenOptions={{ contentStyle: { backgroundColor: Colors[scheme].bg } }}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="vault/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="totp/[id]" options={{ headerShown: false }} />
         <Stack.Screen
-          name="modal"
-          options={{ presentation: "modal", title: "Modal" }}
+          name="item/[id]"
+          options={{ headerShown: false, presentation: "modal" }}
         />
       </Stack>
+      {locked && <LockOverlay />}
       <StatusBar style={scheme === "dark" ? "light" : "dark"} />
     </NavThemeProvider>
   );
@@ -58,7 +62,9 @@ function RootLayoutNav() {
 export default function RootLayout() {
   return (
     <ThemeProvider initialMode="system">
-      <RootLayoutNav />
+      <VaultProvider>
+        <RootLayoutNav />
+      </VaultProvider>
     </ThemeProvider>
   );
 }

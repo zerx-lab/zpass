@@ -4,6 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ZPass</title>
+    <!--
+      Geist 字体通过 Google Fonts CDN 加载；加载失败时会 fallback 到 system-ui。
+      与 website 字体方案保持一致，确保跨表面（desktop/website/extension）品牌统一。
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
     <script type="module" src="./popup/main.ts"></script>
   </head>
   <body>

@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  Alert,
   Animated,
   Easing,
   Platform,
@@ -17,11 +16,16 @@ import * as Haptics from "expo-haptics";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { Colors } from "@/constants/theme";
 import { IconSymbol } from "@/components/ui/icon-symbol";
-import { TOTP_ITEMS, formatCode } from "@/app/(tabs)/totp";
-
-// ─── 常量 ────────────────────────────────────────────────────────────────────
-
-const PERIOD = 30; // TOTP 周期（秒）
+import { useVault } from "@/contexts/vault-context";
+import { faviconColor, faviconInitials } from "@/lib/format";
+import {
+  generateTotp,
+  formatTotpCode,
+  totpElapsed,
+  totpRemaining,
+  TOTP_PERIOD,
+} from "@/lib/totp";
+import { copyEphemeral } from "@/lib/clipboard";
 
 const MONO = Platform.select({
   ios: "Menlo",
@@ -29,54 +33,36 @@ const MONO = Platform.select({
   default: "monospace",
 });
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function getElapsed(): number {
-  return Math.floor(Date.now() / 1000) % PERIOD;
-}
-
-function getRemaining(): number {
-  return PERIOD - getElapsed();
-}
-
-// ─── 组件 ────────────────────────────────────────────────────────────────────
-
 export default function TotpDetailScreen() {
   const scheme = useColorScheme() ?? "dark";
   const C = Colors[scheme];
-
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { getItem } = useVault();
 
-  // 找到对应账户；找不到则 fallback 到第一个，避免崩溃
-  const account = useMemo(
-    () => TOTP_ITEMS.find((t) => t.id === id) ?? TOTP_ITEMS[0],
-    [id],
+  const item = getItem(id);
+  const isLogin = item?.type === "login";
+  const secret = isLogin ? item.totp : undefined;
+
+  const [remaining, setRemaining] = useState(totpRemaining());
+  const [periodKey, setPeriodKey] = useState(() =>
+    Math.floor(Date.now() / 1000 / TOTP_PERIOD),
   );
-
-  const [remaining, setRemaining] = useState<number>(getRemaining());
   const isUrgent = remaining <= 5;
 
-  // 进度动画（0 = 周期起点，1 = 周期末尾）
   const progressAnim = useRef(
-    new Animated.Value(getElapsed() / PERIOD),
+    new Animated.Value(totpElapsed() / TOTP_PERIOD),
   ).current;
   const progressAnimRef = useRef<Animated.CompositeAnimation | null>(null);
 
-  // ── 倒计时 ──
   useEffect(() => {
     function tick() {
-      const rem = getRemaining();
-      const elapsed = getElapsed();
+      const rem = totpRemaining();
+      const elapsed = totpElapsed();
       setRemaining(rem);
+      setPeriodKey(Math.floor(Date.now() / 1000 / TOTP_PERIOD));
 
       progressAnimRef.current?.stop();
-
-      if (elapsed === 0) {
-        progressAnim.setValue(0);
-      } else {
-        progressAnim.setValue(elapsed / PERIOD);
-      }
-
+      progressAnim.setValue(elapsed === 0 ? 0 : elapsed / TOTP_PERIOD);
       const anim = Animated.timing(progressAnim, {
         toValue: 1,
         duration: rem * 1000,
@@ -86,47 +72,59 @@ export default function TotpDetailScreen() {
       progressAnimRef.current = anim;
       anim.start();
     }
-
     tick();
-    const id = setInterval(tick, 1000);
+    const t = setInterval(tick, 1000);
     return () => {
-      clearInterval(id);
+      clearInterval(t);
       progressAnimRef.current?.stop();
     };
   }, [progressAnim]);
 
-  // ── 复制 ──
+  const code = useMemo(
+    () => (secret ? generateTotp(secret) : "------"),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [secret, periodKey],
+  );
+
   const handleCopy = useCallback(async () => {
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    Alert.alert(
-      "已复制",
-      `${account.name} 的验证码 ${formatCode(account.secret)} 已复制到剪贴板`,
-    );
-  }, [account]);
+    await copyEphemeral(code);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  }, [code]);
 
-  const handleBack = useCallback(() => {
-    router.back();
-  }, []);
-
-  // ── 动态颜色 ──
-  const codeColor = isUrgent ? C.danger : C.text;
-  const barColor = isUrgent ? C.danger : C.info;
-
-  // ── 进度条宽度（百分比） ──
   const barWidth = progressAnim.interpolate({
     inputRange: [0, 1],
     outputRange: ["0%", "100%"],
   });
 
-  // ─── Render ───────────────────────────────────────────────────────────────
+  if (!item || !isLogin || !secret) {
+    return (
+      <SafeAreaView style={[styles.safe, { backgroundColor: C.bg }]} edges={["top"]}>
+        <View style={[styles.navBar, { borderBottomColor: C.lineSoft }]}>
+          <TouchableOpacity style={styles.navBtn} onPress={() => router.back()}>
+            <IconSymbol name="chevron.left" size={22} color={C.text} />
+          </TouchableOpacity>
+          <Text style={[styles.navTitle, { color: C.text }]}>验证码</Text>
+          <View style={styles.navBtn} />
+        </View>
+        <View style={styles.notFound}>
+          <Text style={{ color: C.text3 }}>该条目没有 TOTP 验证码</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const codeColor = isUrgent ? C.danger : C.text;
+  const barColor = isUrgent ? C.danger : C.info;
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: C.bg }]} edges={["top", "left", "right"]}>
-      {/* ── NavBar ── */}
+    <SafeAreaView
+      style={[styles.safe, { backgroundColor: C.bg }]}
+      edges={["top", "left", "right"]}
+    >
       <View style={[styles.navBar, { borderBottomColor: C.lineSoft }]}>
         <TouchableOpacity
           style={styles.navBtn}
-          onPress={handleBack}
+          onPress={() => router.back()}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           activeOpacity={0.6}
         >
@@ -137,11 +135,11 @@ export default function TotpDetailScreen() {
         </Text>
         <TouchableOpacity
           style={styles.navBtn}
-          onPress={() => Alert.alert("更多操作", "编辑 / 删除 / 导出")}
+          onPress={() => router.push(`/item/${item.id}` as any)}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           activeOpacity={0.6}
         >
-          <IconSymbol name="ellipsis" size={20} color={C.text} />
+          <IconSymbol name="square.and.pencil" size={19} color={C.text} />
         </TouchableOpacity>
       </View>
 
@@ -149,92 +147,58 @@ export default function TotpDetailScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── 账户 Chip ── */}
-        <View
-          style={[
-            styles.chip,
-            { borderColor: C.line, backgroundColor: C.bgElev },
-          ]}
-        >
-          <View style={[styles.chipFavicon, { backgroundColor: account.color }]}>
-            <Text style={styles.chipFaviconText}>
-              {account.initials.slice(0, 1)}
-            </Text>
+        <View style={[styles.chip, { borderColor: C.line, backgroundColor: C.bgElev }]}>
+          <View style={[styles.chipFavicon, { backgroundColor: faviconColor(item.name) }]}>
+            <Text style={styles.chipFaviconText}>{faviconInitials(item.name)}</Text>
           </View>
-          <Text style={[styles.chipName, { color: C.text }]}>
-            {account.name}
-          </Text>
+          <Text style={[styles.chipName, { color: C.text }]}>{item.name}</Text>
           <Text style={[styles.chipDot, { color: C.text3 }]}> · </Text>
-          <Text
-            style={[styles.chipUsername, { color: C.text3 }]}
-            numberOfLines={1}
-          >
-            {account.username}
+          <Text style={[styles.chipUsername, { color: C.text3 }]} numberOfLines={1}>
+            {item.username}
           </Text>
         </View>
 
-        {/* ── 大号验证码 ── */}
         <Text style={[styles.codeText, { color: codeColor }]}>
-          {formatCode(account.secret)}
+          {formatTotpCode(code)}
         </Text>
 
-        {/* ── 倒计时说明 ── */}
         <Text style={[styles.expiresText, { color: C.text3 }]}>
           {isUrgent ? "即将刷新 · " : "有效期 · "}
           {remaining}s
         </Text>
 
-        {/* ── 进度条 ── */}
         <View style={styles.progressOuter}>
           <View style={[styles.progressTrack, { backgroundColor: C.bgElev2 }]}>
             <Animated.View
-              style={[
-                styles.progressBar,
-                { width: barWidth, backgroundColor: barColor },
-              ]}
+              style={[styles.progressBar, { width: barWidth, backgroundColor: barColor }]}
             />
           </View>
         </View>
 
-        {/* ── 复制按钮 ── */}
         <TouchableOpacity
-          style={[
-            styles.copyBtn,
-            { borderColor: C.line, backgroundColor: C.bgElev },
-          ]}
+          style={[styles.copyBtn, { borderColor: C.line, backgroundColor: C.bgElev }]}
           onPress={handleCopy}
           activeOpacity={0.7}
         >
           <IconSymbol name="doc.on.doc.fill" size={16} color={C.text} />
-          <Text style={[styles.copyBtnText, { color: C.text }]}>
-            复制验证码
-          </Text>
+          <Text style={[styles.copyBtnText, { color: C.text }]}>复制验证码</Text>
         </TouchableOpacity>
 
-        {/* ── 元信息卡 ── */}
-        <View
-          style={[
-            styles.metaCard,
-            { borderColor: C.line, backgroundColor: C.bgElev },
-          ]}
-        >
-          <MetaRow label="服务" value={account.name} c={C} />
+        <View style={[styles.metaCard, { borderColor: C.line, backgroundColor: C.bgElev }]}>
+          <MetaRow label="服务" value={item.name} c={C} />
           <View style={[styles.metaDivider, { backgroundColor: C.lineSoft }]} />
-          <MetaRow label="账号" value={account.username} c={C} />
+          <MetaRow label="账号" value={item.username} c={C} />
           <View style={[styles.metaDivider, { backgroundColor: C.lineSoft }]} />
           <MetaRow label="算法" value="SHA-1 · 6 位 · 30s" c={C} mono />
         </View>
 
-        {/* ── 提示 ── */}
         <Text style={[styles.hint, { color: C.text3 }]}>
-          验证码每 30 秒自动刷新 · 请在剩余时间内使用
+          验证码每 30 秒自动刷新 · 复制后 30 秒自动清空剪贴板
         </Text>
       </ScrollView>
     </SafeAreaView>
   );
 }
-
-// ─── 子组件：元信息行 ───────────────────────────────────────────────────────
 
 function MetaRow({
   label,
@@ -264,14 +228,9 @@ function MetaRow({
   );
 }
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-  },
+  safe: { flex: 1 },
 
-  // NavBar
   navBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -280,20 +239,11 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  navBtn: {
-    width: 36,
-    height: 36,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  navTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    flex: 1,
-    textAlign: "center",
-  },
+  navBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
+  navTitle: { fontSize: 16, fontWeight: "600", flex: 1, textAlign: "center" },
 
-  // Scroll
+  notFound: { flex: 1, alignItems: "center", justifyContent: "center" },
+
   scrollContent: {
     paddingHorizontal: 28,
     paddingTop: 32,
@@ -301,7 +251,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
-  // Chip
   chip: {
     flexDirection: "row",
     alignItems: "center",
@@ -326,19 +275,10 @@ const styles = StyleSheet.create({
     color: "#ffffff",
     includeFontPadding: false,
   },
-  chipName: {
-    fontSize: 13,
-    fontWeight: "500",
-  },
-  chipDot: {
-    fontSize: 13,
-  },
-  chipUsername: {
-    fontSize: 12,
-    flexShrink: 1,
-  },
+  chipName: { fontSize: 13, fontWeight: "500" },
+  chipDot: { fontSize: 13 },
+  chipUsername: { fontSize: 12, flexShrink: 1 },
 
-  // 大验证码
   codeText: {
     fontSize: 56,
     fontWeight: "300",
@@ -349,28 +289,12 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     textAlign: "center",
   },
-  expiresText: {
-    fontSize: 13,
-    marginBottom: 20,
-  },
+  expiresText: { fontSize: 13, marginBottom: 20 },
 
-  // 进度条
-  progressOuter: {
-    width: "100%",
-    marginBottom: 32,
-  },
-  progressTrack: {
-    width: "100%",
-    height: 4,
-    borderRadius: 2,
-    overflow: "hidden",
-  },
-  progressBar: {
-    height: "100%",
-    borderRadius: 2,
-  },
+  progressOuter: { width: "100%", marginBottom: 32 },
+  progressTrack: { width: "100%", height: 4, borderRadius: 2, overflow: "hidden" },
+  progressBar: { height: "100%", borderRadius: 2 },
 
-  // 复制按钮
   copyBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -381,12 +305,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     marginBottom: 32,
   },
-  copyBtnText: {
-    fontSize: 15,
-    fontWeight: "500",
-  },
+  copyBtnText: { fontSize: 15, fontWeight: "500" },
 
-  // 元信息卡
   metaCard: {
     width: "100%",
     borderWidth: 1,
@@ -401,24 +321,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     gap: 12,
   },
-  metaLabel: {
-    fontSize: 13,
-  },
-  metaValue: {
-    fontSize: 14,
-    fontWeight: "500",
-    flexShrink: 1,
-    textAlign: "right",
-  },
-  metaDivider: {
-    height: StyleSheet.hairlineWidth,
-    width: "100%",
-  },
+  metaLabel: { fontSize: 13 },
+  metaValue: { fontSize: 14, fontWeight: "500", flexShrink: 1, textAlign: "right" },
+  metaDivider: { height: StyleSheet.hairlineWidth, width: "100%" },
 
-  // 提示
-  hint: {
-    fontSize: 11,
-    textAlign: "center",
-    paddingHorizontal: 16,
-  },
+  hint: { fontSize: 11, textAlign: "center", paddingHorizontal: 16 },
 });
