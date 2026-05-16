@@ -1,0 +1,1208 @@
+---
+// ============================================================================
+// Desktop — PC 客户端演示区块
+// 左侧：文案 + CTA + 平台元信息
+// 右侧：mac 风格窗口外框 + 三栏 vault 静态界面（sidebar / list / detail）
+// 设计还原自 ZPassDesign/ZPass.html（参见 ZPassDesign/screenshots/zh.png），
+// 所有颜色/边框均使用官网全局 token (--bg, --text, --line ...)，
+// 因此会随 <html data-theme="dark|light"> 自动联动主题切换。
+//
+// 注意：本组件只是"静态预览图"，不含交互。意在展示桌面端的视觉密度与信息架构，
+// 与 Mobile.astro 形成对称（左文+右设备）。
+// ============================================================================
+
+import type { SiteStrings } from "../i18n/strings";
+
+export interface Props {
+	t: SiteStrings;
+}
+
+const { t } = Astro.props;
+
+// 左侧 sidebar 主导航
+// [键名(用于决定 i18n), 计数文本(可空), 是否激活, 图标 path d]
+const navMain: Array<{
+	label: string;
+	count: string;
+	active: boolean;
+	icon: string;
+}> = [
+	{
+		label: t.desktop_ui_nav_all,
+		count: "28",
+		active: true,
+		// grid 4 dots
+		icon: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z",
+	},
+	{
+		label: t.desktop_ui_nav_generator,
+		count: "",
+		active: false,
+		// dice / refresh
+		icon: "M4 4h16v16H4z M8 8h2v2H8z M14 14h2v2h-2z M14 8h2v2h-2z",
+	},
+	{
+		label: t.desktop_ui_nav_health,
+		count: "3",
+		active: false,
+		// shield
+		icon: "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z",
+	},
+];
+
+// sidebar 分类
+const navCategory: Array<{ label: string; count: string; icon: string }> = [
+	{
+		label: t.desktop_ui_nav_logins,
+		count: "16",
+		icon: "M12 2a4 4 0 014 4v3h1a2 2 0 012 2v9a2 2 0 01-2 2H7a2 2 0 01-2-2v-9a2 2 0 012-2h1V6a4 4 0 014-4z",
+	},
+	{
+		label: t.desktop_ui_nav_cards,
+		count: "3",
+		icon: "M3 6h18v12H3z M3 10h18",
+	},
+	{
+		label: t.desktop_ui_nav_notes,
+		count: "3",
+		icon: "M5 3h11l3 3v15H5z M9 12h6 M9 16h6 M9 8h4",
+	},
+	{
+		label: t.desktop_ui_nav_identity,
+		count: "1",
+		icon: "M12 12a4 4 0 100-8 4 4 0 000 8z M4 21a8 8 0 0116 0",
+	},
+	{
+		label: t.desktop_ui_nav_ssh,
+		count: "3",
+		icon: "M3 6h18v12H3z M7 10l3 2-3 2 M12 14h5",
+	},
+	{
+		label: t.desktop_ui_nav_wallet,
+		count: "2",
+		icon: "M3 7h18v12H3z M3 7l4-4h10l4 4 M16 13h2",
+	},
+];
+
+// sidebar 文件夹分组
+const navFolder: Array<{ label: string; count: string }> = [
+	{ label: t.desktop_ui_nav_work, count: "12" },
+	{ label: t.desktop_ui_nav_personal, count: "8" },
+];
+
+// 中间列表 chip 过滤器：[label, n, active]
+const chips: Array<[string, string, boolean]> = [
+	[t.desktop_ui_chip_all, "28", true],
+	[t.desktop_ui_chip_logins, "16", false],
+	[t.desktop_ui_chip_cards, "3", false],
+	[t.desktop_ui_chip_notes, "3", false],
+	[t.desktop_ui_chip_identity, "1", false],
+];
+
+// 中间列表条目：[徽标缩写, 名称, 用户名, 是否 TOTP, 时间标签, 是否激活]
+type Row = [string, string, string, boolean, string, boolean];
+const rows: Row[] = [
+	["GH", "GitHub", "alex.rivera@zpass.dev", true, t.desktop_ui_row_2d_ago, true],
+	["VC", "Vercel", "alex@zpass.dev", false, t.desktop_ui_row_6d_ago, false],
+	["ST", "Stripe", "ops@zpass.dev", true, t.desktop_ui_row_14d_ago, false],
+	["LN", "Linear", "alex.rivera@zpass.dev", false, t.desktop_ui_row_1y_ago, false],
+	["FG", "Figma", "alex@zpass.dev", false, t.desktop_ui_row_1y_ago, false],
+	["NT", "Notion", "alex.rivera@zpass.dev", false, t.desktop_ui_row_1y_ago, false],
+];
+
+// 平台元信息（右下文案）
+const platforms: string[] = [
+	t.desktop_status_macos,
+	t.desktop_status_windows,
+	t.desktop_status_linux,
+	t.desktop_status_extra,
+];
+---
+
+<section class="section" id="desktop">
+	<div class="wrap">
+		<div class="sec-head reveal">
+			<div class="index mono">
+				<b>04</b> / {t.desktop_section_label}
+			</div>
+			<div>
+				<h2>{t.section_desktop}</h2>
+				<div class="sec-sub">{t.section_desktop_sub}</div>
+			</div>
+		</div>
+
+		<div class="desktop-row">
+			<!-- ===== 左：文案 + CTA ===== -->
+			<div class="desktop-copy reveal">
+				<div class="desktop-eyebrow mono">{t.desktop_eyebrow}</div>
+				<h2 class="desktop-headline">{t.desktop_headline}</h2>
+				<p class="desktop-body">{t.desktop_body}</p>
+
+				<div class="desktop-cta-row">
+					<a href="#download" class="btn primary" rel="noopener">
+						{t.hero_cta_primary}
+					</a>
+				</div>
+
+				<div class="desktop-meta mono">
+					{platforms.map((p) => <div>{p}</div>)}
+				</div>
+			</div>
+
+			<!-- ===== 右：mac 风格窗口外框 + 三栏静态预览 ===== -->
+			<div class="desktop-stage reveal">
+				<div
+					class="desktop-window"
+					aria-label="ZPass desktop preview"
+					role="img"
+				>
+					<!-- ====== 标题栏（mac 风：红黄绿点 + 地址 / 标签）====== -->
+					<div class="dw-titlebar">
+						<span class="dw-dots" aria-hidden="true">
+							<i></i><i></i><i></i>
+						</span>
+						<div class="dw-crumbs mono">
+							<span>{t.desktop_ui_crumb_root}</span>
+							<span class="sep">/</span>
+							<b>GitHub</b>
+						</div>
+						<div class="dw-spacer"></div>
+						<div class="dw-search">
+							<svg
+								width="13"
+								height="13"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								aria-hidden="true"
+							>
+								<circle cx="11" cy="11" r="7"></circle>
+								<path d="M21 21l-4-4"></path>
+							</svg>
+							<span>{t.desktop_ui_search_placeholder}</span>
+							<span class="kbd">⌘K</span>
+						</div>
+						<div class="dw-newbtn mono">＋ {t.desktop_ui_new_item}</div>
+					</div>
+
+					<!-- ====== 三栏主体 ====== -->
+					<div class="dw-app">
+						<!-- ---- Sidebar ---- -->
+						<aside class="dw-sidebar">
+							<div class="dw-brand">
+								<div class="dw-logo">Z</div>
+								<div class="dw-brandname">ZPass</div>
+								<div class="dw-tag mono">
+									{t.desktop_ui_brand_tag}
+								</div>
+							</div>
+
+							<div class="dw-nav-section mono">
+								{t.desktop_ui_workspace}
+							</div>
+							{
+								navMain.map((it) => (
+									<div
+										class={"dw-nav-item" + (it.active ? " on" : "")}
+									>
+										<svg
+											width="14"
+											height="14"
+											viewBox="0 0 24 24"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="1.6"
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											aria-hidden="true"
+										>
+											<path d={it.icon} />
+										</svg>
+										<span>{it.label}</span>
+										{it.count && (
+											<span class="dw-count mono">{it.count}</span>
+										)}
+									</div>
+								))
+							}
+
+							<div class="dw-nav-section mono">
+								{t.desktop_ui_categories}
+							</div>
+							{
+								navCategory.map((it) => (
+									<div class="dw-nav-item">
+										<svg
+											width="14"
+											height="14"
+											viewBox="0 0 24 24"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="1.6"
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											aria-hidden="true"
+										>
+											<path d={it.icon} />
+										</svg>
+										<span>{it.label}</span>
+										<span class="dw-count mono">{it.count}</span>
+									</div>
+								))
+							}
+
+							<div class="dw-nav-section mono">
+								{t.desktop_ui_folders}
+							</div>
+							{
+								navFolder.map((it) => (
+									<div class="dw-nav-item">
+										<svg
+											width="14"
+											height="14"
+											viewBox="0 0 24 24"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="1.6"
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											aria-hidden="true"
+										>
+											<path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+										</svg>
+										<span>{it.label}</span>
+										<span class="dw-count mono">{it.count}</span>
+									</div>
+								))
+							}
+
+							<div class="dw-sidebar-foot">
+								<div class="dw-avatar mono">AR</div>
+								<div class="dw-user">
+									<div class="dw-user-n">Alex Rivera</div>
+									<div class="dw-user-m mono">zpass.dev</div>
+								</div>
+							</div>
+						</aside>
+
+						<!-- ---- 中间列表 ---- -->
+						<div class="dw-list-pane">
+							<div class="dw-list-head">
+								<h3>{t.desktop_ui_list_title}</h3>
+								<span class="dw-count-pill mono">28</span>
+								<div class="dw-spacer"></div>
+								<span class="dw-list-recent mono">
+									▾ {t.desktop_ui_list_recent}
+								</span>
+							</div>
+
+							<div class="dw-chips">
+								{
+									chips.map(([label, n, on]) => (
+										<span class={"dw-chip" + (on ? " on" : "")}>
+											{label}
+											<span class="n mono">{n}</span>
+										</span>
+									))
+								}
+							</div>
+
+							<div class="dw-list">
+								{
+									rows.map(([m, name, user, totp, time, on]) => (
+										<div class={"dw-row" + (on ? " on" : "")}>
+											<div class="dw-fav mono">{m}</div>
+											<div class="dw-row-meta">
+												<div class="dw-row-title">
+													{name}
+													{totp && (
+														<span class="dw-row-totp mono">TOTP</span>
+													)}
+												</div>
+												<div class="dw-row-sub mono">{user}</div>
+											</div>
+											<div class="dw-row-side mono">
+												<span class="dw-row-badge">
+													{t.desktop_ui_chip_logins}
+												</span>
+												<span class="dw-row-time">{time}</span>
+											</div>
+										</div>
+									))
+								}
+							</div>
+						</div>
+
+						<!-- ---- 右侧详情 ---- -->
+						<div class="dw-detail-pane">
+							<div class="dw-detail-head">
+								<div class="dw-fav big mono">GH</div>
+								<div class="dw-detail-title">
+									<h2>GitHub</h2>
+									<div class="dw-detail-url mono">github.com</div>
+									<div class="dw-tag-row">
+										<span class="dw-tag mono">
+											<i class="dot"></i> Work
+										</span>
+										<span class="dw-tag mono">
+											<i class="dot"></i> dev
+										</span>
+										<span class="dw-tag mono">
+											<i class="dot"></i> 2fa
+										</span>
+									</div>
+								</div>
+								<div class="dw-detail-actions">
+									<span class="dw-btn ghost mono">
+										☆ {t.desktop_ui_btn_fav}
+									</span>
+									<span class="dw-btn ghost mono">
+										↗ {t.desktop_ui_btn_share}
+									</span>
+									<span class="dw-btn primary mono">
+										✎ {t.desktop_ui_btn_edit}
+									</span>
+								</div>
+							</div>
+
+							<div class="dw-detail-body">
+								<!-- Credentials -->
+								<div class="dw-section-title mono">
+									{t.desktop_ui_section_credentials}
+								</div>
+								<div class="dw-fieldgroup">
+									<div class="dw-field">
+										<div class="dw-field-label mono">
+											{t.desktop_ui_meta_username}
+										</div>
+										<div class="dw-field-value mono">
+											alex.rivera@zpass.dev
+										</div>
+										<div class="dw-field-tools" aria-hidden="true">
+											<span>⧉</span>
+										</div>
+									</div>
+									<div class="dw-field">
+										<div class="dw-field-label mono">
+											{t.desktop_ui_meta_password}
+										</div>
+										<div class="dw-field-value mono masked">
+											••••••••••••••••••••
+										</div>
+										<div class="dw-field-tools" aria-hidden="true">
+											<span>👁</span><span>⧉</span><span>↻</span>
+										</div>
+									</div>
+									<div class="dw-field">
+										<div class="dw-field-label mono">
+											{t.desktop_ui_meta_website}
+										</div>
+										<div class="dw-field-value mono">github.com</div>
+										<div class="dw-field-tools" aria-hidden="true">
+											<span>⧉</span><span>↗</span>
+										</div>
+									</div>
+								</div>
+
+								<!-- Strength -->
+								<div class="dw-section-title mono">
+									{t.desktop_ui_section_strength}
+								</div>
+								<div class="dw-strength">
+									<div class="dw-strength-row">
+										<div class="dw-strength-score mono">
+											94<small>/100</small>
+										</div>
+										<div class="dw-strength-bar">
+											<span style="width:94%"></span>
+										</div>
+										<div class="dw-strength-label mono">
+											{t.desktop_ui_strength_label}
+										</div>
+									</div>
+									<div class="dw-strength-meta mono">
+										<span>
+											{t.desktop_ui_strength_length}{" "}
+											<b>20</b>
+										</span>
+										<span>
+											{t.desktop_ui_strength_entropy}{" "}
+											<b>124 bits</b>
+										</span>
+										<span>
+											{t.desktop_ui_strength_crack}{" "}
+											<b>{t.desktop_ui_strength_crack_value}</b>
+										</span>
+										<span>
+											{t.desktop_ui_strength_reuse}{" "}
+											<b>{t.desktop_ui_strength_reuse_value}</b>
+										</span>
+									</div>
+								</div>
+
+								<!-- TOTP -->
+								<div class="dw-section-title mono">
+									{t.desktop_ui_section_totp}
+								</div>
+								<div class="dw-totp">
+									<div class="dw-totp-timer" aria-hidden="true">
+										<span class="mono">17</span>
+									</div>
+									<div class="dw-totp-code mono">068&nbsp;508</div>
+									<div class="dw-spacer"></div>
+									<div class="dw-totp-meta mono">
+										TOTP · SHA1 · 30s
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+</section>
+
+<style>
+	/* ============================================================================
+	 * Desktop 区块布局：左文案 / 右窗口
+	 * 与 .mobile-row 视觉对称（参考 global.css 中 .mobile-row）
+	 * ============================================================================ */
+	.desktop-row {
+		display: grid;
+		grid-template-columns: 380px 1fr;
+		gap: 60px;
+		align-items: center;
+	}
+
+	.desktop-copy {
+		min-width: 0;
+	}
+	.desktop-eyebrow {
+		font-family: var(--font-mono);
+		color: var(--text-3);
+		font-size: 11px;
+		letter-spacing: 0.08em;
+	}
+	.desktop-headline {
+		margin-top: 18px;
+		max-width: 18ch;
+	}
+	.desktop-body {
+		color: var(--text-2);
+		max-width: 48ch;
+		margin-top: 18px;
+		font-size: 15px;
+	}
+	.desktop-cta-row {
+		margin-top: 28px;
+		display: flex;
+		gap: 10px;
+		flex-wrap: wrap;
+	}
+	.desktop-meta {
+		margin-top: 28px;
+		color: var(--text-3);
+		font-size: 11px;
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 10px;
+		max-width: 360px;
+	}
+
+	.desktop-stage {
+		min-width: 0;
+		display: flex;
+		justify-content: flex-end;
+	}
+
+	/* ============================================================================
+	 * 窗口外框（mac 风）
+	 * 整窗使用 var(--bg) / var(--line)，会随 <html data-theme> 自动反色
+	 * ============================================================================ */
+	.desktop-window {
+		width: 100%;
+		max-width: 880px;
+		border: 1px solid var(--line);
+		border-radius: var(--radius-lg);
+		overflow: hidden;
+		background: var(--bg);
+		box-shadow: var(--shadow-soft), var(--shadow-frame);
+		display: flex;
+		flex-direction: column;
+	}
+
+	/* —— 标题栏 —— */
+	.dw-titlebar {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 0 12px;
+		height: 40px;
+		background: var(--bg-elev);
+		border-bottom: 1px solid var(--line-soft);
+	}
+	.dw-dots {
+		display: inline-flex;
+		gap: 6px;
+	}
+	.dw-dots i {
+		width: 11px;
+		height: 11px;
+		border-radius: 50%;
+		background: var(--browser-dot);
+		display: inline-block;
+	}
+	.dw-crumbs {
+		font-size: 12px;
+		color: var(--text-3);
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.dw-crumbs b {
+		color: var(--text);
+		font-weight: 500;
+	}
+	.dw-crumbs .sep {
+		color: var(--text-4);
+	}
+	.dw-spacer {
+		flex: 1;
+	}
+	.dw-search {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		height: 26px;
+		padding: 0 10px;
+		min-width: 220px;
+		max-width: 320px;
+		font-family: var(--font-mono);
+		font-size: 11px;
+		color: var(--text-3);
+		background: var(--bg);
+		border: 1px solid var(--line);
+		border-radius: 5px;
+		white-space: nowrap;
+		overflow: hidden;
+	}
+	.dw-search > span:not(.kbd) {
+		flex: 1;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.dw-search .kbd {
+		padding: 1px 5px;
+		border: 1px solid var(--line);
+		border-radius: 3px;
+		font-size: 10px;
+		color: var(--text-2);
+		background: var(--bg-elev);
+	}
+	.dw-newbtn {
+		font-family: var(--font-mono);
+		font-size: 11px;
+		padding: 0 10px;
+		height: 26px;
+		display: inline-flex;
+		align-items: center;
+		border-radius: 5px;
+		background: var(--text);
+		color: var(--bg);
+		font-weight: 600;
+	}
+
+	/* —— 三栏主体网格 —— */
+	.dw-app {
+		display: grid;
+		grid-template-columns: 168px 248px 1fr;
+		min-height: 520px;
+		max-height: 620px;
+		background: var(--bg);
+	}
+
+	/* ====== Sidebar ====== */
+	.dw-sidebar {
+		border-right: 1px solid var(--line-soft);
+		padding: 10px 8px;
+		display: flex;
+		flex-direction: column;
+		min-height: 0;
+		overflow: hidden;
+	}
+	.dw-brand {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 4px 6px 12px;
+		border-bottom: 1px solid var(--line-soft);
+		margin-bottom: 8px;
+	}
+	.dw-logo {
+		width: 22px;
+		height: 22px;
+		border-radius: 5px;
+		background: var(--text);
+		color: var(--bg);
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		font-family: var(--font-mono);
+		font-weight: 700;
+		font-size: 12px;
+	}
+	.dw-brandname {
+		font-weight: 600;
+		font-size: 13px;
+		letter-spacing: -0.01em;
+	}
+	.dw-tag {
+		margin-left: auto;
+		font-size: 9px;
+		color: var(--text-3);
+		padding: 2px 5px;
+		border: 1px solid var(--line);
+		border-radius: 4px;
+	}
+
+	.dw-nav-section {
+		padding: 10px 6px 4px;
+		font-size: 9px;
+		color: var(--text-3);
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+	}
+	.dw-nav-item {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 5px 6px;
+		border-radius: 5px;
+		color: var(--text-2);
+		font-size: 12px;
+		white-space: nowrap;
+		overflow: hidden;
+	}
+	.dw-nav-item > span:not(.dw-count) {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.dw-nav-item.on {
+		background: var(--bg-active);
+		color: var(--text);
+	}
+	.dw-nav-item svg {
+		flex-shrink: 0;
+		color: var(--text-3);
+	}
+	.dw-nav-item.on svg {
+		color: var(--text);
+	}
+	.dw-count {
+		font-size: 10px;
+		color: var(--text-3);
+	}
+
+	.dw-sidebar-foot {
+		margin-top: auto;
+		padding: 10px 6px 2px;
+		border-top: 1px solid var(--line-soft);
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.dw-avatar {
+		width: 22px;
+		height: 22px;
+		border-radius: 5px;
+		background: var(--bg-elev-2);
+		border: 1px solid var(--line);
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 10px;
+		font-weight: 600;
+		color: var(--text);
+	}
+	.dw-user {
+		display: flex;
+		flex-direction: column;
+		line-height: 1.2;
+		min-width: 0;
+	}
+	.dw-user-n {
+		font-size: 11px;
+		color: var(--text);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.dw-user-m {
+		font-size: 9px;
+		color: var(--text-3);
+	}
+
+	/* ====== List pane ====== */
+	.dw-list-pane {
+		border-right: 1px solid var(--line-soft);
+		display: flex;
+		flex-direction: column;
+		min-height: 0;
+		overflow: hidden;
+	}
+	.dw-list-head {
+		padding: 12px 14px 8px;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		border-bottom: 1px solid var(--line-soft);
+	}
+	.dw-list-head h3 {
+		margin: 0;
+		font-size: 13px;
+		font-weight: 600;
+		letter-spacing: -0.01em;
+	}
+	.dw-count-pill {
+		font-size: 10px;
+		color: var(--text-3);
+		padding: 1px 5px;
+		border: 1px solid var(--line);
+		border-radius: 4px;
+	}
+	.dw-list-recent {
+		font-size: 11px;
+		color: var(--text-3);
+	}
+
+	.dw-chips {
+		display: flex;
+		gap: 4px;
+		padding: 6px 14px;
+		border-bottom: 1px solid var(--line-soft);
+		overflow: hidden;
+		flex-wrap: nowrap;
+	}
+	.dw-chip {
+		padding: 3px 8px;
+		border-radius: 999px;
+		border: 1px solid var(--line);
+		background: var(--bg-elev);
+		font-size: 10px;
+		color: var(--text-2);
+		white-space: nowrap;
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+	}
+	.dw-chip .n {
+		font-size: 9px;
+		opacity: 0.7;
+	}
+	.dw-chip.on {
+		background: var(--text);
+		color: var(--bg);
+		border-color: var(--text);
+	}
+
+	.dw-list {
+		overflow: hidden;
+		min-height: 0;
+		flex: 1;
+	}
+	.dw-row {
+		display: grid;
+		grid-template-columns: 26px 1fr auto;
+		gap: 10px;
+		align-items: center;
+		padding: 9px 14px;
+		border-bottom: 1px solid var(--line-soft);
+		position: relative;
+	}
+	.dw-row.on {
+		background: var(--bg-active);
+	}
+	.dw-row.on::before {
+		content: "";
+		position: absolute;
+		left: 0;
+		top: 6px;
+		bottom: 6px;
+		width: 2px;
+		background: var(--text);
+		border-radius: 0 2px 2px 0;
+	}
+	.dw-fav {
+		width: 26px;
+		height: 26px;
+		border-radius: 5px;
+		background: var(--bg-elev-2);
+		border: 1px solid var(--line);
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 10px;
+		font-weight: 600;
+		color: var(--text);
+		flex-shrink: 0;
+	}
+	.dw-fav.big {
+		width: 40px;
+		height: 40px;
+		border-radius: 8px;
+		font-size: 14px;
+	}
+	.dw-row-meta {
+		min-width: 0;
+	}
+	.dw-row-title {
+		font-size: 12px;
+		font-weight: 500;
+		color: var(--text);
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.dw-row-totp {
+		font-size: 8.5px;
+		padding: 1px 4px;
+		border: 1px solid var(--line);
+		border-radius: 3px;
+		color: var(--text-3);
+		letter-spacing: 0.06em;
+	}
+	.dw-row-sub {
+		font-size: 10px;
+		color: var(--text-3);
+		margin-top: 2px;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.dw-row-side {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: 4px;
+	}
+	.dw-row-badge {
+		font-size: 8.5px;
+		padding: 1px 5px;
+		border: 1px solid var(--line);
+		border-radius: 3px;
+		color: var(--text-3);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+	.dw-row-time {
+		font-size: 9.5px;
+		color: var(--text-3);
+	}
+
+	/* ====== Detail pane ====== */
+	.dw-detail-pane {
+		display: flex;
+		flex-direction: column;
+		min-height: 0;
+		overflow: hidden;
+	}
+	.dw-detail-head {
+		padding: 16px 18px 12px;
+		display: flex;
+		align-items: flex-start;
+		gap: 12px;
+		border-bottom: 1px solid var(--line-soft);
+	}
+	.dw-detail-title {
+		min-width: 0;
+		flex: 1;
+	}
+	.dw-detail-title h2 {
+		margin: 0;
+		font-size: 17px;
+		font-weight: 600;
+		letter-spacing: -0.015em;
+	}
+	.dw-detail-url {
+		font-size: 11px;
+		color: var(--text-3);
+		margin-top: 2px;
+	}
+	.dw-tag-row {
+		display: flex;
+		gap: 6px;
+		margin-top: 8px;
+		flex-wrap: wrap;
+	}
+	.dw-tag {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		padding: 2px 7px;
+		font-size: 10px;
+		background: var(--bg-elev-2);
+		border: 1px solid var(--line);
+		border-radius: 4px;
+		color: var(--text-2);
+	}
+	.dw-tag .dot {
+		width: 5px;
+		height: 5px;
+		border-radius: 50%;
+		background: var(--text-3);
+		display: inline-block;
+	}
+	.dw-detail-actions {
+		display: flex;
+		gap: 5px;
+		flex-shrink: 0;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+	}
+	.dw-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		padding: 0 9px;
+		height: 24px;
+		border-radius: 5px;
+		border: 1px solid var(--line);
+		background: var(--bg-elev);
+		color: var(--text);
+		font-size: 11px;
+		font-weight: 500;
+		white-space: nowrap;
+	}
+	.dw-btn.ghost {
+		background: transparent;
+		border-color: var(--line);
+		color: var(--text-2);
+	}
+	.dw-btn.primary {
+		background: var(--text);
+		color: var(--bg);
+		border-color: var(--text);
+		font-weight: 600;
+	}
+
+	.dw-detail-body {
+		padding: 14px 18px 20px;
+		overflow: hidden;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.dw-section-title {
+		font-size: 10px;
+		color: var(--text-3);
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin: 6px 0 4px;
+	}
+	.dw-section-title::after {
+		content: "";
+		flex: 1;
+		height: 1px;
+		background: var(--line-soft);
+	}
+
+	.dw-fieldgroup {
+		border: 1px solid var(--line);
+		border-radius: var(--radius);
+		overflow: hidden;
+		background: var(--bg-elev);
+	}
+	.dw-field {
+		display: grid;
+		grid-template-columns: 80px 1fr auto;
+		gap: 10px;
+		align-items: center;
+		padding: 9px 12px;
+		border-bottom: 1px solid var(--line-soft);
+	}
+	.dw-field:last-child {
+		border-bottom: 0;
+	}
+	.dw-field-label {
+		font-size: 10px;
+		color: var(--text-3);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+	.dw-field-value {
+		font-size: 12px;
+		color: var(--text);
+		word-break: break-all;
+	}
+	.dw-field-value.masked {
+		letter-spacing: 0.25em;
+	}
+	.dw-field-tools {
+		display: flex;
+		gap: 4px;
+		color: var(--text-3);
+		font-size: 11px;
+	}
+	.dw-field-tools span {
+		width: 22px;
+		height: 22px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 4px;
+	}
+
+	/* —— Strength —— */
+	.dw-strength {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		padding: 12px 14px;
+		border: 1px solid var(--line);
+		border-radius: var(--radius);
+		background: var(--bg-elev);
+	}
+	.dw-strength-row {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+	}
+	.dw-strength-score {
+		font-size: 22px;
+		font-weight: 600;
+		letter-spacing: -0.02em;
+		color: var(--text);
+	}
+	.dw-strength-score small {
+		font-size: 11px;
+		color: var(--text-3);
+		font-weight: 500;
+	}
+	.dw-strength-bar {
+		flex: 1;
+		height: 5px;
+		background: var(--line-soft);
+		border-radius: 3px;
+		overflow: hidden;
+		position: relative;
+	}
+	.dw-strength-bar > span {
+		position: absolute;
+		left: 0;
+		top: 0;
+		bottom: 0;
+		background: var(--text);
+		border-radius: 3px;
+	}
+	.dw-strength-label {
+		font-size: 11px;
+		color: var(--text-2);
+	}
+	.dw-strength-meta {
+		display: flex;
+		gap: 14px;
+		flex-wrap: wrap;
+		font-size: 10px;
+		color: var(--text-3);
+	}
+	.dw-strength-meta b {
+		color: var(--text);
+		font-weight: 500;
+	}
+
+	/* —— TOTP —— */
+	.dw-totp {
+		display: flex;
+		align-items: center;
+		gap: 14px;
+		padding: 11px 14px;
+		border: 1px solid var(--line);
+		border-radius: var(--radius);
+		background: var(--bg-elev);
+	}
+	.dw-totp-timer {
+		width: 26px;
+		height: 26px;
+		border-radius: 50%;
+		background: conic-gradient(var(--text) 200deg, var(--line) 0);
+		position: relative;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+	}
+	.dw-totp-timer::after {
+		content: "";
+		position: absolute;
+		inset: 3px;
+		border-radius: 50%;
+		background: var(--bg-elev);
+	}
+	.dw-totp-timer span {
+		position: relative;
+		z-index: 2;
+		font-size: 10px;
+		color: var(--text);
+	}
+	.dw-totp-code {
+		font-size: 18px;
+		font-weight: 600;
+		letter-spacing: 0.15em;
+		color: var(--text);
+	}
+	.dw-totp-meta {
+		font-size: 10px;
+		color: var(--text-3);
+	}
+
+	/* ============================================================================
+	 * 响应式：窄屏 → 单列堆叠；过窄屏 → 折叠 sidebar、隐藏 list pane
+	 * ============================================================================ */
+	@media (max-width: 1100px) {
+		.desktop-row {
+			grid-template-columns: 1fr;
+			gap: 36px;
+		}
+		.desktop-stage {
+			justify-content: flex-start;
+		}
+	}
+
+	@media (max-width: 820px) {
+		.dw-app {
+			grid-template-columns: 132px 1fr;
+			max-height: 560px;
+		}
+		.dw-detail-pane {
+			display: none;
+		}
+		.dw-search {
+			display: none;
+		}
+	}
+
+	@media (max-width: 520px) {
+		.dw-app {
+			grid-template-columns: 1fr;
+		}
+		.dw-sidebar {
+			display: none;
+		}
+		.dw-newbtn {
+			display: none;
+		}
+		.dw-crumbs {
+			font-size: 11px;
+		}
+	}
+</style>

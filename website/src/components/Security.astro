@@ -1,0 +1,74 @@
+---
+// ============================================================================
+// Security — 安全架构
+// 6 个安全要点 cell 网格 + 3 张审计计划卡。
+// 移植自 ZPassDesign/src/site/site-app.jsx 的 Security 组件。
+//
+// 注:前期开发期——尚未进行真实第三方审计,审计卡展示的是"已规划"
+// 的审计安排与威胁建模工作,不夸大已完成事项。
+// ============================================================================
+
+import type { SiteStrings } from "../i18n/strings";
+
+export interface Props {
+	t: SiteStrings;
+}
+
+const { t } = Astro.props;
+
+// 6 个安全要点
+const cells: Array<[string, string]> = [
+	[t.sec_1_k, t.sec_1_v],
+	[t.sec_2_k, t.sec_2_v],
+	[t.sec_3_k, t.sec_3_v],
+	[t.sec_4_k, t.sec_4_v],
+	[t.sec_5_k, t.sec_5_v],
+	[t.sec_6_k, t.sec_6_v],
+];
+
+// 3 张审计/安全工作计划卡(前期开发期占位)
+// 文案全部走 i18n,跟随站点语言切换。
+const audits: Array<{ firm: string; meta: string }> = [
+	{ firm: t.audit_1_firm, meta: t.audit_1_meta },
+	{ firm: t.audit_2_firm, meta: t.audit_2_meta },
+	{ firm: t.audit_3_firm, meta: t.audit_3_meta },
+];
+---
+
+<section class="section" id="security">
+	<div class="wrap">
+		<div class="sec-head reveal">
+			<div class="index mono"><b>06</b> / {t.section_security}</div>
+			<div>
+				<h2>{t.section_security}</h2>
+				<div class="sec-sub">{t.section_security_sub}</div>
+			</div>
+		</div>
+
+		<!-- ===== 6 个安全要点 ===== -->
+		<div class="sec-grid">
+			{
+				cells.map(([k, v], i) => (
+					<div class="sec-cell reveal">
+						<div class="k mono">S.0{i + 1}</div>
+						<h4>{k}</h4>
+						<div class="v">{v}</div>
+					</div>
+				))
+			}
+		</div>
+
+		<!-- ===== 审计/安全工作计划卡 ===== -->
+		<div class="audits">
+			{
+				audits.map((a) => (
+					<div class="audit-card reveal">
+						<div class="firm mono">{t.audits_label}</div>
+						<h5>{a.firm}</h5>
+						<div class="meta mono">{a.meta}</div>
+					</div>
+				))
+			}
+		</div>
+	</div>
+</section>

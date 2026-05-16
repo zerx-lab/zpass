@@ -1,0 +1,138 @@
+---
+// ============================================================================
+// Mobile — 移动端章节
+// 左侧：文案 + CTA + 平台元信息
+// 右侧：手机外框 + 静态 vault 界面预览（status bar / header / search / list / tabbar）
+// 移植自 ZPassDesign/src/site/site-app.jsx 的 Mobile 组件，所有内联样式已抽到 global.css。
+// ============================================================================
+
+import type { SiteStrings } from "../i18n/strings";
+
+export interface Props {
+	t: SiteStrings;
+}
+
+const { t } = Astro.props;
+
+// 静态展示的 vault 列表行：[徽标缩写, 名称, 用户名, TOTP 码]
+const rows: Array<[string, string, string, string]> = [
+	["GH", "GitHub", "alex.rivera@…", "482 917"],
+	["VC", "Vercel", "alex@zpass.dev", "061 284"],
+	["AW", "AWS Console", "alex-admin", "309 117"],
+	["ST", "Stripe", "ops@zpass.dev", "—"],
+];
+
+// 底部 tab 项：[名称, 是否激活]
+const tabs: Array<[string, boolean]> = [
+	["Vault", true],
+	["Generator", false],
+	["Security", false],
+	["Settings", false],
+];
+---
+
+<section class="section" id="mobile">
+	<div class="wrap">
+		<div class="sec-head reveal">
+			<div class="index mono">
+				<b>05</b> / {t.mobile_section_label}
+			</div>
+			<div>
+				<h2>{t.section_mobile}</h2>
+				<div class="sec-sub">{t.section_mobile_sub}</div>
+			</div>
+		</div>
+
+		<div class="mobile-row">
+			<!-- ===== 左：文案 + CTA ===== -->
+			<div class="mobile-copy reveal">
+				<div class="mobile-eyebrow mono">{t.mobile_eyebrow}</div>
+				<h2 class="mobile-headline">{t.mobile_headline}</h2>
+				<p class="mobile-body">{t.mobile_body}</p>
+
+				<div class="mobile-cta-row">
+					<a
+						href="#download"
+						class="btn primary"
+						rel="noopener"
+					>
+						{t.hero_cta_primary}
+					</a>
+				</div>
+
+				<div class="mobile-meta mono">
+					<div>{t.mobile_status_ios}</div>
+					<div>{t.mobile_status_android}</div>
+					<div>Face ID · Touch ID</div>
+					<div>{t.mobile_status_autofill}</div>
+				</div>
+			</div>
+
+			<!-- ===== 右：手机界面（静态预览） ===== -->
+			<div class="mobile-stage reveal">
+				<div class="phone-bezel" aria-label="ZPass mobile preview">
+					<div class="phone-screen">
+						<!-- 状态栏 -->
+						<div class="phone-statusbar">
+							<span>9:41</span>
+							<span class="battery" aria-hidden="true"></span>
+						</div>
+
+						<!-- 头部 -->
+						<div class="phone-header">
+							<div class="kicker">{t.mobile_phone_kicker}</div>
+							<h3>{t.mobile_phone_greeting}</h3>
+						</div>
+
+						<!-- 搜索框 -->
+						<div class="phone-search">
+							<svg
+								width="14"
+								height="14"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								aria-hidden="true"
+							>
+								<circle cx="11" cy="11" r="7"></circle>
+								<path d="M21 21l-4-4"></path>
+							</svg>
+							Search vault…
+						</div>
+
+						<!-- 列表 -->
+						<div class="phone-list">
+							{
+								rows.map(([m, n, u, code]) => (
+									<div class="phone-row">
+										<div class="mono-badge">{m}</div>
+										<div class="meta">
+											<div class="name">{n}</div>
+											<div class="user">{u}</div>
+										</div>
+										<div class={"code" + (code === "—" ? " muted" : "")}>
+											{code}
+										</div>
+									</div>
+								))
+							}
+						</div>
+
+						<!-- 底部 tab bar -->
+						<div class="phone-tabbar">
+							{
+								tabs.map(([label, on]) => (
+									<div class={"tab" + (on ? " on" : "")}>
+										<div class="dot" />
+										{label}
+									</div>
+								))
+							}
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+</section>

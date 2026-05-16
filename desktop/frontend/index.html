@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-scale="100" data-body="sans">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<meta name="color-scheme" content="dark light" />
+		<meta
+			name="description"
+			content="ZPass — zero-knowledge password manager for desktop"
+		/>
+		<title>ZPass</title>
+		<!--
+			防 FOUC —— 在 React 挂载前根据持久化偏好 / 系统偏好写入 <html> 属性
+			优先级：localStorage "zpass.prefs" → 系统首选项（prefers-color-scheme / navigator.language）→ 标签上的默认值
+
+			对应 stores/prefs.ts 的 persist key "zpass.prefs"（version 3）
+			失败时保持标签上的 dark / scale=100 / sans / en 默认值
+
+			注意：prefs v3 把旧的 `density`（compact/normal/comfy）字段替换为
+			`scale`（缩放百分比："80"/"90"/"100"/"110"/"125"/"150"）。本脚本
+			向下兼容：若 localStorage 里仍然是 v2 存档（只含 density），不再
+			尝试映射为任何 scale 档位，直接忽略 —— 让 React 侧的 persist
+			migrate 走默认路径（scale="100"），避免 FOUC 阶段把用户明明已经
+			迁移到 v3 的存档又误读成老 density 字段。
+
+			注意：
+			  1. 所有 var 提到函数顶部，满足 biome `noInnerDeclarations` 规则
+			  2. 使用 var 而非 let/const 是为了兼容 ES5，保证脚本在任何 WebView 内核
+			     下（包括老版本 WebView2）都能无
+转译直接运行
+			  3. 首次启动（无持久化数据）时默认跟随系统：
+			       - 语言跟随 navigator.language（zh-* → zh，其它 → en）
+			       - 主题跟随 prefers-color-scheme（dark → dark，light → light）
+			     与 React 端 stores/prefs.ts 中 PREFS_DEFAULTS 的 lazy 初始化保持一致，
+			     保证 FOUC 脚本和 React 首次渲染看到同一个偏好，避免切换闪烁。
+		-->
+		<script>
+			(function applyPersistedPrefs() {
+				var raw;
+				var parsed;
+				var state;
+				var root;
+				var hasPersisted;
+				var navLang;
+				var trimmed;
+
+				root = document.documentElement;
+
+				try {
+					raw = localStorage.getItem("zpass.prefs");
+				} catch (_) {
+					raw = null;
+				}
+
+				hasPersisted = false;
+				if (raw) {
+					try {
+						parsed = JSON.parse(raw);
+						state = parsed?.state ? parsed.state : parsed;
+						if (state) {
+							hasPersisted = true;
+							if (state.theme === "light" || state.theme === "dark") {
+								root.setAttribute("data-theme", state.theme);
+							}
+							// scale（v3+）：仅接受白名单内的百分比字符串，避免
+							// 恶意 / 损坏的 localStorage 值污染 DOM 属性。
+							// 不接受 v2 旧 density 字段 —— v2→v3 迁移由 React 侧
+							// zustand persist 的 migrate 钩子负责，这里静默跳过。
+							if (
+								state.scale === "80" ||
+								state.scale === "90" ||
+								state.scale === "100" ||
+								state.scale === "110" ||
+								state.scale === "125" ||
+								state.scale === "150"
+							) {
+								root.setAttribute("data-scale", state.scale);
+								// 同步把 inline zoom 写到 #root 上，避免 React 挂载
+								// 前的首帧按 100% 渲染、随后又闪一下跳到目标缩放。
+								// 与 ThemeSync 的行为保持一致（zoom 宿主是 #root
+								// 而非 body，让 Radix Portal 可以挂到 zoom 子树外）。
+								if (state.scale !== "100") {
+									// defer 到 DOMContentLoaded —— 此刻 #root 已存在
+									document.addEventListener("DOMContentLoaded", () => {
+										var r = document.getElementById("root");
+										if (r) r.style.zoom = state.scale + "%";
+									});
+								}
+							}
+							if (state.body === "mono" || state.body === "sans") {
+								root.setAttribute("data-body", state.body);
+							}
+							if (state.lang === "zh") {
+								root.setAttribute("lang", "zh-CN");
+							} else if (state.lang === "en") {
+								root.setAttribute("lang", "en");
+							}
+							if (typeof state.accent === "string" && state.accent) {
+								trimmed = state.accent.replace(/^\s+|\s+$/g, "");
+								if (trimmed) {
+									root.style.setProperty("--accent", trimmed);
+								}
+							}
+						}
+					} catch (_) {
+						/* 解析失败时回落到系统偏好分支 */
+					}
+				}
+
+				// 无持久化数据时跟随系统偏好
+				if (!hasPersisted) {
+					// 语言：navigator.language 以 zh 开头视为中文，其它回落英文
+					try {
+						navLang =
+							(navigator && (navigator.language || navigator.userLanguage)) ||
+							"en";
+						if (String(navLang).toLowerCase().indexOf("zh") === 0) {
+							root.setAttribute("lang", "zh-CN");
+						}
+					} catch (_) {
+						/* navigator 不可用时保持默认 en */
+					}
+
+					// 主题：prefers-color-scheme 匹配 light 则切 light，其它保持 dark
+					try {
+						if (window.matchMedia?.("(prefers-color-scheme: light)").matches) {
+							root.setAttribute("data-theme", "light");
+						}
+					} catch (_) {
+						/* matchMedia 不可用时保持默认 dark */
+					}
+				}
+			})();
+		</script>
+	</head>
+	<body>
+		<!--
+			#root —— React 应用挂载点；ThemeSync 会在此节点写入 `style="zoom: <pct>%"`
+			实现整体界面缩放（见 src/app/ThemeSync.tsx 注释）。
+
+			#portal-root —— Radix UI（Select / DropdownMenu / Popover 等 popper
+			定位组件）的 Portal 挂载目标。**必须是 #root 的兄弟节点，不能在 #root
+			内部**，这样它就位于 zoom 子树之外。
+
+			为什么需要它：
+			  Radix 的 popper 定位通过 `trigger.getBoundingClientRect()` 读取
+			  触发按钮的**物理视口坐标**（已含 zoom 放大），再写到 Portal 内容的
+			  `transform: translate(x, y)` 上。若 Portal 也在 zoom 子树内，这个
+			  translate 值会被 zoom **二次放大**，导致下拉面板向右下偏移，缩放
+			  越大偏移越大（表现为 110% 缩放下 Select 下拉与触发按钮错位）。
+			  把 Portal 挂到 zoom 子树外的 #portal-root 后，transform 值按 1:1
+			  解释，位置正确。
+
+			这个节点不渲染任何可视内容，只作为 React Portal 的容器，尺寸为 0，
+			不参与文档流；Portal 内容自带 `position: fixed`，不依赖父容器布局。
+
+			#titlebar-root —— 自定义标题栏（<Titlebar />）的 Portal 挂载目标。
+			**必须位于 #portal-root 之后**，是 body 的最后一个可见子节点。
+
+			为什么需要独立的 portal 节点：
+			  Radix Dialog/AlertDialog 会把 Overlay (`fixed inset-0 z-50`) 挂到
+			  #portal-root 内。若 Titlebar 直接渲染在 #root 子树里（即使设了相同
+			  z-index），由于 DOM 顺序 `#root` < `#portal-root`，同 z-index 下
+			  Overlay 永远覆盖 Titlebar；更糟的是 ThemeSync 给 #root 写 inline
+			  `zoom: <pct>%` 让 #root 形成 stacking context，Titlebar 的 z-index
+			  被锁在 #root 内部，外层比较时 #root 整体降为 auto，Overlay 永远在上。
+
+			  把 Titlebar 用 React Portal 渲染到位于 #portal-root **之后**的
+			  #titlebar-root，三个好处一并拿到：
+			    1) 同 z-index 下 Titlebar 因 DOM 顺序靠后而覆盖所有 Modal Overlay，
+			       打开新建/编辑/删除等 Dialog 时仍然保持窗口拖拽与最小化/关闭按钮
+			       可见、可点击，行为对齐 macOS / 1Password / Bitwarden Desktop。
+			    2) Titlebar 脱离 #root 的 zoom 子树，在 80%/110%/125%/150% 缩放档位
+			       下也按 100% 物理像素渲染 —— 与 Windows 11 系统窗口控件对齐，
+			       符合 "窗口控件不参与应用内部缩放" 的系统规范。
+			    3) AppShell grid 布局保持不变 —— Titlebar 组件内部留一个 36px 占位
+			       div 在原 grid 行位置，真正可见的标题栏内容通过 portal 渲染到
+			       这里并使用 `position: fixed; top: 0`，外部调用方零改动。
+
+			该节点同样不渲染任何可视内容，尺寸为 0；Titlebar 内容自带 fixed 定位。
+		-->
+		<div id="root"></div>
+		<div id="portal-root"></div>
+		<div id="titlebar-root"></div>
+		<script type="module" src="/src/main.tsx"></script>
+	</body>
+</html>

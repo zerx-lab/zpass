@@ -1,0 +1,120 @@
+version: "3"
+
+includes:
+  common: ./build/Taskfile.yml
+  windows: ./build/windows/Taskfile.yml
+  darwin: ./build/darwin/Taskfile.yml
+  linux: ./build/linux/Taskfile.yml
+  ios: ./build/ios/Taskfile.yml
+  android: ./build/android/Taskfile.yml
+
+vars:
+  APP_NAME: "ZPassDesktop"
+  BIN_DIR: "bin"
+  VITE_PORT: "{{.WAILS_VITE_PORT | default 9245}}"
+
+tasks:
+  build:
+    summary: Builds the application
+    cmds:
+      - task: "{{OS}}:build"
+
+  package:
+    summary: Packages a production build of the application
+    cmds:
+      - task: "{{OS}}:package"
+
+  run:
+    summary: Runs the application
+    cmds:
+      - task: "{{OS}}:run"
+
+  dev:
+    summary: Runs the application in development mode
+    cmds:
+      - wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}
+
+  setup:docker:
+    summary: Builds Docker image for cross-compilation (~800MB download)
+    cmds:
+      - task: common:setup:docker
+
+  build:server:
+    summary: Builds the application in server mode (no GUI, HTTP server only)
+    cmds:
+      - task: common:build:server
+
+  run:server:
+    summary: Runs the application in server mode
+    cmds:
+      - task: common:run:server
+
+  build:docker:
+    summary: Builds a Docker image for server mode deployment
+    cmds:
+      - task: common:build:docker
+
+  run:docker:
+    summary: Builds and runs the Docker image
+    cmds:
+      - task: common:run:docker
+
+  # ---------------------------------------------------------------------------
+  # SSH agent 守护进程的辅助任务
+  # ---------------------------------------------------------------------------
+
+  agent:build:
+    summary: Build the zpass-agent SSH daemon binary into bin/
+    desc: |
+      Compiles cmd/zpass-agent into bin/zpass-agent (.exe on Windows).
+      Set ZPASS_AGENT_BIN to this path or place beside the GUI binary
+      so SshAgentService can auto-launch it as a child process.
+      Windows builds use the GUI subsystem so Scheduled Task can run it without
+      showing a console window. Use `go run ./cmd/zpass-agent --debug` when you
+      need foreground logs during development.
+    cmds:
+      - cmd: go build -trimpath -ldflags="-s -w" -o bin/zpass-agent ./cmd/zpass-agent/
+        platforms: [linux, darwin]
+      - cmd: go build -trimpath -ldflags="-s -w -H windowsgui" -o bin/zpass-agent.exe ./cmd/zpass-agent/
+        platforms: [windows]
+
+  agent:run:
+    summary: Run the zpass-agent daemon in foreground (debug)
+    desc: |
+      Launches the agent with --debug so all slog output goes to stderr.
+      Useful for end-to-end testing without the GUI auto-supervisor:
+          # terminal 1: run GUI (will fail to locate agent if not built)
+          task dev
+          # terminal 2: run agent manually
+          task agent:run
+          # terminal 3: test SSH client
+          export SSH_AUTH_SOCK=$(go run ./cmd/zpass-agent --version >/dev/null; echo $XDG_RUNTIME_DIR/zpass/agent.sock)
+          ssh-add -L
+    deps: [agent:build]
+    cmds:
+      - cmd: ./bin/zpass-agent --debug
+        platforms: [linux, darwin]
+      - cmd: go run ./cmd/zpass-agent --debug
+        platforms: [windows]
+
+  agent:test:
+    summary: Run unit tests for SSH agent code (proto + GUI + daemon)
+    cmds:
+      - go test ./internal/sshagentproto/... ./cmd/zpass-agent/... .
+
+  nativehost:build:
+    summary: Build the browser native messaging host into bin/
+    desc: |
+      Compiles the stdio native messaging bridge used by extension.
+      The binary intentionally reuses the desktop VaultService and only serves
+      autofill data while the vault is unlocked or trusted-device unlock succeeds.
+    cmds:
+      - cmd: go build -tags nativehost -trimpath -ldflags="-s -w" -o bin/zpass-native-host .
+        platforms: [linux, darwin]
+      - cmd: go build -tags nativehost -trimpath -ldflags="-s -w" -o bin/zpass-native-host.exe .
+        platforms: [windows]
+
+  nativehost:test:
+    summary: Run native messaging host tests
+    cmds:
+      - go test -tags nativehost .

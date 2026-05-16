@@ -1,0 +1,140 @@
+---
+// ============================================================================
+// Changelog → Roadmap — 路线图列表
+// 前期开发期：产品尚未公开发布,本区块改为展示"我们正在做什么、
+// 大致何时完成"的路线图,而非已发布版本的更新日志。
+//
+// 设计要点：
+//   - 复用原 changelog 的视觉结构(左侧编号 + 时间窗口,右侧标签 + 描述)
+//   - 标签语义：plan(强调色,规划中) / build(绿色,进行中) / next(灰色,后续)
+//   - 不出现任何具体已发布版本号、SHA256 哈希、Sigstore 签名、Cure53/Trail of Bits 等
+//     已完成事项措辞,避免误导用户以为产品已上线
+//   - 内容暂为静态数据,后续可改为从 markdown / CMS 读取
+// ============================================================================
+
+import type { SiteStrings } from "../i18n/strings";
+
+export interface Props {
+	t: SiteStrings;
+}
+
+const { t } = Astro.props;
+
+// 路线图条目类型
+type RoadmapTag = "build" | "plan" | "next";
+interface RoadmapItem {
+	/** 阶段编号(M01 / M02 ...),代替已发布版本号 */
+	phase: string;
+	/** 时间窗口(季度粒度),刻意不写具体月份避免承诺 */
+	window: string;
+	tags: Array<[RoadmapTag, string]>;
+	notes: string;
+}
+
+// ZPass 公开发布前路线图
+// 注:阶段编号固定,时间窗口/标签/说明全部走 i18n,根据当前 locale 切换语言
+const items: RoadmapItem[] = [
+	{
+		phase: "M01",
+		window: t.roadmap_window_in_progress,
+		tags: [["build", t.roadmap_tag_building]],
+		notes: t.roadmap_m01_notes,
+	},
+	{
+		phase: "M02",
+		window: t.roadmap_window_in_progress,
+		tags: [["build", t.roadmap_tag_building]],
+		notes: t.roadmap_m02_notes,
+	},
+	{
+		phase: "M03",
+		window: t.roadmap_window_next,
+		tags: [["plan", t.roadmap_tag_planned]],
+		notes: t.roadmap_m03_notes,
+	},
+	{
+		phase: "M04",
+		window: t.roadmap_window_next,
+		tags: [["plan", t.roadmap_tag_planned]],
+		notes: t.roadmap_m04_notes,
+	},
+	{
+		phase: "M05",
+		window: t.roadmap_window_before_launch,
+		tags: [
+			["plan", t.roadmap_tag_planned],
+			["next", t.roadmap_tag_review],
+		],
+		notes: t.roadmap_m05_notes,
+	},
+	{
+		phase: "M06",
+		window: t.roadmap_window_later,
+		tags: [["next", t.roadmap_tag_later]],
+		notes: t.roadmap_m06_notes,
+	},
+];
+---
+
+<section class="section" id="changelog">
+	<div class="wrap">
+		<div class="sec-head reveal">
+			<div class="index mono">
+				<b>08</b> / {t.changelog_section_label}
+			</div>
+			<div>
+				<h2>{t.section_changelog}</h2>
+				<div class="sec-sub">{t.section_changelog_sub}</div>
+			</div>
+		</div>
+
+		<div class="changelog-list">
+			{
+				items.map((it) => (
+					<article class="change reveal">
+						<div class="ver mono">
+							<span>{it.phase}</span>
+							<span class="d">{it.window}</span>
+						</div>
+						<div class="notes">
+							{it.tags.map(([k, label]) => (
+								<span class={`tag mono ${k}`}>{label}</span>
+							))}
+							<p>{it.notes}</p>
+						</div>
+					</article>
+				))
+			}
+		</div>
+	</div>
+</section>
+
+<style>
+	/* ----- 路线图标签语义色覆盖(复用原 .tag 基础样式) -----
+	 * 注意：tokens.css 中只定义了 --text / --text-2 / --text-3 / --text-4，
+	 * 不存在 --text-1。之前误用 var(--text-1, #f5f5f3) 导致 light 主题下
+	 * 回退为近白色文字，在白底上完全不可见。这里统一使用真实存在的 token，
+	 * 并用淡背景增强 light 主题下的对比度与区分度。
+	 */
+
+	/* build: 强调色,代表正在构建中 */
+	.changelog-list .tag.build {
+		color: var(--accent);
+		border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+		background: color-mix(in srgb, var(--accent) 12%, transparent);
+	}
+
+	/* plan: 中性偏亮,代表已规划但尚未开工 */
+	.changelog-list .tag.plan {
+		color: var(--text);
+		border-color: color-mix(in srgb, var(--text) 25%, var(--line));
+		background: color-mix(in srgb, var(--text) 6%, transparent);
+	}
+
+	/* next: 暗淡灰,代表更靠后的阶段 */
+	.changelog-list .tag.next {
+		color: var(--text-2);
+		border-color: var(--line);
+		background: color-mix(in srgb, var(--text-3) 8%, transparent);
+	}
+</style>

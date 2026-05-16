@@ -1,0 +1,68 @@
+---
+// ============================================================================
+// Hero — 顶部主视觉
+// 包含：eyebrow、超大标题、副标题、单一 CTA(订阅发布通知)、可用平台行、
+// 统计数字行。
+//
+// 注：前期开发期版本——已移除原"查看源代码"副 CTA 与 hero-panel
+// 终端面板(curl 安装命令演示),因为产品尚未发布,无可下载二进制。
+// ============================================================================
+
+import type { SiteStrings, Locale } from "../i18n/strings";
+
+export interface Props {
+	t: SiteStrings;
+	locale: Locale;
+	/** 当前语言版本的首页基础路径,用于锚点链接 */
+	homeBase?: string;
+}
+
+const { t, locale, homeBase = locale === "zh" ? "/zh/" : "/" } = Astro.props;
+
+const stats = [
+	{ n: t.hero_stat_1_n, l: t.hero_stat_1_l },
+	{ n: t.hero_stat_2_n, l: t.hero_stat_2_l },
+	{ n: t.hero_stat_3_n, l: t.hero_stat_3_l },
+	{ n: t.hero_stat_4_n, l: t.hero_stat_4_l },
+];
+---
+
+<section class="hero" id="top">
+	<div class="hero-grid-bg"></div>
+	<div class="wrap" style="position: relative;">
+		<span class="cross" style="left: -5px; top: -5px;"></span>
+		<span class="cross" style="right: -5px; top: -5px;"></span>
+
+		<div class="eyebrow">
+			<span class="dot"></span>{t.hero_eyebrow}
+		</div>
+
+		<h1>
+			<span>{t.hero_title_1}</span>
+			{" "}
+			<span class="dim">{t.hero_title_2}</span>
+		</h1>
+
+		<p class="lede">{t.hero_sub}</p>
+
+		<div class="hero-cta">
+			<a href={`${homeBase}#download`} class="btn primary"
+				>{t.hero_cta_primary}</a
+			>
+		</div>
+
+		<div class="hero-availability mono">{t.hero_availability}</div>
+
+		<!-- ========== Hero 统计数字行 ========== -->
+		<div class="hero-stats mono">
+			{
+				stats.map((s) => (
+					<div>
+						<div class="n">{s.n}</div>
+						<div class="l">{s.l}</div>
+					</div>
+				))
+			}
+		</div>
+	</div>
+</section>

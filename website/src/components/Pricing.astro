@@ -1,0 +1,75 @@
+---
+// ============================================================================
+// Pricing — 定价方案
+// 4 档：Free(免费) / Personal / Family / Team
+// 居中的 Personal 档使用 .featured 高亮样式(带 accent 边框 + 阴影)。
+// 数据来自 i18n strings 中的 PriceTier 结构。
+//
+// 注:前期开发期所有 CTA 均链接到 #download 邮件订阅区,而非真实下单/下载。
+// ============================================================================
+
+import type { SiteStrings, PriceTier } from "../i18n/strings";
+
+export interface Props {
+	t: SiteStrings;
+}
+
+const { t } = Astro.props;
+
+// 4 档定价数据，按从入门到企业的顺序排列
+// featured 标记控制高亮样式，默认高亮 Personal（最常被选择的方案）
+const tiers: Array<{ tier: PriceTier; featured?: boolean; contact?: boolean }> = [
+	{ tier: t.pricing_solo },
+	{ tier: t.pricing_personal, featured: true },
+	{ tier: t.pricing_family },
+	{ tier: t.pricing_team, contact: true },
+];
+---
+
+<section class="section" id="pricing">
+	<div class="wrap">
+		<div class="sec-head reveal">
+			<div class="index mono"><b>07</b> / {t.section_pricing}</div>
+			<div>
+				<h2>{t.section_pricing}</h2>
+				<div class="sec-sub">{t.section_pricing_sub}</div>
+			</div>
+		</div>
+
+		<div class="pricing-grid">
+			{
+				tiers.map(({ tier, featured, contact }) => (
+					<div
+						class={"price-card reveal" + (featured ? " featured" : "")}
+					>
+						<div class="name mono">{tier.name}</div>
+						<div class="price">{tier.price}</div>
+						<div class="unit">{tier.unit}</div>
+
+						<ul>
+							{tier.bullets.map((b) => (
+								<li>{b}</li>
+							))}
+						</ul>
+
+						{contact ? (
+							<button
+								class="btn"
+								data-contact-open="business"
+							>
+								{tier.cta} <span class="arrow">→</span>
+							</button>
+						) : (
+							<a
+								href="#download"
+								class={"btn" + (featured ? " primary" : "")}
+							>
+								{tier.cta} <span class="arrow">→</span>
+							</a>
+						)}
+					</div>
+				))
+			}
+		</div>
+	</div>
+</section>

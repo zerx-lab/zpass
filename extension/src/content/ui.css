@@ -1,0 +1,226 @@
+.zpass-fill-button {
+  position: absolute;
+  z-index: 2147483646;
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 7px;
+  background: #101114;
+  color: #f7f7f8;
+  font: 700 13px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.24);
+  cursor: pointer;
+}
+
+.zpass-menu,
+.zpass-notice {
+  position: absolute;
+  z-index: 2147483647;
+  width: 280px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  background: #101114;
+  color: #f7f7f8;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.32);
+  font: 13px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  overflow: hidden;
+}
+
+.zpass-menu-item {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.zpass-menu-item:hover,
+.zpass-menu-item:focus {
+  background: rgba(255, 255, 255, 0.08);
+  outline: none;
+}
+
+.zpass-menu-item strong,
+.zpass-menu-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zpass-menu-item span {
+  color: rgba(247, 247, 248, 0.68);
+}
+
+.zpass-notice {
+  padding: 10px 12px;
+}
+
+.zpass-toast {
+  position: fixed;
+  z-index: 2147483647;
+  right: 18px;
+  top: 18px;
+  display: grid;
+  gap: 3px;
+  width: min(320px, calc(100vw - 36px));
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  background: #101114;
+  color: #f7f7f8;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.32);
+  font: 13px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.zpass-toast strong,
+.zpass-toast span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zpass-toast span {
+  color: rgba(247, 247, 248, 0.68);
+}
+
+.zpass-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.34);
+}
+
+.zpass-passkey-dialog {
+  display: grid;
+  gap: 14px;
+  width: min(360px, calc(100vw - 40px));
+  padding: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  background: #101114;
+  color: #f7f7f8;
+  box-shadow: 0 22px 72px rgba(0, 0, 0, 0.38);
+  font: 13px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.zpass-passkey-dialog h2,
+.zpass-passkey-dialog p {
+  margin: 0;
+}
+
+.zpass-passkey-dialog h2 {
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+.zpass-passkey-dialog p {
+  color: rgba(247, 247, 248, 0.68);
+}
+
+.zpass-passkey-meta {
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.zpass-passkey-meta strong,
+.zpass-passkey-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zpass-passkey-meta span {
+  color: rgba(247, 247, 248, 0.62);
+}
+
+.zpass-passkey-list {
+  display: grid;
+  gap: 8px;
+  max-height: min(280px, 42vh);
+  overflow: auto;
+}
+
+.zpass-passkey-row,
+.zpass-passkey-option {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.05);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.zpass-passkey-option {
+  cursor: pointer;
+}
+
+.zpass-passkey-option:hover,
+.zpass-passkey-option:focus {
+  background: rgba(255, 255, 255, 0.11);
+  outline: none;
+}
+
+.zpass-passkey-row strong,
+.zpass-passkey-row span,
+.zpass-passkey-option strong,
+.zpass-passkey-option span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zpass-passkey-row span,
+.zpass-passkey-option span {
+  color: rgba(247, 247, 248, 0.62);
+}
+
+.zpass-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.zpass-dialog-actions button {
+  min-width: 74px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 7px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f7f7f8;
+  font: inherit;
+  cursor: pointer;
+}
+
+.zpass-dialog-actions button:hover,
+.zpass-dialog-actions button:focus {
+  background: rgba(255, 255, 255, 0.11);
+  outline: none;
+}
+
+.zpass-dialog-actions .zpass-primary {
+  border-color: rgba(247, 247, 248, 0.28);
+  background: #f7f7f8;
+  color: #101114;
+}
+
+.zpass-dialog-actions .zpass-primary:hover,
+.zpass-dialog-actions .zpass-primary:focus {
+  background: #e8e8ea;
+}

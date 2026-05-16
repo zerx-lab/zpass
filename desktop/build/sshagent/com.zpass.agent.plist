@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ZPass SSH Agent —— macOS LaunchAgent
+
+  安装：
+    1. 把可执行文件放到 /Applications/ZPass.app/Contents/MacOS/zpass-agent
+       （或修改下方 ProgramArguments 的绝对路径）
+    2. 把本文件改名为 com.zpass.agent.plist 放到 ~/Library/LaunchAgents/
+    3. launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.zpass.agent.plist
+    4. launchctl enable gui/$(id -u)/com.zpass.agent
+
+  类似 systemd 的 socket activation：把 socket fd 通过环境变量传给子进程，
+  agent 用 launch_activate_socket 拿到。但当前 zpass-agent 不实现这个机制
+  （TODO v3+），所以暂时用 RunAtLoad + KeepAlive 让 launchd 自动启动 +
+  保持运行。
+
+  让 ssh 客户端用这个 socket：
+    export SSH_AUTH_SOCK="$HOME/Library/Application Support/ZPass/agent.sock"
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.zpass.agent</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Applications/ZPass.app/Contents/MacOS/zpass-agent</string>
+    </array>
+
+    <!-- 日志走 user log（log show --predicate 'process == "zpass-agent"'）-->
+    <key>StandardErrorPath</key>
+    <string>/tmp/zpass-agent.err.log</string>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/zpass-agent.out.log</string>
+
+    <!-- 登录时自动启动 -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- 进程崩溃后自动重启 -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <!-- 限制启动频率，避免崩溃风暴 -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!-- 进程优先级与资源 -->
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>256</integer>
+    </dict>
+
+    <!--
+      TODO v3+：用 Sockets key 启用 socket activation：
+
+      <key>Sockets</key>
+      <dict>
+          <key>SshAgent</key>
+          <dict>
+              <key>SockPathName</key>
+              <string>/Users/USER/Library/Application Support/ZPass/agent.sock</string>
+              <key>SockPathMode</key>
+              <integer>384</integer>
+          </dict>
+      </dict>
+
+      然后 zpass-agent 用 launch_activate_socket("SshAgent") 拿 listener fd。
+      RunAtLoad 改 false，让 launchd 仅在 socket 收到连接时启动 agent。
+    -->
+</dict>
+</plist>

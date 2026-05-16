@@ -1,0 +1,35 @@
+# ZPass SSH Agent —— systemd socket activation
+#
+# 与 zpass-agent.service 配合使用。安装方式见 zpass-agent.service 头部注释。
+#
+# socket activation 的好处：
+#   - agent 进程仅在第一个 SSH 客户端 connect 时启动
+#   - 空闲时 zpass-agent 进程不存在 → 0 MB 内存占用
+#   - 进程崩溃后 systemd 自动重启，socket 文件不会残留
+#
+# 让 ssh 客户端用这个 socket：
+#   export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/zpass/agent.sock"
+
+[Unit]
+Description=ZPass SSH agent socket
+Documentation=https://github.com/zerx-lab/zpass
+
+[Socket]
+# 路径与 internal/sshagentproto.AgentSocketPath() 的 Linux 解析一致：
+# $XDG_RUNTIME_DIR/zpass/agent.sock (通常 /run/user/UID/zpass/agent.sock)
+ListenStream=%t/zpass/agent.sock
+
+# 0600 权限：仅当前用户可读写
+SocketMode=0600
+
+# 父目录如果不存在则创建（systemd 247+ 支持）
+DirectoryMode=0700
+
+# 进程优雅退出后自动清理 socket 文件，避免下次启动残留
+RemoveOnStop=yes
+
+# 不需要 Accept=yes（zpass-agent 自己用 unix listener 接管）
+Accept=no
+
+[Install]
+WantedBy=sockets.target

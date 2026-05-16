@@ -1,0 +1,599 @@
+---
+// ============================================================================
+// ContactDialog — 联系我们对话框
+//
+// 用法：
+//   <ContactDialog t={t} />
+//   在页面任意位置放置一次，触发器通过 data-contact-open 属性绑定：
+//   <button data-contact-open>联系我们</button>
+//
+// 功能：
+//   - 模态对话框：backdrop 点击关闭，Escape 关闭，焦点陷阱
+//   - 表单字段：姓名 / 邮箱 / 类型（select）/ 消息（textarea）
+//   - 前端校验 + 提交状态（pending → success / error）
+//   - POST /api/contact → { ok: boolean, error?: string }
+//   - 纯原生 JS，无框架依赖
+//   - 与 token.css 设计系统对齐：变量驱动，尊重 dark/light 主题
+// ============================================================================
+
+import type { SiteStrings } from "../i18n/strings";
+
+export interface Props {
+  t: SiteStrings;
+  /** 提交端点，默认 /api/contact */
+  endpoint?: string;
+}
+
+const { t, endpoint = "/api/contact" } = Astro.props;
+---
+
+<!-- 对话框 overlay + panel -->
+<div
+  id="contact-dialog"
+  class="cd-overlay"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="cd-title"
+  aria-hidden="true"
+  data-contact-dialog
+>
+  <div class="cd-panel" data-contact-panel>
+    <!-- 头部 -->
+    <div class="cd-head">
+      <span id="cd-title" class="cd-title">{t.contact_title}</span>
+      <button
+        class="cd-close mono"
+        aria-label={t.contact_close}
+        data-contact-close
+      >✕</button>
+    </div>
+
+    <!-- 表单 -->
+    <form
+      class="cd-form"
+      novalidate
+      data-contact-form
+      data-contact-endpoint={endpoint}
+    >
+      <!-- 姓名 + 邮箱并排（宽屏） -->
+      <div class="cd-row">
+        <div class="cd-field">
+          <label class="cd-label" for="cd-name">{t.contact_name_label}</label>
+          <input
+            id="cd-name"
+            class="cd-input"
+            type="text"
+            name="name"
+            autocomplete="name"
+            placeholder={t.contact_name_placeholder}
+            data-cd-name
+          />
+          <span class="cd-err" data-cd-err-name aria-live="polite"></span>
+        </div>
+        <div class="cd-field">
+          <label class="cd-label" for="cd-email">{t.contact_email_label}</label>
+          <input
+            id="cd-email"
+            class="cd-input"
+            type="email"
+            name="email"
+            autocomplete="email"
+            placeholder={t.contact_email_placeholder}
+            data-cd-email
+          />
+          <span class="cd-err" data-cd-err-email aria-live="polite"></span>
+        </div>
+      </div>
+
+      <!-- 类型 -->
+      <div class="cd-field">
+        <label class="cd-label" for="cd-type">{t.contact_type_label}</label>
+        <select id="cd-type" class="cd-select" name="type" data-cd-type>
+          <option value="general">{t.contact_type_general}</option>
+          <option value="business">{t.contact_type_business}</option>
+          <option value="security">{t.contact_type_security}</option>
+          <option value="press">{t.contact_type_press}</option>
+        </select>
+      </div>
+
+      <!-- 消息 -->
+      <div class="cd-field">
+        <label class="cd-label" for="cd-message">{t.contact_message_label}</label>
+        <textarea
+          id="cd-message"
+          class="cd-textarea"
+          name="message"
+          rows="5"
+          placeholder={t.contact_message_placeholder}
+          maxlength="2000"
+          data-cd-message
+        ></textarea>
+        <span class="cd-err" data-cd-err-message aria-live="polite"></span>
+      </div>
+
+      <!-- 底部：状态 + 提交 -->
+      <div class="cd-foot">
+        <span
+          class="cd-status mono"
+          data-cd-status
+          role="status"
+          aria-live="polite"
+        ></span>
+        <button type="submit" class="btn primary cd-submit" data-cd-submit>
+          {t.contact_submit} <span class="arrow">→</span>
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<style>
+  /* ---- overlay ---- */
+  .cd-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px;
+
+    /* 隐藏状态 */
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition:
+      opacity 0.2s ease,
+      visibility 0.2s ease;
+  }
+
+  .cd-overlay[aria-hidden="false"] {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+  }
+
+  /* ---- panel ---- */
+  .cd-panel {
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    width: 100%;
+    max-width: 560px;
+    max-height: calc(100dvh - 48px);
+    overflow-y: auto;
+    box-shadow: var(--shadow-strong);
+
+    transform: translateY(12px) scale(0.98);
+    transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .cd-overlay[aria-hidden="false"] .cd-panel {
+    transform: translateY(0) scale(1);
+  }
+
+  /* ---- 头部 ---- */
+  .cd-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px 0;
+  }
+
+  .cd-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.01em;
+  }
+
+  .cd-close {
+    background: none;
+    border: none;
+    padding: 4px 6px;
+    color: var(--text-3);
+    font-size: 13px;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    line-height: 1;
+    transition: color 0.15s, background 0.15s;
+  }
+
+  .cd-close:hover {
+    color: var(--text);
+    background: var(--bg-hover);
+  }
+
+  /* ---- 表单 ---- */
+  .cd-form {
+    padding: 20px 24px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  /* 姓名+邮箱并排 */
+  .cd-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  @media (max-width: 480px) {
+    .cd-row {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .cd-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .cd-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-2);
+    letter-spacing: 0.01em;
+  }
+
+  /* 输入框 / 下拉 / 文本域共用基础样式 */
+  .cd-input,
+  .cd-select,
+  .cd-textarea {
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    padding: 9px 12px;
+    width: 100%;
+    box-sizing: border-box;
+    transition:
+      border-color 0.15s,
+      box-shadow 0.15s;
+    outline: none;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  .cd-select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%236e6e73' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 32px;
+    cursor: pointer;
+  }
+
+  .cd-textarea {
+    resize: vertical;
+    min-height: 110px;
+    line-height: 1.55;
+  }
+
+  .cd-input::placeholder,
+  .cd-textarea::placeholder {
+    color: var(--text-3);
+  }
+
+  .cd-input:focus,
+  .cd-select:focus,
+  .cd-textarea:focus {
+    border-color: var(--text-3);
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.04);
+  }
+
+  /* 错误态 */
+  .cd-input.invalid,
+  .cd-textarea.invalid {
+    border-color: var(--danger);
+    box-shadow: 0 0 0 3px rgba(229, 90, 74, 0.12);
+  }
+
+  .cd-err {
+    font-size: 11px;
+    color: var(--danger);
+    min-height: 14px;
+    line-height: 1.4;
+  }
+
+  /* ---- 底部 ---- */
+  .cd-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 4px;
+  }
+
+  .cd-status {
+    font-size: 12px;
+    color: var(--text-3);
+    flex: 1 1 0;
+  }
+
+  .cd-status.ok {
+    color: var(--ok);
+  }
+
+  .cd-status.err {
+    color: var(--danger);
+  }
+
+  /* 成功后隐藏提交按钮 */
+  .cd-submit[data-hidden] {
+    display: none;
+  }
+
+  /* light 主题适配 */
+  [data-theme="light"] .cd-input,
+  [data-theme="light"] .cd-select,
+  [data-theme="light"] .cd-textarea {
+    background: #fff;
+    border-color: #d8d8dc;
+  }
+
+  [data-theme="light"] .cd-input:focus,
+  [data-theme="light"] .cd-select:focus,
+  [data-theme="light"] .cd-textarea:focus {
+    box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.06);
+  }
+</style>
+
+<script
+  is:inline
+  data-astro-rerun
+  define:vars={{
+    invalidNameMsg: t.contact_invalid_name,
+    invalidEmailMsg: t.contact_invalid_email,
+    invalidMessageMsg: t.contact_invalid_message,
+    pendingMsg: t.contact_pending,
+    successMsg: t.contact_success,
+    errorMsg: t.contact_error,
+  }}
+>
+  (function () {
+    var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    // 检测语言
+    function detectLang() {
+      var htmlLang = (document.documentElement.lang || "").toLowerCase();
+      if (htmlLang.indexOf("zh") === 0) return "zh";
+      var navLang = ((navigator.language || "") + "").toLowerCase();
+      if (navLang.indexOf("zh") === 0) return "zh";
+      return "en";
+    }
+
+    // ---- DOM refs ----
+    var overlay = document.querySelector("[data-contact-dialog]");
+    var panel = overlay && overlay.querySelector("[data-contact-panel]");
+    var form = overlay && overlay.querySelector("[data-contact-form]");
+
+    if (!overlay || !form) return;
+
+    var nameInput = form.querySelector("[data-cd-name]");
+    var emailInput = form.querySelector("[data-cd-email]");
+    var typeSelect = form.querySelector("[data-cd-type]");
+    var messageInput = form.querySelector("[data-cd-message]");
+    var submitBtn = form.querySelector("[data-cd-submit]");
+    var statusEl = form.querySelector("[data-cd-status]");
+    var errName = form.querySelector("[data-cd-err-name]");
+    var errEmail = form.querySelector("[data-cd-err-email]");
+    var errMessage = form.querySelector("[data-cd-err-message]");
+
+    // ---- 焦点陷阱 ----
+    var focusable =
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+    function trapFocus(e) {
+      if (!overlay || overlay.getAttribute("aria-hidden") === "true") return;
+      var els = Array.from(overlay.querySelectorAll(focusable));
+      if (!els.length) return;
+      var first = els[0];
+      var last = els[els.length - 1];
+      if (e.key === "Tab") {
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
+    }
+
+    // ---- 开关 ----
+    var prevFocus = null;
+    // 打开后短暂窗口内抑制 overlay 背景点击关闭，避免移动端
+    // 同一次 tap 触发"打开"后合成 click 又落到新显示的 overlay 上立即关闭
+    var suppressBackdropUntil = 0;
+
+    function openDialog() {
+      prevFocus = document.activeElement;
+      overlay.setAttribute("aria-hidden", "false");
+      document.body.style.overflow = "hidden";
+      suppressBackdropUntil = Date.now() + 350;
+      // 聚焦第一个可用输入
+      setTimeout(function () {
+        var first = overlay.querySelector(focusable);
+        if (first) first.focus();
+      }, 50);
+      document.addEventListener("keydown", handleKey);
+    }
+
+    function closeDialog() {
+      overlay.setAttribute("aria-hidden", "true");
+      document.body.style.overflow = "";
+      document.removeEventListener("keydown", handleKey);
+      if (prevFocus && prevFocus.focus) prevFocus.focus();
+    }
+
+    function handleKey(e) {
+      if (e.key === "Escape") closeDialog();
+      trapFocus(e);
+    }
+
+    // overlay 背景点击关闭
+    // 只在 e.target === overlay 自身时关闭（避免 panel 内部元素冒泡、
+    // 以及移动端 tap 穿透导致 e.target 是其他元素时误关）
+    overlay.addEventListener("click", function (e) {
+      if (Date.now() < suppressBackdropUntil) return;
+      if (e.target === overlay) closeDialog();
+    });
+
+    // 关闭按钮
+    overlay.querySelector("[data-contact-close]").addEventListener("click", closeDialog);
+
+    // 把"打开对话框"的动作暴露到 window，供全局 listener 调用。
+    // data-astro-rerun 会让此脚本在每次 SPA 导航后重跑，
+    // 每次重跑都会用最新的函数引用覆盖 window.__zpassContactOpen，
+    // 确保全局 listener（只挂一次）调用的永远是最新 DOM 对应的 open 动作。
+    window.__zpassContactOpen = function (presetType) {
+      resetForm();
+      if (presetType && typeSelect) {
+        var opt = typeSelect.querySelector('option[value="' + presetType + '"]');
+        if (opt) typeSelect.value = presetType;
+      }
+      openDialog();
+    };
+
+    // 所有带 data-contact-open 属性的元素都可触发
+    // document 级 click 监听全局只挂一次（避免 SPA 重跑后累积）
+    if (!window.__zpassContactOpenBound) {
+      window.__zpassContactOpenBound = true;
+      document.addEventListener("click", function (e) {
+        if (!e.target || !e.target.closest) return;
+        var trigger = e.target.closest("[data-contact-open]");
+        if (!trigger) return;
+        e.preventDefault();
+        var presetType = trigger.getAttribute("data-contact-open");
+        // 调用最新一次脚本执行时定义的 open 动作
+        if (typeof window.__zpassContactOpen === "function") {
+          window.__zpassContactOpen(presetType);
+        }
+      });
+    }
+
+    // ---- 工具函数 ----
+    function setErr(el, msg) {
+      if (el) el.textContent = msg || "";
+    }
+
+    function clearErrs() {
+      setErr(errName, "");
+      setErr(errEmail, "");
+      setErr(errMessage, "");
+      if (nameInput) nameInput.classList.remove("invalid");
+      if (emailInput) emailInput.classList.remove("invalid");
+      if (messageInput) messageInput.classList.remove("invalid");
+    }
+
+    function setStatus(kind, text) {
+      if (!statusEl) return;
+      statusEl.classList.remove("ok", "err");
+      if (kind === "ok") statusEl.classList.add("ok");
+      if (kind === "err") statusEl.classList.add("err");
+      statusEl.textContent = text || "";
+    }
+
+    function resetForm() {
+      if (form) form.reset();
+      clearErrs();
+      setStatus("", "");
+      if (submitBtn) submitBtn.removeAttribute("data-hidden");
+      if (submitBtn) submitBtn.removeAttribute("disabled");
+    }
+
+    // 实时清除错误
+    [nameInput, emailInput, messageInput].forEach(function (el) {
+      if (!el) return;
+      el.addEventListener("input", function () {
+        el.classList.remove("invalid");
+        // 清除对应错误提示
+        if (el === nameInput) setErr(errName, "");
+        if (el === emailInput) setErr(errEmail, "");
+        if (el === messageInput) setErr(errMessage, "");
+      });
+    });
+
+    // ---- 提交 ----
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      clearErrs();
+
+      var name = (nameInput ? nameInput.value : "").trim();
+      var email = (emailInput ? emailInput.value : "").trim();
+      var type = typeSelect ? typeSelect.value : "general";
+      var message = (messageInput ? messageInput.value : "").trim();
+
+      // 前端校验
+      var valid = true;
+      if (!name) {
+        setErr(errName, invalidNameMsg);
+        if (nameInput) nameInput.classList.add("invalid");
+        valid = false;
+      }
+      if (!EMAIL_RE.test(email)) {
+        setErr(errEmail, invalidEmailMsg);
+        if (emailInput) emailInput.classList.add("invalid");
+        valid = false;
+      }
+      if (!message || message.length > 2000) {
+        setErr(errMessage, invalidMessageMsg);
+        if (messageInput) messageInput.classList.add("invalid");
+        valid = false;
+      }
+      if (!valid) return;
+
+      // 禁用提交，显示 pending
+      if (submitBtn) submitBtn.setAttribute("disabled", "true");
+      setStatus("", pendingMsg);
+
+      var endpoint = form.getAttribute("data-contact-endpoint") || "/api/contact";
+
+      (async function () {
+        var r = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({
+            name: name,
+            email: email,
+            type: type,
+            message: message,
+            lang: detectLang(),
+          }),
+        });
+        var j;
+        try {
+          j = await r.json();
+        } catch (_) {
+          j = {};
+        }
+        if (r.ok && j && j.ok === true) {
+          setStatus("ok", successMsg);
+          if (submitBtn) submitBtn.setAttribute("data-hidden", "true");
+          if (form) form.reset();
+        } else {
+          setStatus("err", errorMsg);
+          if (submitBtn) submitBtn.removeAttribute("disabled");
+        }
+      })().catch(function () {
+        setStatus("err", errorMsg);
+        if (submitBtn) submitBtn.removeAttribute("disabled");
+      });
+    });
+  })();
+</script>

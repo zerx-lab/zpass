@@ -1,0 +1,144 @@
+---
+// ============================================================================
+// Features — 6 个特性的网格
+// 与设计稿一致：3 列网格，每个 cell 有编号、标题、描述、右下小图标。
+// 移植自 ZPassDesign/src/site/site-app.jsx 的 Features 与 FeatIcon 组件。
+// ============================================================================
+
+import type { SiteStrings } from "../i18n/strings";
+
+export interface Props {
+	t: SiteStrings;
+}
+
+const { t } = Astro.props;
+
+// 6 个特性：[icon kind, title, body]
+const items: Array<[string, string, string]> = [
+	["enc", t.f1_title, t.f1_body],
+	["totp", t.f2_title, t.f2_body],
+	["key", t.f3_title, t.f3_body],
+	["team", t.f4_title, t.f4_body],
+	["breach", t.f5_title, t.f5_body],
+	["self", t.f6_title, t.f6_body],
+];
+---
+
+<section class="section" id="features">
+	<div class="wrap">
+		<div class="sec-head reveal">
+			<div class="index mono"><b>01</b> / {t.section_features}</div>
+			<div>
+				<h2>{t.section_features}</h2>
+				<div class="sec-sub">{t.section_features_sub}</div>
+			</div>
+		</div>
+
+		<div class="features">
+			{
+				items.map(([kind, title, body], i) => (
+					<div class="feature reveal">
+						<div class="num">F.0{i + 1}</div>
+						<h3>{title}</h3>
+						<p>{body}</p>
+						<div class="icon" aria-hidden="true">
+							{kind === "enc" && (
+								<svg
+									width="16"
+									height="16"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="1.4"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+								>
+									<rect x="5" y="11" width="14" height="9" rx="2" />
+									<path d="M8 11V7a4 4 0 0 1 8 0v4" />
+								</svg>
+							)}
+							{kind === "totp" && (
+								<svg
+									width="16"
+									height="16"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="1.4"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+								>
+									<circle cx="12" cy="12" r="8" />
+									<path d="M12 8v4l3 2" />
+								</svg>
+							)}
+							{kind === "key" && (
+								<svg
+									width="16"
+									height="16"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="1.4"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+								>
+									<circle cx="8" cy="12" r="4" />
+									<path d="M12 12h10M18 12v3M22 12v3" />
+								</svg>
+							)}
+							{kind === "team" && (
+								<svg
+									width="16"
+									height="16"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="1.4"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+								>
+									<circle cx="9" cy="10" r="3" />
+									<circle cx="17" cy="11" r="2.5" />
+									<path d="M3 20c0-3 3-5 6-5s6 2 6 5M14 20c0-2 2-3.5 4-3.5s4 1.5 4 3.5" />
+								</svg>
+							)}
+							{kind === "breach" && (
+								<svg
+									width="16"
+									height="16"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="1.4"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+								>
+									<path d="M3 18l9-14 9 14H3z" />
+									<path d="M12 10v4M12 16v.5" />
+								</svg>
+							)}
+							{kind === "self" && (
+								<svg
+									width="16"
+									height="16"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="1.4"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+								>
+									<rect x="3" y="5" width="18" height="6" rx="1" />
+									<rect x="3" y="13" width="18" height="6" rx="1" />
+									<circle cx="7" cy="8" r="0.8" fill="currentColor" />
+									<circle cx="7" cy="16" r="0.8" fill="currentColor" />
+								</svg>
+							)}
+						</div>
+					</div>
+				))
+			}
+		</div>
+	</div>
+</section>

@@ -1,0 +1,537 @@
+/* ============================================================
+ * ZPass Desktop — 全局样式入口
+ * ------------------------------------------------------------
+ * 加载顺序：
+ *   1. Geist / Geist Mono 字体（@fontsource 自托管）
+ *   2. Design Tokens（CSS 变量，同步自 ZPassDesign/src/tokens.css）
+ *   3. Tailwind v4 @import + @theme 映射（把 token 暴露为 utility）
+ *   4. 基础全局规则（滚动条、选区、聚焦环）
+ * ============================================================ */
+
+/* 1. Geist 字体 —— AGENTS.md 规定唯二字体
+ *
+ * 实际使用的字重经全量 grep 仅四档：normal(400) / medium(500) / semibold(600)。
+ * 历史版本曾 import 300 / 700，但代码里没有任何 font-light / font-bold 组合
+ * 在用 —— 删掉减少首屏 ~2 个 woff2 请求 + ~80KB 字体文件。
+ */
+@import "@fontsource/geist-sans/400.css";
+@import "@fontsource/geist-sans/500.css";
+@import "@fontsource/geist-sans/600.css";
+@import "@fontsource/geist-mono/400.css";
+@import "@fontsource/geist-mono/500.css";
+@import "@fontsource/geist-mono/600.css";
+
+/* 2. Design Tokens */
+@import "./tokens.css";
+
+/* 3. Tailwind v4 —— CSS-first 配置，无 tailwind.config.js */
+@import "tailwindcss";
+
+/* Tailwind v4 @theme —— 把 ZPass token 暴露成 Tailwind utility
+ * 用法：bg-bg / text-text-2 / border-line / rounded-md / font-mono 等 */
+@theme {
+	/* 字体 */
+	--font-sans:
+		"Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+	--font-mono:
+		"Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+	/* 背景层级 */
+	--color-bg: var(--bg);
+	--color-bg-elev: var(--bg-elev);
+	--color-bg-elev-2: var(--bg-elev-2);
+	--color-bg-hover: var(--bg-hover);
+	--color-bg-active: var(--bg-active);
+
+	/* 线条 */
+	--color-line: var(--line);
+	--color-line-soft: var(--line-soft);
+
+	/* 文本层级 */
+	--color-text: var(--text);
+	--color-text-2: var(--text-2);
+	--color-text-3: var(--text-3);
+	--color-text-4: var(--text-4);
+
+	/* 强调色 */
+	--color-accent: var(--accent);
+	--color-accent-ink: var(--accent-ink);
+
+	/* 语义色 */
+	--color-danger: var(--danger);
+	--color-warn: var(--warn);
+	--color-ok: var(--ok);
+	--color-info: var(--info);
+
+	/* 圆角 —— AGENTS 规定 5 / 7 / 10 / 14 px */
+	--radius-sm: 5px;
+	--radius-md: 7px;
+	--radius-lg: 10px;
+	--radius-xl: 14px;
+
+	/* 阴影 */
+	--shadow-sm: var(--shadow-sm);
+	--shadow-md: var(--shadow-md);
+	--shadow-lg: var(--shadow-lg);
+}
+
+/* 4. 基础全局规则 */
+* {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	margin: 0;
+	padding: 0;
+	height: 100%;
+}
+
+body {
+	font-family: var(--font-sans);
+	font-size: 14px;
+	line-height: 1.5;
+	color: var(--text);
+	background: var(--bg);
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	/* 2026 排版基线：
+	 * - geometricPrecision 让 zoom 缩放档位下文字不再发虚（VS Code/Linear 同款）
+	 * - Geist 的 OpenType 特性：ss01 现代 a/g 字形，cv11 直角 l，calt 上下文连字
+	 *   这是让产品观感跳到 Linear/Vercel 档次的关键一行
+	 */
+	text-rendering: geometricPrecision;
+	font-feature-settings:
+		"ss01" on,
+		"cv11" on,
+		"calt" on;
+	font-synthesis: none;
+	-webkit-text-size-adjust: 100%;
+	/* 桌面客户端不需要整页 body 滚动，交给 #root 或内部区域。
+	 * zoom 宿主是 #root（不是 body），所以 body 本身永远不会被缩放
+	 * 内容撑大，可以安全地一律 hidden，避免任何像素级舍入造成的
+	 * 误差滚动条在 body 上出现。
+	 */
+	overflow: hidden;
+}
+
+/* 用户启用自定义正文字体时（ThemeSync 在 <html> 上写 data-custom-sans）重置
+ * Geist 专属的 OpenType 特性开关。`ss01` / `cv11` 是 Geist 自己的
+ * stylistic set / character variant tag，其他字体（中文 / Maple Mono /
+ * 像素字体等）要么没定义，要么映射到完全不同的字形，会造成
+ * 意料外的字形跳变。`calt`（contextual alternates）多数字体都启用，留着。
+ * 同时解除 `font-synthesis: none`，允许浏览器在用户字体缺某个字重 /
+ * 斜体时合成，避免「选中 Medium 字体但加粗处看起来不加粗」的千状。
+ * applyUserFont 已在动态 @font-face 里用 weight 1 999 通配绑定 face，
+ * 这里的 font-synthesis 是双保险。
+ */
+html[data-custom-sans] body {
+	font-feature-settings: "calt" on;
+	font-synthesis: weight style;
+}
+
+/* #root —— React 应用根节点，同时承载 inline `zoom: <pct>%`
+ * （由 ThemeSync 写入，详见 src/app/ThemeSync.tsx 注释）。
+ *
+ * overflow 策略：
+ *   - 默认 `hidden` —— 100% 缩放下 AppShell (`h-full overflow-hidden`)
+ *     自然不会溢出，保持桌面客户端"无整页滚动"的惯例。
+ *   - 非 100% 缩放（由 <html data-scale> 标记）切到 `auto`：放大档位
+ *     下，内容（Sidebar 248 + 主区 max-w-180 + padding 等固定 px）
+ *     按 zoom 倍数放大后可能超出逻辑视口，此时允许 #root 出现滚动
+ *     条作为保底（类似浏览器 Ctrl+= 放大出现滚动条的行为），
+ *     确保用户能滚动访问被缩放挤出可视区的内容。
+ *   - 由于 #root 位于 zoom 子树顶端（zoom 作用在自己身上），它的
+ *     100% 尺寸相对 body 是物理视口尺寸；其内部子元素的 100%
+ *     才基于"视口 / zoom"计算。滚动条出现时宿主是 #root，不会
+ *     污染 body / <html>，避免 Titlebar 等固定行被滚走。
+ */
+#root {
+	height: 100%;
+	overflow: hidden;
+	isolation: isolate;
+}
+
+html[data-scale]:not([data-scale="100"]) #root {
+	overflow: auto;
+}
+
+/* 基础元素 reset ——————————————————————————————————————————————
+ *
+ * 包进 @layer base 至关重要：
+ *   - Tailwind v4 的 utilities 默认在 `utilities` layer 中，优先级
+ *     比 `base` layer 高（CSS Cascade Layers 规则）
+ *   - 如果这里的 button {} 不放进 layer，它就处于"未分层"区，
+ *     在级联中会**覆盖** layer 内的 utilities
+ *   - 历史教训：button { background: transparent; border: none; padding: 0 }
+ *     之前直接写在文件级，导致 DialogButton 的 .bg-(--warn) /
+ *     .border-2 / .px-4 全被覆盖，按钮看起来"没底色没边框没内边距"
+ *
+ * 把字体继承 / button reset / a reset 三个相邻 reset 块统一放进
+ * @layer base，让 Tailwind utility 始终能压过这些默认值。
+ */
+@layer base {
+	button,
+	input,
+	select,
+	textarea {
+		font-family: inherit;
+		font-size: inherit;
+		color: inherit;
+	}
+
+	/* button reset —— 让 Tailwind utility 接管按钮的形状 / 颜色，
+	   不在这里强加默认描边 / 背景 / padding，避免覆盖 .bg-* / .border-* / .px-* */
+	button {
+		cursor: pointer;
+		background: transparent;
+		border: none;
+		padding: 0;
+	}
+
+	a {
+		color: inherit;
+		text-decoration: none;
+	}
+}
+
+/* ─── 全局禁选 ─────────────────────────────────────────────
+ * 桌面客户端不是网页 —— 1Password / Linear / Raycast 等原生级 PC App
+ * 默认禁止用户用鼠标拖选 UI 文字（按钮文案、列表项标题、侧边栏菜单等），
+ * 避免出现"选中半个按钮文案高亮一片"的网页感，提升原生质感。
+ *
+ * 策略：
+ *   1. 全局 user-select: none，光标也强制 default（避免文字部分变成 I-beam）
+ *   2. 输入控件（input / textarea / [contenteditable]）必须可选可编辑，
+ *      否则连复制密码框里的内容、改备注都做不到
+ *   3. 提供 .zpass-selectable 逃生口给"展示型但需要复制"的内容，例如：
+ *      - 详情页里的密码 / 用户名 / TOTP 明文
+ *      - 备注（Notes）正文
+ *      - 未来可能的导出预览 / 错误码
+ *      调用方在该元素上加上类即可恢复 text 选区
+ *   4. 选区样式仍保留半透明叠加（Linear/Raycast/Notion 同款），仅作用
+ *      于上述白名单元素
+ * ──────────────────────────────────────────────────────── */
+html,
+body {
+	-webkit-user-select: none;
+	-moz-user-select: none;
+	-ms-user-select: none;
+	user-select: none;
+	cursor: default;
+}
+
+/* 白名单：原生输入控件 + 显式标记可选的元素 */
+input,
+textarea,
+[contenteditable="true"],
+[contenteditable=""],
+.zpass-selectable,
+.zpass-selectable * {
+	-webkit-user-select: text;
+	-moz-user-select: text;
+	-ms-user-select: text;
+	user-select: text;
+	cursor: auto;
+}
+
+/* 选区 —— 半透明叠加，2026 主流做法（Linear/Raycast/Notion 同款）
+ * 不再用 accent 实色压底，避免 dark 主题下选中文字像探照灯一样刺眼
+ */
+::selection {
+	background: color-mix(in srgb, var(--text) 22%, transparent);
+	color: inherit;
+}
+
+/* Mono 工具类 —— 密码、TOTP、快捷键专用 */
+.mono {
+	font-family: var(--font-mono);
+	font-variant-numeric: tabular-nums;
+}
+
+/* 等宽字号默认启用 tabular-nums —— 修复"9 → 10"切换时计数抖动
+ * Tailwind 的 font-mono 工具类只切 font-family，没切 numeric features；
+ * 这条规则给所有显式声明 mono 字体的元素加上等宽数字，无需散落写 .mono 类
+ */
+[class*="font-mono"],
+.font-mono {
+	font-variant-numeric: tabular-nums;
+}
+
+/* 键盘快捷键徽章 */
+.kbd {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 18px;
+	height: 18px;
+	padding: 0 4px;
+	font-family: var(--font-mono);
+	font-size: 11px;
+	line-height: 1;
+	color: var(--text-2);
+	background: var(--bg-elev-2);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-sm);
+}
+
+/* ─── 聚焦样式 ──────────────────────────────────────────────
+ * 规则分三类：
+ *   1. 输入控件（input / textarea / select / contenteditable）：
+ *      彻底关掉自身的 outline。焦点反馈靠外层包裹元素（label / div）
+ *      的 border 色切换来提供，比如 UnlockPage 的密码框、CmdK 的搜索框
+ *      都是 <input> 外面裹一个带 border 的容器，容器监听 :focus-within
+ *      或由 React 维护的 focused state 来切 border 色 —— 这样能保证
+ *      焦点反馈与容器视觉节奏一致，而不是出现一条独立于容器的 outline。
+ *
+ *   2. 其它可聚焦元素（button / a / [tabindex] 等）：
+ *      保留 :focus-visible 的 outline 作为键盘可达性反馈，但用中性
+ *      --text 色而非 --accent，贴合黑白高级感主题。outline-offset 改小
+ *      一点，避免与相邻元素视觉冲突。
+ *
+ *   3. 鼠标点击导致的 :focus 不显示 outline，只在键盘聚焦（:focus-visible）
+ *      时显示，避免按钮被点一下就留下一圈描边。
+ *
+ * 注意：不用 `*:focus-visible` 通配，改成分类写，避免给 input 也套上。
+ * ──────────────────────────────────────────────────────── */
+
+/* 1. 所有原生输入控件：关闭自带 outline */
+input:focus,
+input:focus-visible,
+textarea:focus,
+textarea:focus-visible,
+select:focus,
+select:focus-visible,
+[contenteditable]:focus,
+[contenteditable]:focus-visible {
+	outline: none;
+	box-shadow: none;
+}
+
+/* 2. 其它可聚焦元素：键盘聚焦时显示中性色 outline
+ *
+ * ⚠ 排除 Radix / cmdk 自管视觉的 role：
+ *   - role="menuitem" / "menuitemradio" / "menuitemcheckbox"
+ *     （@radix-ui/react-dropdown-menu、@radix-ui/react-menu 自动注入）
+ *   - role="option"
+ *     （@radix-ui/react-select、cmdk 的 Command.Item 自动注入）
+ *   - role="combobox"
+ *     （@radix-ui/react-select 触发按钮）
+ *   - role="listbox" / role="dialog"
+ *     （Radix Select.Content、Dialog 容器）
+ *
+ *   这些组件通过 `[data-highlighted]` / `[data-state=open]` / `[data-selected]`
+ *   等 data attribute 自管视觉反馈（背景高亮 + 前景提亮），若再叠加浏览器
+ *   outline 会得到"选中底色 + 一圈黑色描边"的双层视觉。截图中 DropdownMenu
+ *   打开时 Personal 项的外框就是这个 bug：Radix 把焦点放到第一个 RadioItem，
+ *   它命中 `[tabindex]:focus-visible` 规则 → 额外长出 outline。
+ *
+ *   实现选择：用 `:not([role=…])` 链把所有菜单/下拉相关 role 从通用选择器
+ *   里排除。Radix 元素仍旧是可聚焦的（它们自己处理高亮），这里只是不再
+ *   额外画 outline。menuitem* 三种变体用 [role^="menuitem"] 前缀匹配一次
+ *   排除。
+ *
+ *   具体 Radix 组件里还会再显式写一次 `focus:outline-none` 作为冗余保护。
+ */
+:is(
+		button,
+		a,
+		[role="button"],
+		[role="radio"],
+		[role="switch"],
+		[tabindex]
+	):not(
+		[role^="menuitem"],
+		[role="option"],
+		[role="combobox"],
+		[role="listbox"],
+		[role="dialog"]
+	):focus-visible {
+	outline: 1px solid var(--text);
+	outline-offset: 2px;
+	border-radius: var(--radius-sm);
+}
+
+/* 3. 鼠标点击触发的 :focus 不显示 outline（仅键盘聚焦才显示） */
+:focus:not(:focus-visible) {
+	outline: none;
+}
+
+/* 滚动条 —— 细、低调，匹配设计原型 */
+*::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+	background: var(--line);
+	border: 2px solid var(--bg);
+	border-radius: 10px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+	background: var(--text-4);
+}
+
+/* Firefox */
+* {
+	scrollbar-width: thin;
+	scrollbar-color: var(--line) transparent;
+}
+
+/* 防 FOUC —— 在 main.tsx 设置 data-theme 前避免白屏闪烁 */
+html:not([data-theme]) {
+	background: #0c0c0d;
+	color: #ececec;
+}
+
+/* ─── 全局动画 keyframes ────────────────────────────────────────
+ * 提到 globals 是因为同一份 keyframes 被 Toast / NewItemDialog / AlertDialog
+ * 多处引用。原本写在 Toast 的 inline <style>，会出现"Toast 没渲染过 → Dialog
+ * 入场动画失效"的潜在 bug；提到全局后任何组件都能稳定使用。
+ * ──────────────────────────────────────────────────────────── */
+@keyframes zpass-toast-in {
+	from {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+@keyframes zpass-dialog-in {
+	from {
+		opacity: 0;
+		transform: translateY(6px) scale(0.985);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0) scale(1);
+	}
+}
+
+@keyframes zpass-overlay-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+/* ─── 标签工具类（A4：统一 mono uppercase 标签） ───────────────
+ * 项目里散落多处 `font-mono text-[10.5px] uppercase tracking-[0.08em] text-(--text-3)`
+ * 组合，字距值还分 0.05em / 0.08em / 0.1em / 0.12em / 0.14em 五种。
+ * 抽两个工具类：
+ *   .label-cap       —— 详情字段名 / 分组标题（10.5px / 0.08em / text-3）
+ *   .label-cap-strong —— 顶部 section 标识（11px / 0.14em / text-4）
+ * 使用方式：与现有 Tailwind 类共存即可，不强制改写所有调用点
+ * ──────────────────────────────────────────────────────────── */
+.label-cap {
+	font-family: var(--font-mono);
+	font-size: 10.5px;
+	line-height: 1.2;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--text-3);
+	font-variant-numeric: tabular-nums;
+}
+
+.label-cap-strong {
+	font-family: var(--font-mono);
+	font-size: 11px;
+	line-height: 1.2;
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+	color: var(--text-4);
+	font-variant-numeric: tabular-nums;
+}
+
+/* ─── 玻璃浮层（B1：visionOS / Arc 风格 backdrop） ─────────────
+ * Dialog / CmdK / Dropdown 浮层背后的 backdrop 用 blur + saturate
+ * 制造"内容继续可见但被推到后景"的层级感。原本只用 black/40 + blur(2px)
+ * 几乎没有玻璃质感，2026 主流做法是 blur(20px) + saturate(140%)。
+ *
+ * 使用：在 backdrop 元素上加 .zpass-backdrop（替换原来的 bg-black/40
+ * + backdrop-blur-[2px] 组合），浮层本体可选 .zpass-glass（半透明 +
+ * 模糊）。两个类各司其职，组合使用。
+ * ──────────────────────────────────────────────────────────── */
+.zpass-backdrop {
+	background-color: color-mix(in srgb, #000 38%, transparent);
+	backdrop-filter: blur(20px) saturate(140%);
+	-webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+[data-theme="light"] .zpass-backdrop {
+	/* 浅色主题下背景色调过深会过度变暗，改 18% */
+	background-color: color-mix(in srgb, #000 18%, transparent);
+}
+
+.zpass-glass {
+	/* 浮层本体：在 elev 之上叠一层半透明 + 轻模糊，
+	 * 让其下的 backdrop 漏出一点点环境色，不是完全实色卡片 */
+	background-color: color-mix(in srgb, var(--bg-elev) 88%, transparent);
+	backdrop-filter: blur(28px) saturate(150%);
+	-webkit-backdrop-filter: blur(28px) saturate(150%);
+	border: 1px solid var(--line);
+}
+
+[data-theme="light"] .zpass-glass {
+	/* 浅色下 elev 已经是近白，需要更强的不透明度避免内容糊掉 */
+	background-color: color-mix(in srgb, var(--bg-elev) 94%, transparent);
+}
+
+/* ─── disabled hover 锁定（C5） ────────────────────────────────
+ * Tailwind 的 disabled: 与 hover: 同优先级，用户把鼠标移到 disabled
+ * 按钮上时 hover:opacity-90 仍会生效，造成"明明禁用却变亮"的视觉。
+ * 在全局给所有 disabled 控件强制锁住交互态。
+ * ──────────────────────────────────────────────────────────── */
+button:disabled,
+[aria-disabled="true"] {
+	cursor: not-allowed;
+}
+
+button:disabled:hover,
+[aria-disabled="true"]:hover {
+	opacity: var(--zpass-disabled-opacity, 0.4);
+}
+
+/* ─── Vault 列表面板 resize handle 拖拽高亮（C6）────────────────
+ * [data-dragging="true"] 由 onResizePointerDown 写入、
+ * onResizePointerUp / onPointerCancel 清除。
+ * pointer capture 确保即使鼠标移出 handle 区域，颜色仍保持高亮。
+ * ──────────────────────────────────────────────────────────── */
+[data-dragging="true"] .resize-handle-line {
+	background-color: var(--text-3) !important;
+	transition: none;
+}
+
+/* ─── Sidebar resize handle hover 高亮 ────────────────────────
+ * 鼠标悬停在 resize-handle 热区时，内部可见线高亮为 --text-4。
+ * 拖拽中由上面的 [data-dragging] 规则覆盖为更深的 --text-3。
+ * ──────────────────────────────────────────────────────────── */
+.resize-handle:hover .resize-handle-line {
+	background-color: var(--text-4);
+}
+
+/* ─── Sidebar 收起/展开过渡 ────────────────────────────────────
+ * AppShell 的 grid-cols 宽度变化时，通过 transition 平滑动画。
+ * 拖拽期间 AppShell 会把 transition 设为 none（inline style），
+ * 这里仅作为非拖拽状态的默认值。
+ * ──────────────────────────────────────────────────────────── */
+[data-sidebar-collapsed] {
+	transition: width 200ms ease;
+}
+
+/* 收起态下 nav 行居中（icon-only），防止文字溢出闪烁 */
+[data-sidebar-collapsed="true"] nav a span {
+	overflow: hidden;
+	width: 0;
+	opacity: 0;
+}

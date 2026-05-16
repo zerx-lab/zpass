@@ -1,0 +1,764 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ZPass — Promo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  html,body { margin:0; padding:0; background:#000; height:100%; overflow:hidden; font-family: "Geist", system-ui, sans-serif; }
+  #root { position: absolute; inset: 0; }
+  * { box-sizing: border-box; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script src="animations.jsx" type="text/babel"></script>
+<script type="text/babel">
+// ZPass promo — 30s
+// Palette
+const BG = '#0c0c0d';
+const FG = '#ececec';
+const DIM = '#6e6e73';
+const DIM2 = '#a8a8ac';
+const LINE = '#232328';
+const ELEV = '#111113';
+const ELEV2 = '#16161a';
+const ACCENT = '#d4ff3a';
+const MONO = '"Geist Mono", ui-monospace, monospace';
+const SANS = '"Geist", system-ui, sans-serif';
+
+const W = 1920, H = 1080;
+
+// ── Helpers ─────────────────────────────────────────────────────────────
+function Grid({ opacity = 0.5 }) {
+  return (
+    <div style={{
+      position:'absolute', inset:0,
+      backgroundImage:`linear-gradient(to right, rgba(255,255,255,0.04) 1px, transparent 1px),linear-gradient(to bottom, rgba(255,255,255,0.04) 1px, transparent 1px)`,
+      backgroundSize:'120px 120px',
+      opacity,
+      maskImage:'radial-gradient(ellipse at 50% 50%, black 30%, transparent 75%)',
+      WebkitMaskImage:'radial-gradient(ellipse at 50% 50%, black 30%, transparent 75%)',
+      pointerEvents:'none',
+    }}/>
+  );
+}
+
+function SlateNumber({ n, active }) {
+  return (
+    <div style={{
+      position:'absolute', left:48, top:48,
+      fontFamily: MONO, fontSize: 14, color: active? ACCENT : DIM,
+      letterSpacing:'0.08em', textTransform:'uppercase',
+    }}>
+      <span style={{color: active? ACCENT : DIM}}>● </span>
+      SCENE · {String(n).padStart(2,'0')} / 06
+    </div>
+  );
+}
+function Timecode({ label }) {
+  return (
+    <div style={{
+      position:'absolute', right:48, top:48,
+      fontFamily: MONO, fontSize: 13, color: DIM, letterSpacing:'0.08em',
+    }}>{label}</div>
+  );
+}
+function CornerMarks() {
+  const line = { position:'absolute', background: DIM };
+  return <>
+    {[[40,40],[W-40,40],[40,H-40],[W-40,H-40]].map(([x,y],i)=>(
+      <div key={i} style={{position:'absolute', left:x-8, top:y-8, width:16, height:16}}>
+        <div style={{...line, left:0, top:8, width:16, height:1}}/>
+        <div style={{...line, left:8, top:0, width:1, height:16}}/>
+      </div>
+    ))}
+  </>;
+}
+
+// ── Scene 1: Lockup/intro (0–5s) ────────────────────────────────────────
+function SceneIntro() {
+  const { progress, localTime, duration } = useSprite();
+  const t = localTime;
+  // logo reveal, tagline type
+  const logoIn = Easing.easeOutBack(Math.min(1, t/0.8));
+  const taglineO = Math.min(1, Math.max(0, (t-1.0)/0.6));
+  const subO = Math.min(1, Math.max(0, (t-1.6)/0.6));
+  const exit = Easing.easeInCubic(Math.max(0, (t - (duration-0.6))/0.6));
+  const shift = -exit * 40;
+
+  // scan line
+  const scanY = (t*120)%H;
+
+  return (
+    <div style={{position:'absolute', inset:0, background: BG, overflow:'hidden'}}>
+      <Grid opacity={0.45}/>
+      <SlateNumber n={1} active/>
+      <Timecode label="ZPASS · PROMO · V1"/>
+      <CornerMarks/>
+
+      <div style={{
+        position:'absolute', left:'50%', top:'50%',
+        transform:`translate(-50%, calc(-50% + ${shift}px))`,
+        textAlign:'center', opacity: 1-exit,
+      }}>
+        <div style={{
+          width: 140, height: 140, borderRadius: 28,
+          background: FG, color: BG,
+          display:'inline-flex', alignItems:'center', justifyContent:'center',
+          fontFamily: MONO, fontWeight: 600, fontSize: 86,
+          transform:`scale(${0.4 + 0.6*logoIn})`,
+          boxShadow: `0 0 0 2px ${LINE}, 0 40px 120px rgba(212,255,58,${0.15*logoIn})`,
+        }}>Z</div>
+        <div style={{
+          marginTop: 44,
+          fontFamily: SANS, fontSize: 112, fontWeight: 500, color: FG,
+          letterSpacing:'-0.035em', lineHeight: 1,
+          opacity: taglineO,
+          transform: `translateY(${(1-taglineO)*20}px)`,
+        }}>
+          ZPass
+        </div>
+        <div style={{
+          marginTop: 22,
+          fontFamily: MONO, fontSize: 22, color: DIM2,
+          letterSpacing:'0.04em',
+          opacity: subO,
+        }}>
+          a calmer password manager
+        </div>
+        <div style={{
+          marginTop: 16,
+          fontFamily: MONO, fontSize: 14, color: DIM,
+          letterSpacing:'0.1em', textTransform:'uppercase',
+          opacity: subO,
+        }}>
+          <span style={{color: ACCENT}}>●</span> open source · e2e encrypted · self-host ready
+        </div>
+      </div>
+
+      <div style={{
+        position:'absolute', left:0, right:0, top: scanY, height:1,
+        background:`linear-gradient(to right, transparent, ${ACCENT}40, transparent)`,
+        opacity:0.6,
+      }}/>
+    </div>
+  );
+}
+
+// ── Scene 2: Vault close-up (5–11s) ─────────────────────────────────────
+const VAULT_ROWS = [
+  { m:'GH', n:'GitHub',   u:'alex.rivera@zpass.dev',   s:94, flag:null },
+  { m:'VC', n:'Vercel',   u:'alex@zpass.dev',          s:88, flag:'2fa' },
+  { m:'ST', n:'Stripe',   u:'ops@zpass.dev',           s:96, flag:'2fa' },
+  { m:'LN', n:'Linear',   u:'alex.rivera@zpass.dev',   s:28, flag:'weak' },
+  { m:'AW', n:'AWS',      u:'alex-admin',              s:98, flag:'2fa' },
+  { m:'FG', n:'Figma',    u:'alex@zpass.dev',          s:92, flag:null },
+  { m:'NT', n:'Notion',   u:'alex.rivera@zpass.dev',   s:34, flag:'weak' },
+  { m:'OA', n:'OpenAI',   u:'alex@zpass.dev',          s:89, flag:null },
+  { m:'AN', n:'Anthropic',u:'alex@zpass.dev',          s:93, flag:null },
+];
+function VaultRow({ row, active, fade }) {
+  const flagColor = row.flag==='weak' ? '#e55a4a' : row.flag==='2fa' ? ACCENT : DIM;
+  return (
+    <div style={{
+      display:'grid', gridTemplateColumns:'56px 1fr 160px 80px',
+      alignItems:'center', gap:18,
+      padding:'18px 22px',
+      borderBottom:`1px solid ${LINE}`,
+      background: active ? '#1d1d22' : 'transparent',
+      position:'relative',
+      opacity: fade,
+    }}>
+      {active && <div style={{position:'absolute', left:0, top:10, bottom:10, width:3, background: FG, borderRadius:2}}/>}
+      <div style={{
+        width:40, height:40, borderRadius:6,
+        background: ELEV2, border:`1px solid ${LINE}`,
+        display:'flex', alignItems:'center', justifyContent:'center',
+        fontFamily: MONO, fontSize:13, color: DIM2, fontWeight:500,
+      }}>{row.m}</div>
+      <div>
+        <div style={{fontSize:18, color: FG, fontWeight:500, letterSpacing:'-0.01em'}}>{row.n}</div>
+        <div style={{fontFamily: MONO, fontSize:13, color: DIM, marginTop:2}}>{row.u}</div>
+      </div>
+      <div style={{display:'flex', alignItems:'center', gap:8}}>
+        <div style={{
+          flex:1, height:4, borderRadius:2, background: LINE, position:'relative', overflow:'hidden',
+        }}>
+          <div style={{position:'absolute', inset:0, width: row.s+'%', background: row.s<50? '#e55a4a' : row.s<80? '#c8934a' : ACCENT}}/>
+        </div>
+        <div style={{fontFamily: MONO, fontSize:12, color: DIM2, width:28, textAlign:'right'}}>{row.s}</div>
+      </div>
+      <div style={{textAlign:'right', fontFamily: MONO, fontSize:11, color: flagColor, letterSpacing:'0.08em', textTransform:'uppercase'}}>
+        {row.flag || '—'}
+      </div>
+    </div>
+  );
+}
+
+function SceneVault() {
+  const { localTime: t, duration } = useSprite();
+  // Row highlight cycles
+  const active = Math.min(VAULT_ROWS.length-1, Math.floor((t-0.5)/0.65));
+  const listIn = Easing.easeOutCubic(Math.min(1, t/0.7));
+  const detailIn = Math.min(1, Math.max(0, (t-1.2)/0.6));
+  const exit = Easing.easeInCubic(Math.max(0, (t - (duration-0.5))/0.5));
+
+  // autofill pop
+  const fillShow = t > 3.8 && t < duration-0.3;
+  const fillIn = Math.min(1, Math.max(0, (t-3.8)/0.4));
+  const copyShow = t > 4.6;
+  const copyIn = Math.min(1, Math.max(0, (t-4.6)/0.3));
+
+  return (
+    <div style={{position:'absolute', inset:0, background: BG, overflow:'hidden', opacity: 1-exit}}>
+      <Grid opacity={0.25}/>
+      <SlateNumber n={2} active/>
+      <Timecode label="VAULT · LOCAL"/>
+
+      {/* App chrome */}
+      <div style={{
+        position:'absolute', left: 100, top: 120, right: 100, bottom: 100,
+        border:`1px solid ${LINE}`, borderRadius: 14,
+        background: ELEV, overflow:'hidden',
+        display:'grid', gridTemplateColumns:'280px 1fr 1fr',
+        boxShadow:'0 40px 120px rgba(0,0,0,0.6)',
+        transform: `translateY(${(1-listIn)*40}px)`, opacity: listIn,
+      }}>
+        {/* Sidebar */}
+        <div style={{borderRight:`1px solid ${LINE}`, padding:'20px 14px', background: BG}}>
+          <div style={{display:'flex', alignItems:'center', gap:10, padding:'6px 8px 18px', borderBottom:`1px solid ${LINE}`}}>
+            <div style={{width:28, height:28, borderRadius:5, background: FG, color: BG, display:'flex', alignItems:'center', justifyContent:'center', fontFamily: MONO, fontWeight:600, fontSize:14}}>Z</div>
+            <div style={{color: FG, fontWeight:500, fontSize:16}}>ZPass</div>
+            <div style={{marginLeft:'auto', fontFamily: MONO, fontSize:10, color: DIM, border:`1px solid ${LINE}`, padding:'2px 6px', borderRadius:4}}>3.2.0</div>
+          </div>
+          <div style={{padding:'16px 8px 8px', fontFamily: MONO, fontSize:10, color: DIM, textTransform:'uppercase', letterSpacing:'0.08em'}}>VAULT</div>
+          {['All items','Logins','Passkeys','Cards','Notes','SSH keys','Wallets'].map((x,i)=>(
+            <div key={x} style={{padding:'10px 10px', fontSize:14, color: i===1?FG:DIM2, background: i===1? '#1d1d22':'transparent', borderRadius:5, marginBottom:2, display:'flex'}}>
+              <span>{x}</span>
+              <span style={{marginLeft:'auto', fontFamily: MONO, fontSize:11, color: DIM}}>{[412,284,12,37,18,9,4][i]}</span>
+            </div>
+          ))}
+          <div style={{padding:'16px 8px 8px', fontFamily: MONO, fontSize:10, color: DIM, textTransform:'uppercase', letterSpacing:'0.08em'}}>SECURITY</div>
+          {['Password health','Breach monitor','Generator'].map(x=>(
+            <div key={x} style={{padding:'10px 10px', fontSize:14, color: DIM2, borderRadius:5}}>{x}</div>
+          ))}
+        </div>
+
+        {/* List */}
+        <div style={{borderRight:`1px solid ${LINE}`, display:'flex', flexDirection:'column', minHeight:0}}>
+          <div style={{padding:'18px 22px', borderBottom:`1px solid ${LINE}`, display:'flex', alignItems:'center', gap:10}}>
+            <div style={{fontSize:18, color: FG, fontWeight:500}}>Logins</div>
+            <div style={{fontFamily: MONO, fontSize:11, color: DIM, border:`1px solid ${LINE}`, padding:'2px 6px', borderRadius:4}}>284</div>
+          </div>
+          <div style={{flex:1, overflow:'hidden'}}>
+            {VAULT_ROWS.map((r, i)=>(
+              <VaultRow key={r.n} row={r} active={i===active} fade={Math.min(1, (listIn*1.5 - i*0.05))}/>
+            ))}
+          </div>
+        </div>
+
+        {/* Detail */}
+        <div style={{padding:'28px 32px', display:'flex', flexDirection:'column', gap:18, opacity: detailIn, background: BG}}>
+          <div style={{display:'flex', alignItems:'center', gap:14}}>
+            <div style={{width:48, height:48, borderRadius:8, background: ELEV2, border:`1px solid ${LINE}`, display:'flex', alignItems:'center', justifyContent:'center', fontFamily: MONO, fontWeight:500, color: DIM2}}>{VAULT_ROWS[active]?.m}</div>
+            <div>
+              <div style={{fontSize:26, color: FG, fontWeight:500, letterSpacing:'-0.01em'}}>{VAULT_ROWS[active]?.n}</div>
+              <div style={{fontFamily: MONO, fontSize:13, color: DIM, marginTop:4}}>{VAULT_ROWS[active]?.n?.toLowerCase()}.com</div>
+            </div>
+          </div>
+
+          <div style={{border:`1px solid ${LINE}`, borderRadius:8, background: ELEV}}>
+            {[['username', VAULT_ROWS[active]?.u], ['password','•••••••••••••••••••'], ['totp','482 917']].map(([k,v],i)=>(
+              <div key={k} style={{padding:'14px 16px', display:'flex', alignItems:'center', gap:12, borderBottom: i<2? `1px solid ${LINE}`:'none'}}>
+                <div style={{fontFamily: MONO, fontSize:11, color: DIM, textTransform:'uppercase', letterSpacing:'0.08em', width:80}}>{k}</div>
+                <div style={{fontFamily: MONO, fontSize:15, color: FG, flex:1, letterSpacing: k==='totp'?'0.15em':'0'}}>{v}</div>
+                <div style={{fontFamily: MONO, fontSize:11, color: DIM, border:`1px solid ${LINE}`, padding:'4px 8px', borderRadius:4}}>copy</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{border:`1px solid ${LINE}`, borderRadius:8, padding:'14px 16px', background: ELEV, fontFamily: MONO, fontSize:12, color: DIM2}}>
+            <div style={{color: DIM, textTransform:'uppercase', letterSpacing:'0.08em', fontSize:10, marginBottom:6}}>STRENGTH · {VAULT_ROWS[active]?.s}/100</div>
+            <div style={{height:6, background: LINE, borderRadius:3, overflow:'hidden'}}>
+              <div style={{width: VAULT_ROWS[active]?.s+'%', height:'100%', background: ACCENT}}/>
+            </div>
+          </div>
+
+          <div style={{marginTop:'auto', fontFamily: MONO, fontSize:11, color: DIM}}>
+            <div>● local-only · never synced plaintext</div>
+            <div>● last used 2 min ago · Safari</div>
+            <div>● argon2id · xchacha20-poly1305</div>
+          </div>
+        </div>
+      </div>
+
+      {/* autofill callout */}
+      {fillShow && (
+        <div style={{
+          position:'absolute', right: 140, top: 380,
+          transform: `translateY(${(1-fillIn)*10}px) scale(${0.92 + fillIn*0.08})`,
+          opacity: fillIn,
+          background: ACCENT, color: BG, padding:'10px 16px', borderRadius:8,
+          fontFamily: MONO, fontSize:14, fontWeight:600, letterSpacing:'0.04em',
+          boxShadow:'0 20px 60px rgba(212,255,58,0.3)',
+          display:'flex', alignItems:'center', gap:8,
+        }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M20 6L9 17l-5-5"/></svg>
+          AUTOFILLED IN 40ms
+        </div>
+      )}
+      {copyShow && (
+        <div style={{
+          position:'absolute', left: 500, bottom: 180,
+          opacity: copyIn, transform: `translateY(${(1-copyIn)*8}px)`,
+          background: ELEV2, color: FG, padding:'10px 14px', borderRadius:6,
+          fontFamily: MONO, fontSize:13, border:`1px solid ${LINE}`,
+        }}>
+          copied TOTP — auto-clears in 30s
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Scene 3: Mobile (11–16s) ────────────────────────────────────────────
+function SceneMobile() {
+  const { localTime: t, duration } = useSprite();
+  const phoneIn = Easing.easeOutCubic(Math.min(1, t/0.8));
+  const exit = Easing.easeInCubic(Math.max(0, (t - (duration-0.5))/0.5));
+  const tick = Math.min(1, Math.max(0, (t-1.8)/0.4));
+  const copy = Math.min(1, Math.max(0, (t-0.8)/0.8));
+
+  // faceID ring
+  const ringP = Math.min(1, Math.max(0, (t-1.1)/0.7));
+
+  return (
+    <div style={{position:'absolute', inset:0, background: BG, overflow:'hidden', opacity:1-exit}}>
+      <Grid opacity={0.22}/>
+      <SlateNumber n={3} active/>
+      <Timecode label="MOBILE · FACEID + AUTOFILL"/>
+
+      <div style={{position:'absolute', left: 120, top: '50%', transform:'translateY(-50%)', width: 640, opacity: copy, transform:`translateY(calc(-50% + ${(1-copy)*20}px))`}}>
+        <div style={{fontFamily: MONO, fontSize:13, color: DIM, letterSpacing:'0.1em', textTransform:'uppercase'}}>
+          <span style={{color: ACCENT}}>●</span> iOS · Android · F-Droid
+        </div>
+        <div style={{fontFamily: SANS, fontSize:84, fontWeight:500, color: FG, letterSpacing:'-0.035em', lineHeight:1.0, marginTop: 28}}>
+          Your vault,<br/><span style={{color: DIM}}>in your thumb.</span>
+        </div>
+        <div style={{marginTop: 32, fontSize:22, color: DIM2, maxWidth:'42ch', lineHeight:1.5}}>
+          Face ID unlock. Autofill into system keyboards.
+          TOTP codes surface when you need them, nowhere else.
+        </div>
+        <div style={{marginTop: 40, display:'flex', gap:16}}>
+          {['Face ID · 240ms','Offline vault','System autofill'].map((l,i)=>(
+            <div key={l} style={{
+              opacity: tick,
+              transform: `translateY(${(1-tick)*10}px)`,
+              padding:'10px 18px', border:`1px solid ${LINE}`, background: ELEV, borderRadius:8,
+              fontFamily: MONO, fontSize:13, color: DIM2, display:'flex', alignItems:'center', gap:10,
+              transitionDelay: `${i*100}ms`,
+            }}>
+              <span style={{color: ACCENT}}>✓</span> {l}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Phone */}
+      <div style={{
+        position:'absolute', right: 200, top: '50%',
+        transform:`translateY(-50%) scale(${0.9 + 0.1*phoneIn})`,
+        width: 420, height: 860,
+        borderRadius: 56,
+        border:`1px solid ${LINE}`,
+        background: ELEV,
+        padding: 12,
+        boxShadow:'0 0 0 2px #18181c, 0 60px 120px rgba(0,0,0,0.7)',
+        opacity: phoneIn,
+      }}>
+        {/* notch */}
+        <div style={{position:'absolute', left:'50%', top:24, transform:'translateX(-50%)', width:130, height:34, borderRadius:99, background:'#000', zIndex:2}}/>
+        <div style={{
+          width:'100%', height:'100%', borderRadius:44, overflow:'hidden', background: BG,
+          position:'relative',
+        }}>
+          {/* Status bar */}
+          <div style={{padding:'20px 28px 0', display:'flex', justifyContent:'space-between', fontFamily: MONO, fontSize:14, color: FG}}>
+            <span>9:41</span>
+            <span>● ● ●</span>
+          </div>
+          {/* Lock ring */}
+          <div style={{marginTop: 100, display:'flex', justifyContent:'center'}}>
+            <svg width="180" height="180" viewBox="0 0 180 180">
+              <circle cx="90" cy="90" r="78" fill="none" stroke={LINE} strokeWidth="2"/>
+              <circle cx="90" cy="90" r="78" fill="none" stroke={ACCENT} strokeWidth="3"
+                strokeDasharray={2*Math.PI*78}
+                strokeDashoffset={(1-ringP) * 2*Math.PI*78}
+                transform="rotate(-90 90 90)"
+                style={{transition:'stroke-dashoffset 80ms'}}
+              />
+              {/* face icon */}
+              <g stroke={FG} strokeWidth="2.5" fill="none" strokeLinecap="round">
+                <path d="M70 70v8M110 70v8"/>
+                <path d="M90 74v14M84 96c3 3 9 3 12 0"/>
+                <rect x="62" y="56" width="56" height="68" rx="10" strokeOpacity="0.3"/>
+              </g>
+            </svg>
+          </div>
+          <div style={{textAlign:'center', marginTop: 28, fontFamily: MONO, fontSize:14, color: ringP>0.9 ? ACCENT : DIM2, letterSpacing:'0.08em', textTransform:'uppercase'}}>
+            {ringP>0.9 ? 'vault unlocked' : 'look to unlock'}
+          </div>
+
+          {/* List preview appears after unlock */}
+          <div style={{marginTop: 40, padding:'0 22px', opacity: Math.max(0, (ringP-0.85)/0.15)}}>
+            {[['GH','GitHub','482 917'],['VC','Vercel','061 284'],['AW','AWS','309 117']].map(([m,n,code])=>(
+              <div key={n} style={{display:'flex', alignItems:'center', gap:14, padding:'14px 16px', border:`1px solid ${LINE}`, borderRadius:10, marginBottom:10, background: ELEV}}>
+                <div style={{width:36, height:36, borderRadius:6, background: ELEV2, border:`1px solid ${LINE}`, display:'flex', alignItems:'center', justifyContent:'center', fontFamily: MONO, fontSize:12, color: DIM2}}>{m}</div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:16, color: FG, fontWeight:500}}>{n}</div>
+                  <div style={{fontFamily: MONO, fontSize:12, color: DIM}}>TOTP</div>
+                </div>
+                <div style={{fontFamily: MONO, fontSize:20, color: ACCENT, letterSpacing:'0.1em'}}>{code}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Scene 4: Crypto flow (16–22s) ───────────────────────────────────────
+function SceneCrypto() {
+  const { localTime: t, duration } = useSprite();
+  const exit = Easing.easeInCubic(Math.max(0, (t - (duration-0.5))/0.5));
+  const p1 = Math.min(1, Math.max(0, (t-0.4)/0.7));
+  const p2 = Math.min(1, Math.max(0, (t-1.6)/0.7));
+  const p3 = Math.min(1, Math.max(0, (t-2.8)/0.7));
+  const p4 = Math.min(1, Math.max(0, (t-4.0)/0.7));
+  const intro = Math.min(1, t/0.6);
+
+  // cipher stream
+  const chars = 'ABCDEF0123456789abcdef•□■◆◇'.split('');
+  const streamRows = 6;
+  const streamCols = 60;
+  const seed = Math.floor(t*8);
+
+  return (
+    <div style={{position:'absolute', inset:0, background: BG, overflow:'hidden', opacity:1-exit}}>
+      <Grid opacity={0.2}/>
+      <SlateNumber n={4} active/>
+      <Timecode label="ENCRYPTION · ZERO-KNOWLEDGE"/>
+
+      {/* Title */}
+      <div style={{
+        position:'absolute', left:100, top:140,
+        opacity: intro, transform: `translateY(${(1-intro)*12}px)`,
+      }}>
+        <div style={{fontFamily: MONO, fontSize:13, color: DIM, letterSpacing:'0.1em', textTransform:'uppercase'}}>
+          <span style={{color: ACCENT}}>●</span> three primitives · everything else is layering
+        </div>
+        <div style={{fontFamily: SANS, fontSize:76, fontWeight:500, color: FG, letterSpacing:'-0.03em', marginTop:22, lineHeight:1.02}}>
+          Your secrets never<br/>leave the device <span style={{color: DIM}}>in the clear.</span>
+        </div>
+      </div>
+
+      {/* Flow diagram */}
+      <div style={{position:'absolute', left:100, right:100, top:480, bottom:140}}>
+        {/* Stage boxes */}
+        {[
+          { x:0,   w:320, title:'DEVICE', sub:'master password + salt', glow: p1 },
+          { x:400, w:320, title:'ARGON2ID', sub:'derive K_vault', glow: p2 },
+          { x:800, w:320, title:'XCHACHA20', sub:'seal each record', glow: p3 },
+          { x:1200,w:320, title:'SERVER', sub:'sees ciphertext only', glow: p4 },
+        ].map((b,i)=>{
+          const visible = [intro, p1, p2, p3][i];
+          return (
+            <div key={i} style={{
+              position:'absolute', left: b.x, top: 40,
+              width: b.w, height: 160,
+              border: `1px solid ${b.glow>0.3 ? ACCENT : LINE}`,
+              borderRadius: 12,
+              background: ELEV,
+              padding: 20,
+              opacity: Math.max(0.2, visible),
+              transform: `scale(${0.92 + visible*0.08})`,
+              boxShadow: b.glow>0.3 ? `0 0 0 2px ${ACCENT}20, 0 20px 60px rgba(212,255,58,${b.glow*0.15})` : 'none',
+              transition: 'border-color 0.3s, box-shadow 0.3s',
+            }}>
+              <div style={{fontFamily: MONO, fontSize:11, color: DIM, letterSpacing:'0.1em'}}>
+                STEP · {String(i+1).padStart(2,'0')}
+              </div>
+              <div style={{fontFamily: MONO, fontSize:26, color: b.glow>0.3 ? ACCENT : FG, fontWeight:500, marginTop:14, letterSpacing:'-0.01em'}}>
+                {b.title}
+              </div>
+              <div style={{fontFamily: MONO, fontSize:13, color: DIM2, marginTop:10}}>
+                {b.sub}
+              </div>
+            </div>
+          );
+        })}
+        {/* connectors */}
+        {[320, 720, 1120].map((x, i)=>{
+          const a = [p1, p2, p3][i];
+          return (
+            <div key={i} style={{position:'absolute', left:x, top:112, width:80, height:2, background: LINE}}>
+              <div style={{position:'absolute', left:0, top:0, width: a*100+'%', height:2, background: ACCENT}}/>
+              <div style={{position:'absolute', right:-6, top:-3, width:0, height:0,
+                borderTop:'4px solid transparent', borderBottom:'4px solid transparent',
+                borderLeft:`8px solid ${a>0.5 ? ACCENT : LINE}`}}/>
+            </div>
+          );
+        })}
+
+        {/* cipher stream under server box */}
+        <div style={{position:'absolute', left:1200, top:210, width:320, fontFamily: MONO, fontSize:12, color: DIM, lineHeight:1.5, opacity: p4}}>
+          {Array.from({length: streamRows}).map((_,r)=>(
+            <div key={r} style={{opacity: Math.max(0.3, 1-r*0.12)}}>
+              {Array.from({length: 30}).map((_,c)=>chars[(seed*7 + r*31 + c*13)%chars.length]).join('')}
+            </div>
+          ))}
+        </div>
+
+        {/* big pill callout at bottom */}
+        <div style={{
+          position:'absolute', left:0, right:0, bottom:-90,
+          display:'flex', justifyContent:'center',
+          opacity: p4,
+        }}>
+          <div style={{
+            display:'flex', alignItems:'center', gap: 14,
+            padding:'14px 24px', borderRadius:99,
+            background: FG, color: BG,
+            fontFamily: MONO, fontSize:16, fontWeight:500, letterSpacing:'0.02em',
+          }}>
+            <span style={{width:10, height:10, borderRadius:5, background: ACCENT, display:'inline-block', boxShadow:`0 0 0 3px ${ACCENT}40`}}/>
+            WE CAN'T READ YOUR VAULT. NEITHER CAN ANYONE ELSE.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Scene 5: Features ticker (22–26s) ───────────────────────────────────
+function SceneFeatures() {
+  const { localTime: t, duration } = useSprite();
+  const intro = Math.min(1, t/0.5);
+  const exit = Easing.easeInCubic(Math.max(0, (t - (duration-0.5))/0.5));
+
+  const items = [
+    ['F.01','End-to-end encrypted','XChaCha20-Poly1305 · Argon2id'],
+    ['F.02','TOTP built in','Codes live next to accounts'],
+    ['F.03','Passkeys & hardware keys','FIDO2 · WebAuthn · YubiKey'],
+    ['F.04','Family & team sharing','Per-folder, per-recipient keys'],
+    ['F.05','Breach monitoring','k-anonymous · local Bloom filter'],
+    ['F.06','Self-hostable','One binary · SQLite · MIT'],
+    ['F.07','CRDT sync','Offline-first · no conflicts'],
+    ['F.08','Travel mode','Hide items, server sees nothing'],
+  ];
+
+  // Pre-reveal cards (stagger)
+  return (
+    <div style={{position:'absolute', inset:0, background: BG, overflow:'hidden', opacity:1-exit}}>
+      <Grid opacity={0.25}/>
+      <SlateNumber n={5} active/>
+      <Timecode label="FEATURES"/>
+
+      <div style={{position:'absolute', left:100, top:140, opacity: intro}}>
+        <div style={{fontFamily: MONO, fontSize:13, color: DIM, letterSpacing:'0.1em', textTransform:'uppercase'}}>
+          <span style={{color: ACCENT}}>●</span> small tools · serious encryption · no dark patterns
+        </div>
+        <div style={{fontFamily: SANS, fontSize:84, fontWeight:500, color: FG, letterSpacing:'-0.035em', marginTop:20}}>
+          Everything you need.<br/><span style={{color: DIM}}>Nothing you don't.</span>
+        </div>
+      </div>
+
+      {/* Ticker rows — left & right opposite directions */}
+      <div style={{position:'absolute', left:0, right:0, top: 480, display:'flex', flexDirection:'column', gap:20}}>
+        {[0,1].map(row => (
+          <div key={row} style={{overflow:'hidden', position:'relative'}}>
+            <div style={{
+              display:'flex', gap:20,
+              transform: `translateX(${row===0 ? -(t*180) : -1800 + (t*180)}px)`,
+            }}>
+              {[...items, ...items, ...items].map((it, i)=>(
+                <div key={row+'-'+i} style={{
+                  flex:'0 0 auto',
+                  padding:'24px 28px',
+                  border:`1px solid ${LINE}`,
+                  borderRadius:12,
+                  background: ELEV,
+                  minWidth: 360,
+                }}>
+                  <div style={{fontFamily: MONO, fontSize:11, color: row===0?ACCENT:DIM, letterSpacing:'0.1em'}}>{it[0]}</div>
+                  <div style={{fontSize:24, color: FG, fontWeight:500, marginTop:10, letterSpacing:'-0.01em'}}>{it[1]}</div>
+                  <div style={{fontFamily: MONO, fontSize:13, color: DIM2, marginTop:8}}>{it[2]}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* stat strip */}
+      <div style={{position:'absolute', left:100, right:100, bottom:100, display:'grid', gridTemplateColumns:'repeat(4,1fr)', borderTop:`1px solid ${LINE}`, borderBottom:`1px solid ${LINE}`, opacity: intro}}>
+        {[['zero','Bytes of plaintext on our servers'],['< 80ms','Vault unlock on a 5-year-old phone'],['MIT','Client · server · protocol'],['2026','Most recent third-party audit']].map(([n,l],i)=>(
+          <div key={n} style={{padding:'24px 20px', borderRight: i<3? `1px solid ${LINE}`:'none'}}>
+            <div style={{fontFamily: MONO, fontSize:34, color: FG, fontWeight:500, letterSpacing:'-0.02em'}}>{n}</div>
+            <div style={{fontSize:14, color: DIM, marginTop:8, maxWidth:'22ch'}}>{l}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Scene 6: Closing (26–30s) ───────────────────────────────────────────
+function SceneClose() {
+  const { localTime: t, duration } = useSprite();
+  const intro = Easing.easeOutCubic(Math.min(1, t/0.8));
+  const cta = Math.min(1, Math.max(0, (t-1.0)/0.6));
+  const url = Math.min(1, Math.max(0, (t-1.6)/0.5));
+  const legal = Math.min(1, Math.max(0, (t-2.2)/0.6));
+
+  // cursor blink
+  const blink = Math.floor(t*2)%2;
+
+  return (
+    <div style={{position:'absolute', inset:0, background: BG, overflow:'hidden'}}>
+      <Grid opacity={0.35}/>
+      <SlateNumber n={6} active/>
+      <Timecode label="GET ZPASS"/>
+      <CornerMarks/>
+
+      <div style={{
+        position:'absolute', left:'50%', top:'50%', transform:'translate(-50%,-50%)', textAlign:'center',
+      }}>
+        <div style={{
+          width: 110, height: 110, borderRadius: 22,
+          background: FG, color: BG, display:'inline-flex', alignItems:'center', justifyContent:'center',
+          fontFamily: MONO, fontWeight: 600, fontSize: 68,
+          transform: `scale(${0.6 + 0.4*intro})`, opacity: intro,
+          boxShadow:`0 0 0 2px ${LINE}, 0 40px 120px ${ACCENT}20`,
+        }}>Z</div>
+
+        <div style={{
+          fontFamily: SANS, fontSize: 132, fontWeight:500, color: FG,
+          letterSpacing:'-0.035em', marginTop: 32, lineHeight:0.95,
+          opacity: intro, transform: `translateY(${(1-intro)*16}px)`,
+        }}>
+          Take back<br/>your keys.
+        </div>
+
+        <div style={{
+          marginTop: 48,
+          display:'inline-flex', gap: 14, alignItems:'center',
+          opacity: cta, transform: `translateY(${(1-cta)*12}px)`,
+        }}>
+          <div style={{
+            padding:'18px 28px', borderRadius: 10,
+            background: ACCENT, color: BG,
+            fontFamily: MONO, fontSize: 20, fontWeight: 600, letterSpacing:'0.02em',
+          }}>↓ Download for macOS</div>
+          <div style={{
+            padding:'18px 28px', borderRadius: 10,
+            border:`1px solid ${LINE}`, background: ELEV, color: FG,
+            fontFamily: MONO, fontSize: 20, letterSpacing:'0.02em',
+          }}>↗ Browse the code</div>
+        </div>
+
+        <div style={{
+          marginTop: 44,
+          fontFamily: MONO, fontSize: 24, color: FG,
+          opacity: url, letterSpacing:'0.04em',
+          display:'inline-flex', alignItems:'center', gap: 12,
+        }}>
+          <span style={{color: DIM}}>$</span>
+          <span>curl -fsSL get.zpass.dev | sh</span>
+          <span style={{width:12, height:22, background: blink? FG : 'transparent', display:'inline-block', verticalAlign:-4}}/>
+        </div>
+
+        <div style={{
+          marginTop: 60, fontFamily: MONO, fontSize:12, color: DIM, letterSpacing:'0.1em',
+          opacity: legal, display:'flex', gap: 28, justifyContent:'center',
+        }}>
+          <span>macOS · Windows · Linux · iOS · Android</span>
+          <span>MIT LICENSE</span>
+          <span>v3.2.0 · SHA256: 7f3a2c91…e42d</span>
+        </div>
+      </div>
+
+      {/* rolling audio-like waveform at very bottom */}
+      <div style={{position:'absolute', left:0, right:0, bottom:40, display:'flex', justifyContent:'center', gap:3, opacity: legal}}>
+        {Array.from({length: 120}).map((_,i)=>{
+          const h = 2 + Math.abs(Math.sin(t*2 + i*0.3))*18;
+          return <div key={i} style={{width:2, height:h, background: DIM, opacity: 0.5 + Math.sin(t*3+i*0.2)*0.3}}/>;
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Scene orchestration ─────────────────────────────────────────────────
+function Film() {
+  const t = useTime();
+  // Crossfade helper
+  const cross = (from, dur=0.5) => {
+    const d = t - from;
+    if (d < 0) return 0;
+    if (d < dur) return d/dur;
+    return 1;
+  };
+  return (
+    <>
+      <Sprite start={0}    end={5.0}>{() => <SceneIntro/>}</Sprite>
+      <Sprite start={4.8}  end={11.0}>{() => <SceneVault/>}</Sprite>
+      <Sprite start={10.8} end={16.0}>{() => <SceneMobile/>}</Sprite>
+      <Sprite start={15.8} end={22.0}>{() => <SceneCrypto/>}</Sprite>
+      <Sprite start={21.8} end={26.0}>{() => <SceneFeatures/>}</Sprite>
+      <Sprite start={25.8} end={30.0}>{() => <SceneClose/>}</Sprite>
+
+      {/* Persistent footer bar */}
+      <div style={{
+        position:'absolute', left:0, right:0, bottom:0, height: 56,
+        background: 'rgba(12,12,13,0.6)', borderTop:`1px solid ${LINE}`,
+        display:'flex', alignItems:'center', padding:'0 48px',
+        fontFamily: MONO, fontSize: 12, color: DIM, letterSpacing:'0.08em',
+        backdropFilter:'blur(10px)', WebkitBackdropFilter:'blur(10px)',
+      }}>
+        <div style={{display:'flex', alignItems:'center', gap:10}}>
+          <div style={{width:20, height:20, borderRadius:4, background: FG, color: BG, display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:600}}>Z</div>
+          ZPASS · A CALMER PASSWORD MANAGER
+        </div>
+        <div style={{marginLeft:'auto', display:'flex', gap:28}}>
+          <span>zpass.dev</span>
+          <span>v3.2.0</span>
+          <span style={{color: ACCENT}}>● LIVE · E2E ENCRYPTED</span>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function App() {
+  return (
+    <Stage width={W} height={H} duration={30} background={BG} persistKey="zpass-promo">
+      <Film />
+    </Stage>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

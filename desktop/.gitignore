@@ -1,0 +1,22 @@
+.task
+bin
+frontend/dist
+frontend/node_modules
+frontend/bindings
+build/linux/appimage/build
+build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
+
+# 编译产物（开发期 go build 在仓库根产生的二进制）
+zpass-desktop
+zpass-desktop.exe
+
+# 编辑器/系统噪声
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

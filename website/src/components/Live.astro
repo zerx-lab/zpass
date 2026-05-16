@@ -1,0 +1,70 @@
+---
+// ============================================================================
+// Live — 实时预览区块
+// 用一个浏览器窗口风格的容器包裹 iframe,加载 ZPass 桌面端预览。
+// 默认通过 props.src 指向 /demo/zpass.html(在 public/demo/ 下放置静态副本)。
+// 通过 props.show 控制是否渲染整个区块。
+//
+// 注:前期开发期默认 show=false 隐藏整个区块。产品尚未发布,不展示
+// 任何"原型/可交互演示"入口,避免误导用户以为可立即试用。
+// 后续公开发布或封闭测试阶段,可在父级页面将 show 显式置为 true。
+// ============================================================================
+
+import type { SiteStrings } from "../i18n/strings";
+
+export interface Props {
+	t: SiteStrings;
+	/** 是否渲染。默认 false(前期开发期不对外展示预览)。 */
+	show?: boolean;
+	/** iframe src,默认指向 public/demo/zpass.html */
+	src?: string;
+	/** 浏览器地址栏显示文本 */
+	url?: string;
+}
+
+const {
+	t,
+	show = false,
+	src = "/demo/zpass.html",
+	url = "preview.zpass.dev",
+} = Astro.props;
+---
+
+{
+	show && (
+		<section class="live" id="demo">
+			<div class="wrap">
+				<div class="sec-head reveal">
+					<div class="index mono">
+						<b>03</b> / {t.live_section_label}
+					</div>
+					<div>
+						<h2>{t.vault_demo_label}</h2>
+						<div class="sec-sub">{t.vault_demo_hint}</div>
+					</div>
+				</div>
+
+				<div class="live-frame-wrap reveal">
+					<div class="live-head">
+						<span class="dots" aria-hidden="true">
+							<i />
+							<i />
+							<i />
+						</span>
+						<div class="url">
+							<span>{url}</span>
+						</div>
+						<span style="color: var(--text-3);">{t.live_frame_status}</span>
+					</div>
+					<iframe
+						src={src}
+						title="ZPass vault — preview"
+						loading="lazy"
+						referrerpolicy="no-referrer"
+						sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+					/>
+				</div>
+			</div>
+		</section>
+	)
+}

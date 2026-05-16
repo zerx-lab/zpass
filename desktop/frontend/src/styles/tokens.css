@@ -1,0 +1,154 @@
+/* ----------------------------------------------------------------------------
+ * ZPass 设计令牌（Design Tokens）
+ *
+ * 从 ZPassDesign/src/tokens.css 迁移，与移动端 / 官网保持同步。
+ * 主题切换：<html data-theme="dark|light">
+ * 缩放切换：<html style="zoom: <pct>%">（由 ThemeSync 注入；CSS 不关心）
+ * 字体切换：<html data-body="sans|mono">
+ *
+ * 约束（AGENTS.md）：
+ *   - 圆角仅用 5 / 7 / 10 / 14 px
+ *   - 描边优先于填充，分隔靠 --line
+ *   - 字体仅用 Geist / Geist Mono
+ * -------------------------------------------------------------------------- */
+
+:root {
+	/* Dark (默认) —— 中性近黑 + 冷色底 */
+	--bg: #0c0c0d;
+	--bg-elev: #111113;
+	--bg-elev-2: #16161a;
+	--bg-hover: #18181c;
+	--bg-active: #1d1d22;
+	--line: #232328;
+	--line-soft: #1a1a1e;
+	--text: #ececec;
+	--text-2: #a8a8ac;
+	/* text-3/4 收紧对比度（小字 9-10.5px 大量挂这两个 token）
+	 * 旧值 text-3 #6e6e73 / text-4 #45454a 在 #0c0c0d 底上仅 ~3.6 / ~2.4，
+	 * 10px 字号低于 WCAG 4.5:1 要求。提亮一档：
+	 *   text-3 → ~4.6  (满足小字 AA)
+	 *   text-4 → ~3.1  (装饰用辅助文本下限 3:1，满足 AA Large / 非正文)
+	 */
+	--text-3: #8a8a90;
+	--text-4: #5c5c62;
+
+	/* 主色 —— 默认中性白，按钮通过背景反差区分 */
+	--accent: #ececec;
+	--accent-ink: #0c0c0d;
+	--accent-glow: rgba(255, 255, 255, 0.04);
+
+	/* 语义色 */
+	--danger: #e55a4a;
+	--warn: #c8934a;
+	--ok: #5ea47a;
+	--info: #6b9cc4;
+
+	/* ----- 自定义 Titlebar 按钮（对齐 Windows 11 Fluent 规范） -----
+	 * Windows 11 原生标题栏按钮在暗色主题下：
+	 *   - 普通按钮 hover  ≈ subtle fill secondary  (白色 ~6% 叠加)
+	 *   - 普通按钮 active ≈ subtle fill tertiary   (白色 ~4% 叠加，比 hover 浅)
+	 *   - 关闭按钮 hover  = #C42B1C                (品牌红，白字)
+	 *   - 关闭按钮 active = #B32519                (稍深，视作按下反馈)
+	 * 使用 color-mix 基于现有 token 合成，主题切换时自动跟随 --text 反差。
+	 * 独立于 --bg-hover / --bg-active，避免通用菜单项色感染窗口控件。
+	 */
+	--titlebar-btn-hover: color-mix(in srgb, var(--text) 8%, transparent);
+	--titlebar-btn-active: color-mix(in srgb, var(--text) 4%, transparent);
+	--titlebar-close-hover: #c42b1c;
+	--titlebar-close-active: #b32519;
+	--titlebar-close-ink: #ffffff;
+
+	/* macOS 原生红绿灯左侧占位
+	 * 红绿灯簇：3 × 12px + 间距 8px + 左边距 20px ≈ 78px，向上取整到 80px 更稳。
+	 * 仅在 <html data-platform="macos"> 下生效于 titlebar 左 padding。
+	 */
+	--titlebar-traffic-lights-inset: 80px;
+
+	/* 背景栅格 */
+	--grid: rgba(255, 255, 255, 0.02);
+
+	/* 圆角（克制，不追求拟物） */
+	--radius-sm: 5px;
+	--radius: 7px;
+	--radius-lg: 10px;
+	--radius-xl: 14px;
+
+	/* 阴影（暗色更深） */
+	--shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+	--shadow-md: 0 2px 8px rgba(0, 0, 0, 0.35);
+	--shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.55);
+
+	/* 字体族 */
+	--font-sans:
+		"Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+	--font-mono:
+		"Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* ----- Light 主题 -----
+ * 分层策略对齐 Linear / Raycast 浅色档：
+ *   - bg     页面底色（最暖、最低）
+ *   - bg-elev 卡片（纯白，与 bg 拉开）
+ *   - bg-elev-2 嵌套层 / 输入框底（略偏冷的白，让纯白卡片在上面也能看出层）
+ * 旧值（#f5f5f3 / #fbfbf9 / #ffffff）三层只差 4-6 个亮度值，
+ * 浅色下卡片几乎看不出层级；现在改为：
+ *   - bg = #f4f4f2  比原值再暖一档作为视觉底
+ *   - bg-elev = #ffffff 卡片直接纯白，与 bg 形成 11 点亮度差
+ *   - bg-elev-2 = #f7f7f5  反向略低于 bg-elev，作为"卡片内嵌套面板"层
+ * 同时把 hover/active 加深一档，触感更明确（旧值 hover 与 bg 差值仅 8）。
+ */
+[data-theme="light"] {
+	--bg: #f4f4f2;
+	--bg-elev: #ffffff;
+	--bg-elev-2: #f7f7f5;
+	--bg-hover: #ebebe7;
+	--bg-active: #dededa;
+	--line: #d9d9d3;
+	--line-soft: #e8e8e4;
+	--text: #0f0f12;
+	--text-2: #3f3f45;
+	/* text-3/4 加深，确保 #ffffff 卡片底上小字达标
+	 * 旧值 text-3 #6e6e74 / text-4 #a0a0a6 在 #fff 上仅 ~4.0 / ~2.7，
+	 * 10-10.5px 字号下截图肉眼即可见模糊。加深一档：
+	 *   text-3 → ~5.5  (满足小字 AA)
+	 *   text-4 → ~3.4  (装饰文本下限 3:1，达标)
+	 */
+	--text-3: #595960;
+	--text-4: #82828a;
+	--accent: #141416;
+	--accent-ink: #f5f5f3;
+	--accent-glow: rgba(0, 0, 0, 0.04);
+	--danger: #b53d2b;
+	--warn: #9a6a1a;
+	--ok: #35734f;
+	--info: #355a7a;
+	--grid: rgba(0, 0, 0, 0.03);
+
+	/* Light 主题下 Titlebar 按钮 —— Fluent 规范浅色档
+	 * 普通按钮 hover  ≈ 黑色 ~5% 叠加
+	 * 普通按钮 active ≈ 黑色 ~3% 叠加
+	 * 关闭按钮保持品牌红（系统级惯例不随主题变）
+	 */
+	--titlebar-btn-hover: color-mix(in srgb, var(--text) 6%, transparent);
+	--titlebar-btn-active: color-mix(in srgb, var(--text) 3%, transparent);
+	--titlebar-close-hover: #c42b1c;
+	--titlebar-close-active: #b32519;
+	--titlebar-close-ink: #ffffff;
+
+	/* 浅色阴影：底色变白后必须靠 shadow 拉浮起感，不能只靠 line */
+	--shadow-sm: 0 1px 2px rgba(15, 15, 18, 0.06);
+	--shadow-md: 0 4px 14px rgba(15, 15, 18, 0.08);
+	--shadow-lg: 0 24px 60px rgba(15, 15, 18, 0.14);
+}
+
+/* ----- 界面缩放 -----
+ * 缩放通过 ThemeSync 在 <html> 上写 `style="zoom: <pct>%"` 实现，
+ * 不依赖任何 CSS 选择器。原 `--dens-row` / `--dens-pad` 变量已随
+ * density→scale 改造一并移除（历史上无任何组件消费它们）。
+ */
+
+/* ----- 正文字体切换（sans / mono） ----- */
+[data-body="mono"] body,
+[data-body="mono"] {
+	--font-sans: "Geist Mono", ui-monospace, monospace;
+}

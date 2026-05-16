@@ -1,0 +1,364 @@
+---
+// ============================================================================
+// ZPass 官网 — 基础布局
+// 负责：
+//   - <html> / <head> 元数据（title、description、og、字体预连接）
+//   - 引入全局 token 与样式
+//   - 根 <html> 上的 lang / data-theme / data-body 属性
+//   - 通过 slot 渲染页面正文
+//   - 注入防 FOUC 主题脚本（先于样式执行）
+//   - 注入 reveal 滚动入场脚本
+//
+// 主题策略（与 ThemeToggle 协同）：
+//   - 默认 theme="auto"：服务端不写 data-theme 属性，由 CSS 中
+//     `prefers-color-scheme` 媒体查询决定外观；客户端脚本会在 head 中
+//     第一时间读取 localStorage("zpass-theme")，如有显式值（dark/light）
+//     则立刻写入 data-theme，避免主题闪烁（FOUC）。
+//   - 显式 theme="dark" 或 "light"：服务端直接渲染对应 data-theme，
+//     适用于强制单一主题的特殊页面。
+// ============================================================================
+
+import "../styles/tokens.css";
+import "../styles/global.css";
+import { ClientRouter } from "astro:transitions";
+import type { Locale } from "../i18n/strings";
+
+export interface Props {
+	/** 页面标题（不含站点后缀） */
+	title?: string;
+	/** 页面描述，用于 meta description / og:description */
+	description?: string;
+	/** 当前语言 */
+	locale?: Locale;
+	/**
+	 * 主题策略：
+	 *   - "auto"（默认）：跟随系统 + localStorage 用户偏好（推荐）
+	 *   - "dark" / "light"：强制单一主题，覆盖用户偏好
+	 */
+	theme?: "dark" | "light" | "auto";
+	/** body 字体：sans | mono */
+	body?: "sans" | "mono";
+	/** 强调色覆写（可选） */
+	accent?: string;
+	/** 当前路径，用于 og:url 与 canonical */
+	pathname?: string;
+}
+
+const {
+	title = "ZPass — a calmer password manager",
+	description = "ZPass 是一款基于零知识架构的跨平台密码管理器。端到端加密、零知识、当前正在紧张研发中。",
+	locale = "en",
+	theme = "auto",
+	body = "sans",
+	accent,
+	pathname = Astro.url.pathname,
+} = Astro.props;
+
+const siteTitle = "ZPass";
+const fullTitle = title.includes(siteTitle) ? title : `${title} · ${siteTitle}`;
+const htmlLang = locale === "zh" ? "zh-CN" : "en";
+const canonical = new URL(
+	pathname,
+	Astro.site ?? "https://zpass.dev",
+).toString();
+
+// 内联到 <html> 上的 style，用于自定义 accent
+const rootStyle = accent ? `--accent: ${accent};` : undefined;
+
+// 仅在 theme 显式为 dark/light 时输出 data-theme；auto 留空，由客户端脚本接管
+const dataTheme = theme === "auto" ? undefined : theme;
+
+// 仅当页面"强制锁定"主题时输出 data-theme-locked="true"，
+// 通知客户端防 FOUC 脚本忽略 localStorage、严格使用 SSR 主题。
+// theme="auto" 的常规页面不输出该属性，让 localStorage 成为权威源——
+// 这样切换语言后能正确恢复用户选择的 light/dark。
+const dataThemeLocked = theme === "auto" ? undefined : "true";
+
+// meta color-scheme / theme-color 的服务端默认值：
+//   - 显式主题：直接对应
+//   - auto：宣告 "light dark"，浏览器会根据系统选择
+const metaColorScheme =
+	theme === "light" ? "light" : theme === "dark" ? "dark" : "light dark";
+---
+
+<!doctype html>
+<html
+	lang={htmlLang}
+	data-theme={dataTheme}
+	data-theme-locked={dataThemeLocked}
+	data-body={body}
+	style={rootStyle}
+>
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+		<!-- ====================================================================
+		 防 FOUC 主题脚本
+		 必须放在所有样式与可见 DOM 之前同步执行：
+		   1) 读取 localStorage("zpass-theme")
+		   2) 若是 "dark"/"light" → 立即设置 <html data-theme>
+		   3) 若是 "auto" 或未设置 → 不动 data-theme，CSS 的 prefers-color-scheme
+		      规则会自动生效
+		   4) 同步更新 <meta name="theme-color"> 以匹配实际主题色
+
+		 注：data-astro-rerun 让 ClientRouter 在每次 SPA 导航后重跑此脚本，
+		     防止跨页面切语言时 <head> 被替换、新 head 上的 inline 脚本默认
+		     不会被重新执行而丢失用户主题偏好。
+
+		 决策模型（简单清晰，避免歧义）：
+		   1) 页面 props 强制锁定（dark/light）→ <html data-theme-locked="true">
+		      这种页面无视 localStorage，永远显示锁定主题（用于法务/邮件等
+		      必须固定主题的特殊页）。当前首页未使用此模式。
+		   2) 否则 localStorage 为权威源：
+		        stored = "dark"/"light" → 写入 data-theme = stored
+		        stored = null（用户选了 auto 或从未选过）→ 移除 data-theme，
+		          交给 CSS prefers-color-scheme 处理
+		 ==================================================================== -->
+		<script is:inline data-astro-rerun>
+			(function () {
+				try {
+					var KEY = "zpass-theme";
+					var root = document.documentElement;
+					var isLocked = root.getAttribute("data-theme-locked") === "true";
+
+					var stored = null;
+					try {
+						stored = localStorage.getItem(KEY);
+					} catch (e) {
+						/* 隐私模式 / 禁用存储：忽略 */
+					}
+
+					var effective;
+					if (isLocked) {
+						// 页面强制锁定：尊重 SSR 写入的 data-theme，不读 storage
+						var locked = root.getAttribute("data-theme");
+						effective = locked === "light" ? "light" : "dark";
+					} else if (stored === "dark" || stored === "light") {
+						// 用户显式选过主题：以 storage 为准
+						root.setAttribute("data-theme", stored);
+						effective = stored;
+					} else {
+						// auto：不写 data-theme，让 CSS 的 prefers-color-scheme 接管
+						root.removeAttribute("data-theme");
+						effective =
+							window.matchMedia &&
+							window.matchMedia("(prefers-color-scheme: light)").matches
+								? "light"
+								: "dark";
+					}
+
+					// 同步 theme-color meta（在 head 解析后再执行一次以确保元素存在）
+					var setMeta = function () {
+						var tc = document.querySelector('meta[name="theme-color"]');
+						if (tc) {
+							tc.setAttribute(
+								"content",
+								effective === "light" ? "#f5f5f3" : "#0c0c0d",
+							);
+						}
+					};
+					if (document.readyState === "loading") {
+						document.addEventListener("DOMContentLoaded", setMeta);
+					} else {
+						setMeta();
+					}
+				} catch (e) {
+					/* 出错不阻塞页面渲染 */
+				}
+			})();
+		</script>
+
+		<!-- ====================================================================
+		 语言自动检测（首次访问时按浏览器语言跳转）
+		 必须在 ClientRouter 之前同步执行，以便在 SPA 水合前就完成重定向，
+		 避免先渲染英文内容再跳走造成闪烁。
+
+		 策略（严格优先级）：
+		   1) localStorage("zpass-lang") 存有 "en"/"zh" → 用户已手动选过，
+		      以 storage 为准。若当前 URL 语言与 storage 不一致 → 跳转一次。
+		   2) 未选过 → 读 navigator.languages（优先）或 navigator.language：
+		        第一个以 "zh" 开头的语言 → 中文；否则 → 英文。
+		      若检测结果与当前 URL 不一致 → 跳转一次。
+		   3) 带查询参数 ?lang=en 或 ?lang=zh 时，视为"显式指定"，
+		      写入 storage 并跳转到纯净 URL（移除 query）。
+
+		 防死循环：
+		   - 每次自动跳转前写一个 sessionStorage 哨兵 "zpass-lang-redirected"，
+		     一个会话内只允许自动跳一次，避免任何边界情况下的循环。
+		 ==================================================================== -->
+		<script is:inline>
+			(function () {
+				try {
+					var LANG_KEY = "zpass-lang";
+					var REDIRECTED_KEY = "zpass-lang-redirected";
+					var path = location.pathname || "/";
+					var currentLang = path === "/zh" || path.indexOf("/zh/") === 0 ? "zh" : "en";
+
+					// 1) ?lang= 显式指定：最高优先级
+					var params = new URLSearchParams(location.search);
+					var queryLang = params.get("lang");
+					if (queryLang === "en" || queryLang === "zh") {
+						try { localStorage.setItem(LANG_KEY, queryLang); } catch (e) {}
+						// 清理 query 并按需跳转
+						var cleanPath = path;
+						if (queryLang === "zh" && currentLang === "en") {
+							cleanPath = cleanPath === "/" ? "/zh/" : "/zh" + cleanPath;
+						} else if (queryLang === "en" && currentLang === "zh") {
+							cleanPath = cleanPath === "/zh" || cleanPath === "/zh/" ? "/" : cleanPath.slice(3);
+						}
+						location.replace(cleanPath + location.hash);
+						return;
+					}
+
+					// 每个会话只允许自动跳一次，防御性兜底
+					var alreadyRedirected = false;
+					try {
+						alreadyRedirected = sessionStorage.getItem(REDIRECTED_KEY) === "1";
+					} catch (e) {}
+					if (alreadyRedirected) return;
+
+					// 2) 用户记忆优先
+					var stored = null;
+					try { stored = localStorage.getItem(LANG_KEY); } catch (e) {}
+
+					var target = null;
+					if (stored === "en" || stored === "zh") {
+						target = stored;
+					} else {
+						// 3) 浏览器语言自动检测
+						var langs = (navigator.languages && navigator.languages.length)
+							? navigator.languages
+							: [navigator.language || "en"];
+						target = "en";
+						for (var i = 0; i < langs.length; i++) {
+							var l = (langs[i] || "").toLowerCase();
+							if (l.indexOf("zh") === 0) { target = "zh"; break; }
+							if (l.indexOf("en") === 0) { target = "en"; break; }
+						}
+					}
+
+					if (target !== currentLang) {
+						try { sessionStorage.setItem(REDIRECTED_KEY, "1"); } catch (e) {}
+						var newPath;
+						if (target === "zh") {
+							newPath = path === "/" ? "/zh/" : "/zh" + path;
+						} else {
+							newPath = (path === "/zh" || path === "/zh/") ? "/" : path.slice(3);
+						}
+						location.replace(newPath + location.search + location.hash);
+					}
+				} catch (e) {
+					/* 出错不阻塞渲染 */
+				}
+			})();
+		</script>
+
+		<!-- ====================================================================
+		 启用 Astro View Transitions（SPA 风格路由）
+		 - 让语言切换不再整页刷新，而是淡入淡出替换内容
+		 - 配合 global.css 中的 ::view-transition-* 规则做柔性过渡
+		 - 默认会拦截所有同源 <a>，含语言切换链接
+		 ==================================================================== -->
+		<ClientRouter fallback="animate" />
+
+		<meta name="color-scheme" content={metaColorScheme} />
+		<meta
+			name="theme-color"
+			content={theme === "light" ? "#f5f5f3" : "#0c0c0d"}
+		/>
+
+		<title>{fullTitle}</title>
+		<meta name="description" content={description} />
+		<link rel="canonical" href={canonical} />
+
+		<!-- Open Graph -->
+		<meta property="og:type" content="website" />
+		<meta property="og:site_name" content={siteTitle} />
+		<meta property="og:title" content={fullTitle} />
+		<meta property="og:description" content={description} />
+		<meta property="og:url" content={canonical} />
+		<meta
+			property="og:locale"
+			content={htmlLang === "zh-CN" ? "zh_CN" : "en_US"}
+		/>
+
+		<!-- Twitter -->
+		<meta name="twitter:card" content="summary_large_image" />
+		<meta name="twitter:title" content={fullTitle} />
+		<meta name="twitter:description" content={description} />
+
+		<!-- 字体：Geist + Geist Mono（与设计稿一致） -->
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<link
+			href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap"
+			rel="stylesheet"
+		/>
+
+		<!-- 站点 favicon（占位，使用 SVG 数据 URI 渲染 Z 字标） -->
+		<link
+			rel="icon"
+			type="image/svg+xml"
+			href="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230c0c0d'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='18' font-weight='600' text-anchor='middle' fill='%23d4ff3a'%3EZ%3C/text%3E%3C/svg%3E"
+		/>
+	</head>
+	<body>
+		<slot />
+
+		<!-- ===== Reveal 滚动入场动画 =====
+		 监听 astro:page-load（首次加载 + SPA 导航后均触发），保证语言切换后
+		 新页面的 .reveal 元素也能正确入场。
+		==================================================================== -->
+		<script is:inline>
+			(function () {
+				function init() {
+					var els = document.querySelectorAll(".reveal");
+					if (!els.length) return;
+
+					var vh = window.innerHeight;
+					els.forEach(function (el) {
+						// 已在视口里的元素直接 in，避免重复 pending 抖动
+						if (el.classList.contains("in")) return;
+						var r = el.getBoundingClientRect();
+						if (r.top > vh * 0.9) el.classList.add("pending");
+						else el.classList.add("in");
+					});
+
+					if (!("IntersectionObserver" in window)) {
+						els.forEach(function (el) {
+							el.classList.remove("pending");
+							el.classList.add("in");
+						});
+						return;
+					}
+
+					var io = new IntersectionObserver(
+						function (entries) {
+							entries.forEach(function (e) {
+								if (e.isIntersecting) {
+									e.target.classList.add("in");
+									e.target.classList.remove("pending");
+								}
+							});
+						},
+						{ threshold: 0.05, rootMargin: "0px 0px -5% 0px" },
+					);
+					els.forEach(function (el) {
+						io.observe(el);
+					});
+				}
+
+				// 首次加载
+				if (document.readyState === "loading") {
+					document.addEventListener("DOMContentLoaded", init);
+				} else {
+					init();
+				}
+
+				// SPA 导航后（包含语言切换）
+				document.addEventListener("astro:page-load", init);
+			})();
+		</script>
+	</body>
+</html>

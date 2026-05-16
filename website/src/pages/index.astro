@@ -1,0 +1,63 @@
+---
+// ============================================================================
+// ZPass 官网 — 英文首页 (默认语言)
+// 路径：/  （由 Astro i18n 配置 prefixDefaultLocale: false 决定）
+// 组合所有章节组件，传入 EN 文案。
+//
+// 注：前期开发期版本——
+//   - 用 Subscribe(邮件订阅) 区块替代原 Install(curl 安装命令) 区块
+//   - Live(实时演示 iframe) 默认 show=false 隐藏,产品尚未发布
+//   - 页面 SEO 描述去掉了"开源 / self-hostable"等表述
+// ============================================================================
+
+import BaseLayout from "../layouts/BaseLayout.astro";
+import Nav from "../components/Nav.astro";
+import Hero from "../components/Hero.astro";
+import Subscribe from "../components/Subscribe.astro";
+import Features from "../components/Features.astro";
+import How from "../components/How.astro";
+import Live from "../components/Live.astro";
+import Desktop from "../components/Desktop.astro";
+import Mobile from "../components/Mobile.astro";
+import Security from "../components/Security.astro";
+import Pricing from "../components/Pricing.astro";
+import Changelog from "../components/Changelog.astro";
+import Faq from "../components/Faq.astro";
+import Footer from "../components/Footer.astro";
+import ContactDialog from "../components/ContactDialog.astro";
+
+import { getStrings } from "../i18n/strings";
+
+const locale = "en" as const;
+const t = getStrings(locale);
+
+// 页面级 SEO
+const title = "ZPass — a calmer password manager";
+const description =
+	"ZPass is a cross-platform credential manager built on zero-knowledge architecture. End-to-end encrypted by design — currently in active development. Subscribe to be notified at launch.";
+---
+
+<BaseLayout
+	title={title}
+	description={description}
+	locale={locale}
+	theme="auto"
+	body="sans"
+>
+	<Nav t={t} locale={locale} />
+	<main>
+		<Hero t={t} locale={locale} />
+		<Subscribe t={t} />
+		<Features t={t} />
+		<How t={t} />
+		<Live t={t} />
+		<Desktop t={t} />
+		<Mobile t={t} />
+		<Security t={t} />
+		<Pricing t={t} />
+		<Changelog t={t} />
+		<Faq t={t} />
+	</main>
+	<Footer t={t} />
+	<ContactDialog t={t} />
+</BaseLayout>

@@ -1,0 +1,104 @@
+---
+// ============================================================================
+// Footer — 站点页脚（精简版）
+// 早期开发阶段，无真实可跳转目标，因此移除 Product/Resources/Company/Legal
+// 四列死链与重复的构建标识，仅保留：
+//   - 品牌 + 一句话 tagline
+//   - 一行版权 + 开发状态
+// ============================================================================
+
+import type { SiteStrings } from "../i18n/strings";
+
+export interface Props {
+	t: SiteStrings;
+}
+
+const { t } = Astro.props;
+---
+
+<footer class="foot foot--lite">
+	<div class="wrap">
+		<div class="foot-lite">
+			<div class="foot-lite-brand">
+				<div class="brand">
+					<span class="logo">Z</span>
+					<span>ZPass</span>
+				</div>
+				<div class="foot-tagline">{t.footer_tagline}</div>
+			</div>
+
+			<div class="foot-lite-right">
+				<button class="foot-contact mono" data-contact-open>
+					{t.contact_trigger}
+				</button>
+				<div class="foot-lite-meta mono">
+					<span>{t.footer_built}</span>
+					<span aria-hidden="true">·</span>
+					<span>{t.footer_version}</span>
+				</div>
+			</div>
+		</div>
+	</div>
+</footer>
+
+<style>
+	.foot--lite {
+		padding: 48px 0 40px;
+	}
+
+	.foot-lite {
+		display: flex;
+		align-items: flex-end;
+		justify-content: space-between;
+		gap: 32px;
+		flex-wrap: wrap;
+	}
+
+	.foot-lite-brand .foot-tagline {
+		margin-top: 10px;
+	}
+
+	.foot-lite-right {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: 8px;
+	}
+
+	.foot-lite-meta {
+		display: inline-flex;
+		align-items: center;
+		gap: 10px;
+		font-size: 11px;
+		color: var(--text-3);
+	}
+
+	.foot-contact {
+		background: none;
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+		padding: 4px 10px;
+		font-size: 11px;
+		color: var(--text-3);
+		cursor: pointer;
+		transition: color 0.15s, border-color 0.15s, background 0.15s;
+		letter-spacing: 0.02em;
+	}
+
+	.foot-contact:hover {
+		color: var(--text);
+		border-color: var(--text-3);
+		background: var(--bg-hover);
+	}
+
+	@media (max-width: 640px) {
+		.foot-lite {
+			flex-direction: column;
+			align-items: flex-start;
+		}
+
+		.foot-lite-right {
+			align-items: flex-start;
+		}
+	}
+</style>

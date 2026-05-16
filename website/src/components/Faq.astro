@@ -1,0 +1,106 @@
+---
+// ============================================================================
+// FAQ — 常见问题
+// 5 条问答，点击问题可展开/折叠对应答案。默认展开第 1 条。
+// 仅一项保持展开（手风琴风格），与设计稿 Faq 组件行为一致。
+// ============================================================================
+
+import type { SiteStrings } from "../i18n/strings";
+
+export interface Props {
+	t: SiteStrings;
+}
+
+const { t } = Astro.props;
+
+// 5 条问答：[question, answer]
+const items: Array<[string, string]> = [
+	[t.faq_1_q, t.faq_1_a],
+	[t.faq_2_q, t.faq_2_a],
+	[t.faq_3_q, t.faq_3_a],
+	[t.faq_4_q, t.faq_4_a],
+	[t.faq_5_q, t.faq_5_a],
+];
+---
+
+<section class="section" id="faq">
+	<div class="wrap">
+		<div class="sec-head reveal">
+			<div class="index mono"><b>09</b> / FAQ</div>
+			<div>
+				<h2>{t.section_faq}</h2>
+			</div>
+		</div>
+
+		<div class="faq-list" data-faq-list>
+			{
+				items.map(([q, a], i) => (
+					<div
+						class={"faq-item reveal" + (i === 0 ? " open" : "")}
+						data-faq-item
+					>
+						<button
+							class="faq-q"
+							type="button"
+							data-faq-toggle
+							aria-expanded={i === 0 ? "true" : "false"}
+							aria-controls={`faq-a-${i}`}
+						>
+							<span class="n">0{i + 1}</span>
+							<span>{q}</span>
+							<span class="i" aria-hidden="true">+</span>
+						</button>
+						<div class="faq-a" id={`faq-a-${i}`} role="region">
+							{a}
+						</div>
+					</div>
+				))
+			}
+		</div>
+	</div>
+</section>
+
+<script>
+	// ========================================================================
+	// FAQ 折叠交互（手风琴：同一时刻最多展开一项）
+	// - 点击已展开项可再次折叠（→ 全部关闭）
+	// - 同步切换 .open class 与 aria-expanded
+	// ========================================================================
+
+	(function () {
+		const lists = document.querySelectorAll<HTMLElement>("[data-faq-list]");
+		lists.forEach((list) => {
+			const items = Array.from(
+				list.querySelectorAll<HTMLElement>("[data-faq-item]"),
+			);
+
+			items.forEach((item) => {
+				const toggle = item.querySelector<HTMLButtonElement>(
+					"[data-faq-toggle]",
+				);
+				if (!toggle) return;
+
+				toggle.addEventListener("click", () => {
+					const isOpen = item.classList.contains("open");
+
+					// 先全部关闭
+					items.forEach((other) => {
+						other.classList.remove("open");
+						const otherToggle = other.querySelector<HTMLButtonElement>(
+							"[data-faq-toggle]",
+						);
+						if (otherToggle) {
+							otherToggle.setAttribute("aria-expanded", "false");
+						}
+					});
+
+					// 当前项：若原本未展开则展开
+					if (!isOpen) {
+						item.classList.add("open");
+						toggle.setAttribute("aria-expanded", "true");
+					}
+				});
+			});
+		});
+	})();
+</script>

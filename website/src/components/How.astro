@@ -1,0 +1,351 @@
+---
+// ============================================================================
+// How — 工作原理
+// 左侧 SVG 流程图（DEVICE → SERVER），右侧三步说明卡片。
+// 三步循环高亮，点击步骤会切换 active；步骤同时控制 SVG 内的高亮态。
+// ============================================================================
+
+import type { SiteStrings } from "../i18n/strings";
+
+export interface Props {
+	t: SiteStrings;
+}
+
+const { t } = Astro.props;
+
+const steps = [
+	{ title: t.how_1_title, body: t.how_1_body },
+	{ title: t.how_2_title, body: t.how_2_body },
+	{ title: t.how_3_title, body: t.how_3_body },
+];
+---
+
+<section class="section" id="how">
+	<div class="wrap">
+		<div class="sec-head reveal">
+			<div class="index mono"><b>02</b> / {t.section_how}</div>
+			<div>
+				<h2>{t.section_how}</h2>
+				<div class="sec-sub">{t.section_how_sub}</div>
+			</div>
+		</div>
+
+		<div class="how">
+			<!-- ===== 流程图 ===== -->
+			<div class="how-diagram reveal">
+				<svg
+					id="how-svg"
+					viewBox="0 0 460 420"
+					width="100%"
+					height="auto"
+					fill="none"
+					aria-label="ZPass 三步加密流程图"
+				>
+					<defs>
+						<marker
+							id="hm"
+							viewBox="0 0 10 10"
+							refX="8"
+							refY="5"
+							markerWidth="6"
+							markerHeight="6"
+							orient="auto"
+						>
+							<path d="M0,0 L10,5 L0,10 Z" fill="currentColor"></path>
+						</marker>
+					</defs>
+
+					<!-- ===== 设备 ===== -->
+					<g>
+						<rect
+							x="30"
+							y="30"
+							width="180"
+							height="360"
+							rx="10"
+							fill="var(--bg-elev-2)"
+							stroke="var(--line)"></rect>
+						<text
+							x="50"
+							y="58"
+							fill="var(--text-3)"
+							font-size="11"
+							font-family="var(--font-mono)">DEVICE</text>
+						<text
+							x="50"
+							y="80"
+							fill="var(--text)"
+							font-size="13"
+							font-family="var(--font-mono)">alex@zpass</text>
+
+						<!-- step 1：DERIVE -->
+						<g class="how-step-shape" data-idx="0">
+							<rect
+								class="how-step-rect"
+								x="48"
+								y="100"
+								width="144"
+								height="68"
+								rx="6"
+								fill="var(--bg)"
+								stroke="var(--line)"></rect>
+							<text
+								x="60"
+								y="120"
+								fill="var(--text-3)"
+								font-size="10"
+								font-family="var(--font-mono)">1 · DERIVE</text>
+							<text
+								x="60"
+								y="140"
+								fill="var(--text)"
+								font-size="12"
+								font-family="var(--font-mono)">Argon2id</text>
+							<text
+								x="60"
+								y="158"
+								fill="var(--text-3)"
+								font-size="11"
+								font-family="var(--font-mono)">→ K_vault</text>
+						</g>
+
+						<!-- step 2：ENCRYPT -->
+						<g class="how-step-shape" data-idx="1">
+							<rect
+								class="how-step-rect"
+								x="48"
+								y="190"
+								width="144"
+								height="68"
+								rx="6"
+								fill="var(--bg)"
+								stroke="var(--line)"></rect>
+							<text
+								x="60"
+								y="210"
+								fill="var(--text-3)"
+								font-size="10"
+								font-family="var(--font-mono)">2 · ENCRYPT</text>
+							<text
+								x="60"
+								y="230"
+								fill="var(--text)"
+								font-size="12"
+								font-family="var(--font-mono)">XChaCha20-</text>
+							<text
+								x="60"
+								y="246"
+								fill="var(--text)"
+								font-size="12"
+								font-family="var(--font-mono)">Poly1305</text>
+						</g>
+
+						<!-- step 3：SYNC -->
+						<g class="how-step-shape" data-idx="2">
+							<rect
+								class="how-step-rect"
+								x="48"
+								y="280"
+								width="144"
+								height="68"
+								rx="6"
+								fill="var(--bg)"
+								stroke="var(--line)"></rect>
+							<text
+								x="60"
+								y="300"
+								fill="var(--text-3)"
+								font-size="10"
+								font-family="var(--font-mono)">3 · SYNC</text>
+							<text
+								x="60"
+								y="320"
+								fill="var(--text)"
+								font-size="12"
+								font-family="var(--font-mono)">CRDT merge</text>
+							<text
+								x="60"
+								y="338"
+								fill="var(--text-3)"
+								font-size="11"
+								font-family="var(--font-mono)">E2E auth</text>
+						</g>
+					</g>
+
+					<!-- 箭头：设备 → 服务器（SYNC 步高亮） -->
+					<g
+						id="how-arrow"
+						stroke="var(--text-3)"
+						color="var(--text-3)"
+						marker-end="url(#hm)"
+					>
+						<path d="M210 314 L 280 314"></path>
+					</g>
+
+					<!-- ===== 服务器 ===== -->
+					<g id="how-server" opacity="0.5">
+						<rect
+							x="290"
+							y="270"
+							width="140"
+							height="80"
+							rx="8"
+							fill="var(--bg-elev-2)"
+							stroke="var(--line)"></rect>
+						<text
+							x="306"
+							y="294"
+							fill="var(--text-3)"
+							font-size="10"
+							font-family="var(--font-mono)">SERVER</text>
+						<text
+							x="306"
+							y="314"
+							fill="var(--text)"
+							font-size="12"
+							font-family="var(--font-mono)">ciphertext</text>
+						<text
+							x="306"
+							y="332"
+							fill="var(--text-3)"
+							font-size="11"
+							font-family="var(--font-mono)">+ opaque meta</text>
+					</g>
+				</svg>
+			</div>
+
+			<!-- ===== 步骤说明 ===== -->
+			<div class="how-steps" id="how-steps">
+				{
+					steps.map(({ title, body }, i) => (
+						<button
+							class={"how-step reveal" + (i === 0 ? " active" : "")}
+							data-idx={i}
+							type="button"
+							aria-label={`Step ${i + 1}: ${title}`}
+						>
+							<div class="kicker mono">
+								<span class="k">{i + 1}</span>
+								{t.how_kicker} · 0{i + 1}
+							</div>
+							<h3>{title}</h3>
+							<p>{body}</p>
+						</button>
+					))
+				}
+			</div>
+		</div>
+	</div>
+</section>
+
+<script>
+	// ============================================================================
+	// 三步循环高亮交互
+	// - 自动每 2.8s 切换一次
+	// - 用户点击步骤会切换并重置自动播放计时器
+	// - 同步更新右侧步骤卡片 .active、左侧 SVG 矩形高亮、SERVER 透明度、箭头颜色
+	// ============================================================================
+
+	(function () {
+		const STEP_COUNT = 3;
+		const INTERVAL_MS = 2800;
+
+		const stepsRoot = document.getElementById("how-steps");
+		const svg = document.getElementById("how-svg");
+		const server = document.getElementById("how-server");
+		const arrow = document.getElementById("how-arrow");
+		if (!stepsRoot || !svg || !server || !arrow) return;
+
+		const stepBtns = Array.from(
+			stepsRoot.querySelectorAll<HTMLButtonElement>(".how-step"),
+		);
+		const stepShapes = Array.from(
+			svg.querySelectorAll<SVGGElement>(".how-step-shape"),
+		);
+
+		let current = 0;
+		let timer: ReturnType<typeof setInterval> | null = null;
+
+		function applyState(idx: number) {
+			current = idx;
+
+			// 右侧卡片
+			stepBtns.forEach((b, i) => {
+				b.classList.toggle("active", i === idx);
+			});
+
+			// 左侧 SVG 矩形
+			stepShapes.forEach((g, i) => {
+				const rect = g.querySelector("rect");
+				g.setAttribute("opacity", String(idx >= i ? 1 : 0.35));
+				if (rect) {
+					if (i === idx) {
+						rect.setAttribute("fill", "var(--bg-active)");
+						rect.setAttribute("stroke", "var(--accent)");
+					} else {
+						rect.setAttribute("fill", "var(--bg)");
+						rect.setAttribute("stroke", "var(--line)");
+					}
+				}
+			});
+
+			// 服务器透明度（仅在 SYNC 步骤完全显示）
+			if (server) {
+				server.setAttribute("opacity", String(idx >= 2 ? 1 : 0.5));
+			}
+
+			// 箭头颜色（SYNC 步骤强调）
+			const arrowColor = idx === 2 ? "var(--accent)" : "var(--text-3)";
+			if (arrow) {
+				arrow.setAttribute("stroke", arrowColor);
+				arrow.setAttribute("color", arrowColor);
+			}
+		}
+
+		function start() {
+			stop();
+			timer = setInterval(() => {
+				applyState((current + 1) % STEP_COUNT);
+			}, INTERVAL_MS);
+		}
+		function stop() {
+			if (timer !== null) {
+				clearInterval(timer);
+				timer = null;
+			}
+		}
+
+		stepBtns.forEach((btn) => {
+			btn.addEventListener("click", () => {
+				const raw = btn.getAttribute("data-idx");
+				const idx = raw === null ? 0 : Number.parseInt(raw, 10);
+				applyState(Number.isFinite(idx) ? idx : 0);
+				start(); // 重置计时器
+			});
+		});
+
+		// 当 #how 进入视口时启动循环；离开时暂停，节省资源。
+		if ("IntersectionObserver" in window) {
+			const section = document.getElementById("how");
+			if (section) {
+				const io = new IntersectionObserver(
+					(entries) => {
+						entries.forEach((e) => {
+							if (e.isIntersecting) start();
+							else stop();
+						});
+					},
+					{ threshold: 0.15 },
+				);
+				io.observe(section);
+			} else {
+				start();
+			}
+		} else {
+			start();
+		}
+
+		// 初始化
+		applyState(0);
+	})();
+</script>

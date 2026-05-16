@@ -1,0 +1,142 @@
+/* ============================================================================
+ * ZPass 设计系统 — 全局 token
+ * 移植自 ZPassDesign/ZPass-Site.html 中的 :root 与 [data-theme="light"]。
+ * 通过 CSS 变量在 dark / light 主题之间切换，强调色 (accent) 也可在运行时覆写。
+ * ============================================================================ */
+
+:root {
+	/* —— 颜色：背景层级 —— */
+	--bg: #0c0c0d;
+	--bg-elev: #111113;
+	--bg-elev-2: #16161a;
+	--bg-hover: #18181c;
+	--bg-active: #1d1d22;
+
+	/* —— 颜色：分割线 —— */
+	--line: #232328;
+	--line-soft: #1a1a1e;
+
+	/* —— 颜色：文本层级 —— */
+	--text: #ececec;
+	--text-2: #a8a8ac;
+	--text-3: #6e6e73;
+	--text-4: #45454a;
+
+	/* —— 强调色 与 状态色 —— */
+	--accent: #d4ff3a;
+	--accent-ink: #0c0c0d;
+	--danger: #e55a4a;
+	--ok: #5ea47a;
+	--info: #6b9cc4;
+
+	/* —— 网格背景 —— */
+	--grid: rgba(255, 255, 255, 0.04);
+
+	/* —— 阴影：从弱到强（dark 主题下使用更深的黑） —— */
+	--shadow-soft: 0 0 0 1px var(--line-soft);
+	--shadow-card: 0 40px 80px rgba(0, 0, 0, 0.45);
+	--shadow-strong: 0 40px 80px rgba(0, 0, 0, 0.55);
+	--shadow-frame: 0 40px 80px rgba(0, 0, 0, 0.5);
+
+	/* —— 装饰性元素颜色（可被主题覆写） —— */
+	/* 浏览器窗口红黄绿圆点（设计稿用同一灰色处理） */
+	--browser-dot: #3a3a3f;
+	/* 手机外框听筒/灵动岛颜色 */
+	--phone-notch: #000000;
+
+	/* —— 圆角 —— */
+	--radius-sm: 5px;
+	--radius: 7px;
+	--radius-lg: 10px;
+
+	/* —— 字体 —— */
+	--font-sans:
+		"Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+	--font-mono:
+		"Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+	/* —— 布局 —— */
+	--max-w: 1320px;
+	--gutter: 40px;
+}
+
+/* ——— Light 主题覆写 ——— */
+[data-theme="light"] {
+	--bg: #f5f5f3;
+	--bg-elev: #fbfbf9;
+	--bg-elev-2: #ffffff;
+	--bg-hover: #ededea;
+	--bg-active: #e4e4e0;
+	--line: #d8d8d2;
+	--line-soft: #e6e6e2;
+	--text: #141416;
+	--text-2: #4a4a4e;
+	--text-3: #77777c;
+	--text-4: #a6a6aa;
+	--accent: #8ab10f;
+	--accent-ink: #ffffff;
+	--grid: rgba(0, 0, 0, 0.04);
+
+	/* light 主题下阴影需收敛，避免大面积深色块在浅色背景上显得突兀 */
+	--shadow-soft: 0 0 0 1px var(--line-soft);
+	--shadow-card: 0 24px 48px rgba(20, 20, 22, 0.08);
+	--shadow-strong: 0 30px 60px rgba(20, 20, 22, 0.12);
+	--shadow-frame: 0 24px 56px rgba(20, 20, 22, 0.1);
+
+	/* 装饰圆点稍亮，保留可识别度 */
+	--browser-dot: #c8c8c2;
+	/* 手机听筒在浅色主题下保持深色，更接近真实设备观感 */
+	--phone-notch: #1a1a1e;
+}
+
+/* ============================================================================
+ * prefers-color-scheme 自动适配
+ *   仅在 <html> 未显式设置 data-theme 时生效（即处于 "auto" 模式）。
+ *   ThemeToggle 客户端脚本会在用户选择 dark/light 时显式写入 data-theme，
+ *   覆盖此默认行为；选择 auto 时则移除属性，回落到此规则。
+ * ============================================================================ */
+@media (prefers-color-scheme: light) {
+	html:not([data-theme]) {
+		--bg: #f5f5f3;
+		--bg-elev: #fbfbf9;
+		--bg-elev-2: #ffffff;
+		--bg-hover: #ededea;
+		--bg-active: #e4e4e0;
+		--line: #d8d8d2;
+		--line-soft: #e6e6e2;
+		--text: #141416;
+		--text-2: #4a4a4e;
+		--text-3: #77777c;
+		--text-4: #a6a6aa;
+		--accent: #8ab10f;
+		--accent-ink: #ffffff;
+		--grid: rgba(0, 0, 0, 0.04);
+
+		--shadow-soft: 0 0 0 1px var(--line-soft);
+		--shadow-card: 0 24px 48px rgba(20, 20, 22, 0.08);
+		--shadow-strong: 0 30px 60px rgba(20, 20, 22, 0.12);
+		--shadow-frame: 0 24px 56px rgba(20, 20, 22, 0.1);
+
+		--browser-dot: #c8c8c2;
+		--phone-notch: #1a1a1e;
+	}
+}
+
+/* ===== 主题切换过渡：让颜色变化更柔和 ===== */
+html {
+	transition:
+		background-color 0.2s ease,
+		color 0.2s ease;
+}
+
+/* ——— 字体 body 切换：用 mono 字体作为 body 字体 ——— */
+[data-body="mono"] {
+	--font-sans: "Geist Mono", ui-monospace, monospace;
+}
+
+/* ——— 响应式：在小屏上收紧外边距 ——— */
+@media (max-width: 720px) {
+	:root {
+		--gutter: 20px;
+	}
+}

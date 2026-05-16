@@ -1,0 +1,9 @@
+{
+  "name": "com.zerx_lab.zpass",
+  "description": "ZPass native messaging host",
+  "path": "C:\\Program Files\\ZPass\\zpass-native-host.exe",
+  "type": "stdio",
+  "allowed_extensions": [
+    "zpass-extension@zerx-lab.local"
+  ]
+}

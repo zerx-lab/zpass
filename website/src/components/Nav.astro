@@ -1,0 +1,472 @@
+---
+// ============================================================================
+// Nav — 顶部导航栏
+// 与设计稿一致：左侧品牌(Z + ZPass + 版本 tag),中部锚点链接,
+// 右侧语言切换 + Subscribe CTA。
+// 语言切换是真实的链接,跳转到对应 locale 的当前页面。
+//
+// 注:前期开发期版本——
+//   - 版本徽标默认显示 "preview"(产品尚未发布)
+//   - 移除原 "Sign in" 按钮(尚无账号体系)
+//   - 移除 nav-links 中的 "demo" 项(Live 区块默认隐藏,锚点会断)
+//   - 右侧主 CTA 文案统一为订阅(t.nav_download = "Subscribe / 订阅")
+//   - ≤860px 汉堡菜单展开所有锚点 + 语言切换 + 联系我们
+// ============================================================================
+
+import type { SiteStrings, Locale } from "../i18n/strings";
+import { localizePath } from "../i18n/strings";
+import ThemeToggle from "./ThemeToggle.astro";
+
+export interface Props {
+	t: SiteStrings;
+	locale: Locale;
+	pathname?: string;
+	/** 品牌右侧的版本徽标,默认 preview(前期开发期) */
+	version?: string;
+}
+
+const {
+	t,
+	locale,
+	pathname = Astro.url.pathname,
+	version = "preview",
+} = Astro.props;
+
+// 站点内锚点链接（跳转到当前语言版本首页 + #anchor）
+const homeBase = locale === "zh" ? "/zh/" : "/";
+const link = (anchor: string) => `${homeBase}#${anchor}`;
+
+// 语言切换：分别预生成两种语言的当前路径，渲染为左右两枚链接
+const enPath = localizePath(pathname, "en");
+const zhPath = localizePath(pathname, "zh");
+---
+
+<nav class="nav">
+	<div class="wrap nav-inner">
+		<a href={homeBase} class="brand" aria-label="ZPass — 首页">
+			<span class="logo">Z</span>
+			<span>ZPass</span>
+			<span class="tag mono">{version}</span>
+		</a>
+
+		<!-- 桌面端中部锚点（≤860px 隐藏，由汉堡菜单接管） -->
+		<div class="nav-links">
+			<a href={link("features")}>{t.nav_features}</a>
+			<a href={link("how")}>{t.section_how}</a>
+			<a href={link("security")}>{t.nav_security}</a>
+			<a href={link("pricing")}>{t.nav_pricing}</a>
+			<a href={link("download")}>{t.nav_download}</a>
+			<a href={link("faq")}>{t.nav_faq}</a>
+		</div>
+
+		<div class="nav-spacer"></div>
+
+		<div class="nav-right">
+			<ThemeToggle t={t} compact={true} />
+
+			<!-- 桌面端联系按钮（≤860px 隐藏） -->
+			<button class="nav-contact-btn mono" data-contact-open>
+				{t.contact_trigger}
+			</button>
+
+			<div
+				class="lang-toggle"
+				role="group"
+				aria-label="Language switcher"
+				data-lang-toggle
+			>
+				<a
+					href={enPath}
+					class={locale === "en" ? "on" : ""}
+					hreflang="en"
+					aria-current={locale === "en" ? "page" : undefined}
+					data-lang-switch="en"
+					>EN</a
+				>
+				<a
+					href={zhPath}
+					class={locale === "zh" ? "on" : ""}
+					hreflang="zh"
+					aria-current={locale === "zh" ? "page" : undefined}
+					data-lang-switch="zh"
+					>中文</a
+				>
+			</div>
+
+			<a href={link("download")} class="btn primary nav-cta"
+				>{t.nav_download}</a
+			>
+
+			<!-- 汉堡按钮（>860px 隐藏） -->
+			<button
+				class="nav-burger"
+				aria-label="Toggle menu"
+				aria-expanded="false"
+				aria-controls="nav-mobile-menu"
+				data-nav-burger
+			>
+				<span class="burger-bar"></span>
+				<span class="burger-bar"></span>
+				<span class="burger-bar"></span>
+			</button>
+		</div>
+	</div>
+
+	<!-- 移动端下拉菜单 -->
+	<div
+		id="nav-mobile-menu"
+		class="nav-mobile-menu"
+		aria-hidden="true"
+		data-nav-mobile-menu
+	>
+		<div class="wrap nav-mobile-inner">
+			<a href={link("features")} class="nav-mobile-link" data-nav-mobile-link>{t.nav_features}</a>
+			<a href={link("how")} class="nav-mobile-link" data-nav-mobile-link>{t.section_how}</a>
+			<a href={link("security")} class="nav-mobile-link" data-nav-mobile-link>{t.nav_security}</a>
+			<a href={link("pricing")} class="nav-mobile-link" data-nav-mobile-link>{t.nav_pricing}</a>
+			<a href={link("download")} class="nav-mobile-link" data-nav-mobile-link>{t.nav_download}</a>
+			<a href={link("faq")} class="nav-mobile-link" data-nav-mobile-link>{t.nav_faq}</a>
+
+			<div class="nav-mobile-divider"></div>
+
+			<div class="nav-mobile-bottom">
+				<div
+					class="lang-toggle"
+					role="group"
+					aria-label="Language switcher"
+				>
+					<a
+						href={enPath}
+						class={locale === "en" ? "on" : ""}
+						hreflang="en"
+						data-lang-switch="en"
+						>EN</a
+					>
+					<a
+						href={zhPath}
+						class={locale === "zh" ? "on" : ""}
+						hreflang="zh"
+						data-lang-switch="zh"
+						>中文</a
+					>
+				</div>
+
+				<button class="nav-mobile-contact mono" data-contact-open>
+					{t.contact_trigger}
+				</button>
+			</div>
+		</div>
+	</div>
+</nav>
+
+<style>
+	.lang-toggle a {
+		min-width: 28px;
+		justify-content: center;
+		text-decoration: none;
+		white-space: nowrap;
+	}
+	.lang-toggle {
+		flex-shrink: 0;
+	}
+
+	/* ---- 桌面端联系按钮 ---- */
+	.nav-contact-btn {
+		background: none;
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+		padding: 0 10px;
+		height: 28px;
+		font-size: 11px;
+		color: var(--text-3);
+		cursor: pointer;
+		letter-spacing: 0.02em;
+		transition: color 0.15s, border-color 0.15s, background 0.15s;
+		white-space: nowrap;
+	}
+	.nav-contact-btn:hover {
+		color: var(--text);
+		border-color: var(--text-3);
+		background: var(--bg-hover);
+	}
+
+	/* ---- 汉堡按钮 ---- */
+	.nav-burger {
+		display: none;
+		flex-direction: column;
+		justify-content: center;
+		gap: 5px;
+		width: 36px;
+		height: 36px;
+		padding: 0 6px;
+		background: none;
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+		cursor: pointer;
+		flex-shrink: 0;
+	}
+	.burger-bar {
+		display: block;
+		width: 100%;
+		height: 1.5px;
+		background: var(--text-2);
+		border-radius: 2px;
+		transition: transform 0.2s ease, opacity 0.2s ease;
+		transform-origin: center;
+	}
+	/* 打开时：第一根旋转 45°，第二根消失，第三根旋转 -45° */
+	.nav-burger[aria-expanded="true"] .burger-bar:nth-child(1) {
+		transform: translateY(6.5px) rotate(45deg);
+	}
+	.nav-burger[aria-expanded="true"] .burger-bar:nth-child(2) {
+		opacity: 0;
+	}
+	.nav-burger[aria-expanded="true"] .burger-bar:nth-child(3) {
+		transform: translateY(-6.5px) rotate(-45deg);
+	}
+
+	/* ---- 移动端下拉菜单 ---- */
+	.nav-mobile-menu {
+		overflow: hidden;
+		max-height: 0;
+		transition: max-height 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+		border-bottom: 1px solid var(--line-soft);
+	}
+	.nav-mobile-menu[aria-hidden="false"] {
+		max-height: 400px;
+	}
+	.nav-mobile-inner {
+		padding: 8px 0 16px;
+		display: flex;
+		flex-direction: column;
+	}
+	.nav-mobile-link {
+		font-size: 14px;
+		color: var(--text-2);
+		padding: 11px 0;
+		border-bottom: 1px solid var(--line-soft);
+		transition: color 0.15s;
+	}
+	.nav-mobile-link:last-of-type {
+		border-bottom: none;
+	}
+	.nav-mobile-link:hover {
+		color: var(--text);
+	}
+	.nav-mobile-divider {
+		height: 1px;
+		background: var(--line-soft);
+		margin: 4px 0 12px;
+	}
+	.nav-mobile-bottom {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+	}
+	.nav-mobile-contact {
+		background: none;
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+		padding: 6px 12px;
+		font-size: 11px;
+		color: var(--text-3);
+		cursor: pointer;
+		letter-spacing: 0.02em;
+		transition: color 0.15s, border-color 0.15s, background 0.15s;
+	}
+	.nav-mobile-contact:hover {
+		color: var(--text);
+		border-color: var(--text-3);
+		background: var(--bg-hover);
+	}
+
+	/* ---- 响应式：≤860px 显示汉堡，隐藏桌面元素 ---- */
+	@media (max-width: 860px) {
+		.nav-burger {
+			display: flex;
+		}
+		.nav-contact-btn {
+			display: none;
+		}
+		/* 移动端隐藏 nav-right 里的 CTA 按钮，由汉堡菜单提供导航 */
+		.nav-cta {
+			display: none;
+		}
+	}
+
+	@media (max-width: 480px) {
+		.nav-burger {
+			width: 32px;
+			height: 32px;
+		}
+	}
+</style>
+
+<script>
+	// ========================================================================
+	// 汉堡菜单 — 展开/收起移动端菜单
+	// ------------------------------------------------------------------------
+	// 绑定策略（避免重复绑定导致点击"开→立刻关"）：
+	//   - 每次对具体 DOM 节点绑定前，用 data-burger-bound / data-link-bound
+	//     标记该元素已绑定，幂等安全。
+	//   - ClientRouter 会在 SPA 切换后给出全新 DOM 节点（新节点上没有标记），
+	//     所以新 DOM 能被重新绑定；旧节点已丢弃，无泄漏。
+	//   - 「astro:page-load 后 closeMenu」这类全局 listener 只注册一次（用
+	//     window flag 保护），不依赖任何具体 DOM 节点。
+	// ========================================================================
+	function initNavBurger() {
+		const burger = document.querySelector<HTMLButtonElement>("[data-nav-burger]");
+		const menu = document.querySelector<HTMLElement>("[data-nav-mobile-menu]");
+		if (!burger || !menu) return;
+
+		function openMenu() {
+			burger!.setAttribute("aria-expanded", "true");
+			menu!.setAttribute("aria-hidden", "false");
+		}
+
+		function closeMenu() {
+			burger!.setAttribute("aria-expanded", "false");
+			menu!.setAttribute("aria-hidden", "true");
+		}
+
+		// 绑定 burger click — 仅绑定一次
+		if (burger.dataset.burgerBound !== "1") {
+			burger.dataset.burgerBound = "1";
+			burger.addEventListener("click", (e) => {
+				e.stopPropagation();
+				const isOpen = burger.getAttribute("aria-expanded") === "true";
+				if (isOpen) closeMenu();
+				else openMenu();
+			});
+		}
+
+		// 绑定菜单内链接点击后关闭 — 每个 link 也只绑定一次
+		menu.querySelectorAll<HTMLElement>("[data-nav-mobile-link]").forEach((link) => {
+			if (link.dataset.linkBound === "1") return;
+			link.dataset.linkBound = "1";
+			link.addEventListener("click", closeMenu);
+		});
+
+		// 菜单容器上的 contact 触发委托 — 只绑定一次
+		if (menu.dataset.contactBound !== "1") {
+			menu.dataset.contactBound = "1";
+			menu.addEventListener("click", (e) => {
+				const t = e.target as HTMLElement | null;
+				if (t?.closest("[data-contact-open]")) closeMenu();
+			});
+		}
+	}
+
+	// 全局 listener 只注册一次（与具体 DOM 节点解耦）
+	if (!(window as any).__zpassBurgerGlobalBound) {
+		(window as any).__zpassBurgerGlobalBound = true;
+
+		// SPA 切换后收起菜单（新页面默认关闭）
+		document.addEventListener("astro:page-load", () => {
+			const burger = document.querySelector<HTMLButtonElement>("[data-nav-burger]");
+			const menu = document.querySelector<HTMLElement>("[data-nav-mobile-menu]");
+			if (burger) burger.setAttribute("aria-expanded", "false");
+			if (menu) menu.setAttribute("aria-hidden", "true");
+		});
+
+		// 点击菜单外区域时关闭（提升移动端体验）
+		document.addEventListener("click", (e) => {
+			const menu = document.querySelector<HTMLElement>("[data-nav-mobile-menu]");
+			const burger = document.querySelector<HTMLButtonElement>("[data-nav-burger]");
+			if (!menu || !burger) return;
+			if (menu.getAttribute("aria-hidden") !== "false") return;
+			const target = e.target as HTMLElement | null;
+			if (!target) return;
+			if (target.closest("[data-nav-mobile-menu]")) return;
+			if (target.closest("[data-nav-burger]")) return;
+			burger.setAttribute("aria-expanded", "false");
+			menu.setAttribute("aria-hidden", "true");
+		});
+
+		// Esc 关闭菜单
+		document.addEventListener("keydown", (e) => {
+			if (e.key !== "Escape") return;
+			const menu = document.querySelector<HTMLElement>("[data-nav-mobile-menu]");
+			const burger = document.querySelector<HTMLButtonElement>("[data-nav-burger]");
+			if (!menu || !burger) return;
+			if (menu.getAttribute("aria-hidden") === "false") {
+				burger.setAttribute("aria-expanded", "false");
+				menu.setAttribute("aria-hidden", "true");
+			}
+		});
+	}
+
+	// 首次脚本执行 + 每次 SPA page-load 都重新扫描 DOM，
+	// 但内部通过 dataset 标记保证幂等，不会重复绑定
+	initNavBurger();
+	document.addEventListener("astro:page-load", initNavBurger);
+</script>
+
+<script>
+	// ========================================================================
+	// 语言切换 — 保留滚动位置 + 走 SPA 导航
+	// ------------------------------------------------------------------------
+	// ClientRouter 默认在跨文档导航时会立即 scrollTo(0,0)（见
+	// astro/dist/transitions/router.js 中的 moveToLocation：!intraPage 分支
+	// 必然滚到顶部）。语言切换属于"同一份内容、只换文案"的场景，把用户从
+	// 当前位置硬甩回顶部体验非常糟糕，所以这里：
+	//
+	//   1) 在用户点击 [data-lang-switch] 链接的瞬间，记录当前 scrollY
+	//   2) 让 ClientRouter 正常完成 SPA 切换（页面会被滚到顶部）
+	//   3) 在 astro:page-load 之后立刻把滚动位置还原回去
+	//
+	// 由于 EN ↔ ZH 两份页面结构严格对齐（Hero / Features / How / ... 顺序
+	// 与高度基本一致），用同一 scrollY 还原视觉上几乎无感知。
+	//
+	// 主题状态由 BaseLayout 的内联脚本（带 data-astro-rerun）在 head 阶段
+	// 接管，无需在这里处理。
+	// ========================================================================
+
+	let pendingScrollY: number | null = null;
+
+	function bindLangSwitchOnce() {
+		// 用模块级 flag 防止 page-load 重复触发时多次绑定
+		if ((window as any).__zpassLangBound) return;
+		(window as any).__zpassLangBound = true;
+
+		// 用 capture 阶段抢在 ClientRouter 的全局 click 处理之前记录滚动位置
+		document.addEventListener(
+			"click",
+			(e) => {
+				const target = e.target as HTMLElement | null;
+				const link = target?.closest<HTMLAnchorElement>("[data-lang-switch]");
+				if (!link) return;
+				// 只在普通左键点击时记录（带修饰键的"新标签页打开"由浏览器接管）
+				const me = e as MouseEvent;
+				if (me.button !== 0 || me.metaKey || me.ctrlKey || me.altKey || me.shiftKey) {
+					return;
+				}
+				// 记住用户手动选择，覆盖下次访问时的浏览器语言自动检测
+				const chosen = link.getAttribute("data-lang-switch");
+				if (chosen === "en" || chosen === "zh") {
+					try {
+						localStorage.setItem("zpass-lang", chosen);
+						// 手动切换后允许"自动检测哨兵"重置（用户可能又改回系统默认语言访问）
+						sessionStorage.removeItem("zpass-lang-redirected");
+					} catch (err) {
+						/* 隐私模式：忽略 */
+					}
+				}
+				pendingScrollY = window.scrollY;
+			},
+			true,
+		);
+
+		// 切换完成后还原滚动位置
+		document.addEventListener("astro:page-load", () => {
+			if (pendingScrollY === null) return;
+			const y = pendingScrollY;
+			pendingScrollY = null;
+			// 用 instant 避免再叠一层平滑滚动动画造成"飘"的感觉
+			window.scrollTo({ left: 0, top: y, behavior: "instant" as ScrollBehavior });
+		});
+	}
+
+	bindLangSwitchOnce();
+</script>

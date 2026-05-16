@@ -1,0 +1,383 @@
+---
+// ============================================================================
+// ThemeToggle — 主题切换段控按钮
+// 三态：dark / auto / light
+//   - dark：强制深色，写入 localStorage("zpass-theme") = "dark" 与 <html data-theme="dark">
+//   - light：强制浅色，写入 localStorage("zpass-theme") = "light" 与 <html data-theme="light">
+//   - auto：跟随系统 prefers-color-scheme，移除 localStorage 与 data-theme
+//
+// 配合 BaseLayout 中的内联防 FOUC 脚本：
+//   - 该脚本在 <head> 早于样式执行，会先读取 localStorage 写入 data-theme，
+//     避免页面闪烁。
+//
+// 本组件渲染为 nav 中的紧凑段控（与 .lang-toggle 视觉对齐），
+// 客户端脚本读取/写入 localStorage 并广播 storage 事件，多 tab 同步。
+// ============================================================================
+
+import type { SiteStrings } from "../i18n/strings";
+
+export interface Props {
+	/**
+	 * i18n 文案。可选；不传时使用英文兜底，便于在某些独立场景（404、邮件模板等）
+	 * 也能复用本组件而无需准备完整文案表。
+	 */
+	t?: SiteStrings;
+	/** 紧凑模式：仅显示图标（默认 true，适合放进顶部导航） */
+	compact?: boolean;
+}
+
+const { t, compact = true } = Astro.props;
+
+// 文案：若提供 t 则使用 i18n，否则用英文兜底
+const labelTheme = t?.theme_label ?? "Theme";
+const labelDark = t?.theme_dark ?? "Dark";
+const labelLight = t?.theme_light ?? "Light";
+const labelAuto = t?.theme_auto ?? "Auto";
+---
+
+<div
+	class={"theme-toggle" + (compact ? " compact" : "")}
+	role="group"
+	aria-label={labelTheme}
+	data-theme-toggle
+>
+	<button
+		type="button"
+		data-theme-value="dark"
+		class="theme-btn"
+		title={labelDark}
+		aria-label={labelDark}
+		aria-pressed="false"
+	>
+		<!-- 月亮图标 -->
+		<svg
+			width="14"
+			height="14"
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			stroke-width="1.6"
+			stroke-linecap="round"
+			stroke-linejoin="round"
+			aria-hidden="true"
+		>
+			<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path>
+		</svg>
+		{!compact && <span class="lbl">{labelDark}</span>}
+	</button>
+
+	<button
+		type="button"
+		data-theme-value="auto"
+		class="theme-btn"
+		title={labelAuto}
+		aria-label={labelAuto}
+		aria-pressed="false"
+	>
+		<!-- 半月/自动图标：左半深色右半浅色的圆 -->
+		<svg
+			width="14"
+			height="14"
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			stroke-width="1.6"
+			stroke-linecap="round"
+			stroke-linejoin="round"
+			aria-hidden="true"
+		>
+			<circle cx="12" cy="12" r="8"></circle>
+			<path d="M12 4v16" fill="currentColor" stroke="none"></path>
+			<path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none"
+			></path>
+		</svg>
+		{!compact && <span class="lbl">{labelAuto}</span>}
+	</button>
+
+	<button
+		type="button"
+		data-theme-value="light"
+		class="theme-btn"
+		title={labelLight}
+		aria-label={labelLight}
+		aria-pressed="false"
+	>
+		<!-- 太阳图标 -->
+		<svg
+			width="14"
+			height="14"
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			stroke-width="1.6"
+			stroke-linecap="round"
+			stroke-linejoin="round"
+			aria-hidden="true"
+		>
+			<circle cx="12" cy="12" r="4"></circle>
+			<path
+				d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"
+			></path>
+		</svg>
+		{!compact && <span class="lbl">{labelLight}</span>}
+	</button>
+</div>
+
+<style>
+	/* ===== 段控容器：与 .lang-toggle 视觉一致 ===== */
+	.theme-toggle {
+		display: inline-flex;
+		border: 1px solid var(--line);
+		border-radius: var(--radius);
+		background: var(--bg-elev);
+		overflow: hidden;
+	}
+
+	.theme-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
+		padding: 0 8px;
+		height: 28px;
+		min-width: 32px;
+		font-family: var(--font-mono);
+		font-size: 11px;
+		color: var(--text-3);
+		border-right: 1px solid var(--line);
+		background: transparent;
+		cursor: pointer;
+		transition:
+			color 0.15s,
+			background 0.15s;
+	}
+	.theme-btn:last-child {
+		border-right: 0;
+	}
+	.theme-btn:hover {
+		color: var(--text);
+	}
+
+	/* 当前激活态：实色背景 + 反色文字（与 .lang-toggle button.on 一致） */
+	.theme-btn[aria-pressed="true"] {
+		background: var(--text);
+		color: var(--bg);
+	}
+	.theme-btn[aria-pressed="true"] svg {
+		stroke: var(--bg);
+	}
+
+	.theme-btn .lbl {
+		font-size: 11px;
+		letter-spacing: 0.02em;
+	}
+
+	/* 紧凑模式下进一步收紧内边距 */
+	.theme-toggle.compact .theme-btn {
+		padding: 0 7px;
+		min-width: 28px;
+	}
+
+	/* 在窄屏上隐藏中间的 auto 项，避免顶部导航过挤 */
+	@media (max-width: 720px) {
+		.theme-toggle .theme-btn[data-theme-value="auto"] {
+			display: none;
+		}
+	}
+</style>
+
+<script>
+	// ========================================================================
+	// 客户端：读取/写入 localStorage("zpass-theme")，应用到 <html data-theme>
+	//
+	// 行为：
+	//   - 初始化：根据当前 localStorage 状态点亮对应按钮（无值视为 "auto"）
+	//   - 点击按钮：
+	//       * dark / light → 写入 localStorage 并设置 data-theme
+	//       * auto         → 移除 localStorage 与 data-theme，回落到 prefers-color-scheme
+	//   - 监听系统主题变化：仅在 "auto" 模式下响应（无需修改 DOM，CSS 已处理）
+	//   - 监听 storage 事件：多 tab 同步主题
+	//
+	// 与 BaseLayout 内联脚本保持同样的 storage key。
+	// ========================================================================
+
+	type ThemeMode = "dark" | "light" | "auto";
+
+	const STORAGE_KEY = "zpass-theme";
+
+	function readMode(): ThemeMode {
+		try {
+			const v = localStorage.getItem(STORAGE_KEY);
+			if (v === "dark" || v === "light") return v;
+		} catch {
+			/* 隐私模式或被禁用，忽略 */
+		}
+		return "auto";
+	}
+
+	// 短暂挂上 data-theme-anim="on" 让全局 CSS 触发颜色过渡，
+	// 过渡时长结束后摘掉，避免长期影响其它交互的 transition。
+	let animTimer: number | null = null;
+	function armThemeAnim() {
+		const root = document.documentElement;
+		// 尊重系统的减少动效偏好：直接跳过加 class
+		try {
+			if (
+				window.matchMedia &&
+				window.matchMedia("(prefers-reduced-motion: reduce)").matches
+			) {
+				return;
+			}
+		} catch {
+			/* ignore */
+		}
+		root.setAttribute("data-theme-anim", "on");
+		if (animTimer !== null) {
+			window.clearTimeout(animTimer);
+		}
+		// 与 global.css 中 transition 时长保持一致（220ms）+ 少量缓冲
+		animTimer = window.setTimeout(() => {
+			root.removeAttribute("data-theme-anim");
+			animTimer = null;
+		}, 280);
+	}
+
+	function applyMode(mode: ThemeMode) {
+		const root = document.documentElement;
+		// 改 data-theme 之前先武装过渡，确保后续的颜色变化被 transition 捕获
+		armThemeAnim();
+		if (mode === "auto") {
+			root.removeAttribute("data-theme");
+			try {
+				localStorage.removeItem(STORAGE_KEY);
+			} catch {
+				/* ignore */
+			}
+		} else {
+			root.setAttribute("data-theme", mode);
+			try {
+				localStorage.setItem(STORAGE_KEY, mode);
+			} catch {
+				/* ignore */
+			}
+		}
+
+		// 同步更新 <meta name="color-scheme"> / "theme-color"
+		const effective = effectiveTheme(mode);
+		const cs = document.querySelector<HTMLMetaElement>(
+			'meta[name="color-scheme"]',
+		);
+		const tc = document.querySelector<HTMLMetaElement>(
+			'meta[name="theme-color"]',
+		);
+		if (cs) cs.content = effective;
+		if (tc) tc.content = effective === "light" ? "#f5f5f3" : "#0c0c0d";
+	}
+
+	function effectiveTheme(mode: ThemeMode): "dark" | "light" {
+		if (mode === "dark" || mode === "light") return mode;
+		try {
+			return window.matchMedia("(prefers-color-scheme: light)").matches
+				? "light"
+				: "dark";
+		} catch {
+			return "dark";
+		}
+	}
+
+	function syncButtons(root: HTMLElement, mode: ThemeMode) {
+		const btns = root.querySelectorAll<HTMLButtonElement>("[data-theme-value]");
+		btns.forEach((b) => {
+			const v = b.dataset.themeValue as ThemeMode | undefined;
+			b.setAttribute("aria-pressed", v === mode ? "true" : "false");
+		});
+	}
+
+	// 标记已初始化的根元素，避免 SPA 导航后重复注册点击监听
+	const INIT_FLAG = "__zpassThemeInit";
+
+	function initToggle(root: HTMLElement) {
+		// 初始同步按钮态（每次都跑，确保新 DOM 反映最新 mode）
+		syncButtons(root, readMode());
+
+		// 防止重复绑定：同一 DOM 节点只注册一次点击监听
+		// （SPA 切换后 root 是全新节点，自然没有该标记，会重新绑定）
+		if ((root as any)[INIT_FLAG]) return;
+		(root as any)[INIT_FLAG] = true;
+
+		// 点击切换
+		root.addEventListener("click", (e) => {
+			const target = e.target as HTMLElement | null;
+			const btn = target?.closest<HTMLButtonElement>("[data-theme-value]");
+			if (!btn || !root.contains(btn)) return;
+			const v = btn.dataset.themeValue as ThemeMode | undefined;
+			if (!v) return;
+			applyMode(v);
+			syncButtons(root, v);
+
+			// 通知页面其他实例（例如多个 ThemeToggle）
+			document.dispatchEvent(
+				new CustomEvent("zpass:theme-change", { detail: { mode: v } }),
+			);
+		});
+	}
+
+	// ========================================================================
+	// 全局监听：只在 module 首次执行时注册一次，永远不重复
+	// （这些监听挂在 document/window/matchMedia 上，跨 SPA 导航持续有效）
+	// ========================================================================
+	let globalsBound = false;
+	function bindGlobalsOnce() {
+		if (globalsBound) return;
+		globalsBound = true;
+
+		// 接收其它实例的变更（同步当前页所有 ThemeToggle 的按钮态）
+		document.addEventListener("zpass:theme-change", (e) => {
+			const detail = (e as CustomEvent<{ mode: ThemeMode }>).detail;
+			if (!detail?.mode) return;
+			document
+				.querySelectorAll<HTMLElement>("[data-theme-toggle]")
+				.forEach((root) => syncButtons(root, detail.mode));
+		});
+
+		// 跨 tab 同步
+		window.addEventListener("storage", (e) => {
+			if (e.key !== STORAGE_KEY) return;
+			const mode = readMode();
+			applyMode(mode);
+			document
+				.querySelectorAll<HTMLElement>("[data-theme-toggle]")
+				.forEach((root) => syncButtons(root, mode));
+		});
+
+		// 当处于 auto 模式时，跟随系统切换更新 meta（CSS 已自动响应）
+		try {
+			const mql = window.matchMedia("(prefers-color-scheme: light)");
+			const onChange = () => {
+				if (readMode() === "auto") applyMode("auto");
+			};
+			if (mql.addEventListener) mql.addEventListener("change", onChange);
+			else if ((mql as any).addListener)
+				(mql as any).addListener(onChange);
+		} catch {
+			/* ignore */
+		}
+	}
+
+	function init() {
+		bindGlobalsOnce();
+		document
+			.querySelectorAll<HTMLElement>("[data-theme-toggle]")
+			.forEach(initToggle);
+	}
+
+	// 首次加载
+	if (document.readyState === "loading") {
+		document.addEventListener("DOMContentLoaded", init);
+	} else {
+		init();
+	}
+
+	// SPA 导航后（ClientRouter 触发）：新 DOM 上的 ThemeToggle 需重新绑定点击
+	document.addEventListener("astro:page-load", init);
+</script>

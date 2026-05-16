@@ -1,0 +1,6 @@
+nul
+node_modules/
+.wxt/
+.output/
+dist/
+desktop/bin/

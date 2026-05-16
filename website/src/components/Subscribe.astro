@@ -1,0 +1,364 @@
+---
+// ============================================================================
+// Subscribe — 邮件订阅区块
+// 前期开发期使用：替代原 Install（curl 安装命令）区块。
+// 用户留下邮箱，发布时通过邮件通知。
+//
+// 设计要点：
+//   - 与原 install 区块视觉一致：双卡片网格布局（左：订阅表单，右：状态终端）
+//   - 表单走同源 SSR 代理：POST /api/subscribe（见 src/pages/api/subscribe.ts），
+//     由 Astro Node 适配器在服务端转发到 listmonk 公共 API。
+//     这样浏览器端不涉及跨源请求，规避 listmonk 不内置 CORS 的限制。
+//   - 服务端响应：{ ok: boolean, hasOptin?: boolean, error?: string }
+//       ok=true + hasOptin=true  → 列表为双重选择加入，提示用户去邮箱点确认
+//       ok=true + hasOptin=false → 单选加入，已直接订阅
+//       ok=false                 → 校验失败 / 上游异常
+//   - 不依赖 React，所有交互通过 is:inline 脚本完成。
+// ============================================================================
+
+import type { SiteStrings } from "../i18n/strings";
+
+export interface Props {
+	t: SiteStrings;
+	/**
+	 * 订阅接口地址。默认走同源 SSR 代理 /api/subscribe，
+	 * 由服务端转发到 listmonk。一般无需覆盖。
+	 */
+	endpoint?: string;
+}
+
+const { t, endpoint = "/api/subscribe" } = Astro.props;
+---
+
+<section class="install" id="download">
+	<div class="wrap">
+		<div class="install-grid">
+			<!-- ===== 卡片 1：订阅表单 ===== -->
+			<div class="install-card reveal">
+				<div class="head">
+					<span class="t">{t.subscribe_title}</span>
+					<span class="tag">{t.subscribe_eyebrow}</span>
+				</div>
+
+				<div class="body">
+					<p class="subscribe-sub">{t.subscribe_sub}</p>
+
+					<form
+						class="subscribe-form"
+						data-subscribe-form
+						data-subscribe-endpoint={endpoint}
+						novalidate
+					>
+						<label class="visually-hidden" for="subscribe-email"
+							>{t.subscribe_placeholder}</label
+						>
+						<input
+							id="subscribe-email"
+							class="subscribe-input mono"
+							type="email"
+							name="email"
+							autocomplete="email"
+							required
+							placeholder={t.subscribe_placeholder}
+							data-subscribe-input
+						/>
+						<button
+							type="submit"
+							class="btn primary subscribe-submit"
+							data-subscribe-submit
+						>
+							{t.subscribe_cta} <span class="arrow">→</span>
+						</button>
+					</form>
+
+					<div
+						class="subscribe-status mono"
+						data-subscribe-status
+						role="status"
+						aria-live="polite"
+					>
+						<span data-subscribe-status-text></span>
+					</div>
+				</div>
+
+				<div class="desc">{t.subscribe_note}</div>
+			</div>
+
+			<!-- ===== 卡片 2：进度状态（静态） ===== -->
+			<div class="install-card reveal">
+				<div class="head">
+					<span class="n">●</span>
+					<span class="t">{t.build_status_title}</span>
+					<span class="tag">{t.build_status_tag}</span>
+				</div>
+				<div class="body">
+					<div class="comment">{t.build_status_comment_desktop}</div>
+					<div class="cmd">
+						<span style="color: var(--accent);">●</span> {t.build_status_macos}
+					</div>
+					<div class="cmd">
+						<span style="color: var(--accent);">●</span> {
+							t.build_status_windows
+						}
+					</div>
+					<div class="cmd">
+						<span style="color: var(--accent);">●</span> {t.build_status_linux}
+					</div>
+					<div class="comment" style="margin-top: 8px;">
+						{t.build_status_comment_mobile}
+					</div>
+					<div class="cmd">
+						<span style="color: var(--accent);">●</span> {t.mobile_status_ios}
+					</div>
+					<div class="cmd">
+						<span style="color: var(--accent);">●</span> {
+							t.mobile_status_android
+						}
+					</div>
+					<div class="comment" style="margin-top: 8px;">
+						{t.build_status_comment_extension}
+					</div>
+					<div class="cmd">
+						<span style="color: var(--accent);">●</span> {
+							t.build_status_browser_ext
+						}
+					</div>
+				</div>
+				<div class="desc">{t.subscribe_eyebrow}</div>
+			</div>
+		</div>
+	</div>
+</section>
+
+<style>
+	/* ----- 仅订阅卡片内部布局，不与全局组件冲突 ----- */
+	.subscribe-sub {
+		font-size: 14px;
+		color: var(--text-2);
+		line-height: 1.55;
+		margin: 0 0 16px;
+	}
+
+	.subscribe-form {
+		display: flex;
+		gap: 8px;
+		margin-top: 4px;
+		flex-wrap: wrap;
+	}
+
+	.subscribe-input {
+		flex: 1 1 220px;
+		min-width: 0;
+		height: 34px;
+		box-sizing: border-box;
+		background: var(--bg-elev-2);
+		border: 1px solid var(--line);
+		color: var(--text);
+		border-radius: var(--radius);
+		padding: 0 14px;
+		font-size: 13px;
+		line-height: 1.4;
+		outline: none;
+		transition:
+			border-color 0.15s ease,
+			box-shadow 0.15s ease,
+			background 0.15s ease;
+	}
+
+	.subscribe-input::placeholder {
+		color: var(--text-3);
+	}
+
+	.subscribe-input:focus {
+		border-color: var(--accent);
+		box-shadow: 0 0 0 3px
+			color-mix(in srgb, var(--accent) 20%, transparent);
+	}
+
+	.subscribe-input.invalid {
+		border-color: var(--danger);
+		box-shadow: 0 0 0 3px
+			color-mix(in srgb, var(--danger) 20%, transparent);
+	}
+
+	.subscribe-submit {
+		flex: 0 0 auto;
+		white-space: nowrap;
+	}
+
+	.subscribe-submit[disabled] {
+		opacity: 0.6;
+		pointer-events: none;
+	}
+
+	.subscribe-status {
+		font-size: 12px;
+		color: var(--text-3);
+		margin-top: 12px;
+		min-height: 16px;
+	}
+
+	.subscribe-status.ok {
+		color: var(--accent);
+	}
+
+	.subscribe-status.err {
+		color: var(--danger);
+	}
+
+	.visually-hidden {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
+	}
+</style>
+
+<script
+	is:inline
+	define:vars={{
+		invalidMsg: t.subscribe_invalid,
+		successMsg: t.subscribe_success,
+		successOptinMsg: t.subscribe_success_optin,
+		alreadyConfirmedMsg: t.subscribe_already_confirmed,
+		pendingMsg: t.subscribe_pending,
+		errorMsg: t.subscribe_error,
+	}}
+>
+	// ========================================================================
+	// 订阅表单交互
+	// 1) 客户端 email 格式校验
+	// 2) 同源 POST 至 [data-subscribe-endpoint]（默认 /api/subscribe）：
+	//      body: { email, name: "", lang }
+	//      lang 取自 <html lang>（/ = "en"，/zh/ = "zh-CN"）；
+	//      fallback 到 navigator.language；都没有则 "en"。
+	//      服务端会据此选择美化邮件的中/英文渲染。
+	//    SSR 端点会代理转发到 listmonk 并屏蔽 CORS 与 list UUID 细节。
+	// 3) 根据响应 JSON 切换 status 文案与样式：
+	//      ok=true + hasOptin=true  → 显示 "请去邮箱点确认链接"
+	//      ok=true + hasOptin=false → 显示 "已订阅"
+	//       ok=true + alreadyConfirmed=true → 显示 "已确认，无需重复操作"
+	//      ok=false / HTTP 错误     → 显示错误（不再吞错）
+	// ========================================================================
+	(function () {
+		var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+		// 解析当前页面语言偏好：<html lang> 优先，否则看浏览器 navigator.language
+		// 规范化为 "zh" 或 "en"，其他一律按 "en" 处理（listmonk 模板里 lang!="zh" 即走英文分支）
+		function detectLang() {
+			var htmlLang = (document.documentElement.lang || "").toLowerCase();
+			var navLang = (
+				(navigator.language || navigator.userLanguage || "") + ""
+			).toLowerCase();
+			if (htmlLang.indexOf("zh") === 0) return "zh";
+			if (htmlLang && htmlLang.indexOf("en") === 0) return "en";
+			if (navLang.indexOf("zh") === 0) return "zh";
+			return "en";
+		}
+
+		function setStatus(form, kind, text) {
+			var box = form.parentElement.querySelector("[data-subscribe-status]");
+			var span = box && box.querySelector("[data-subscribe-status-text]");
+			if (!box || !span) return;
+			box.classList.remove("ok", "err");
+			if (kind === "ok") box.classList.add("ok");
+			if (kind === "err") box.classList.add("err");
+			span.textContent = text || "";
+		}
+
+		function bind(form) {
+			var input = form.querySelector("[data-subscribe-input]");
+			var submit = form.querySelector("[data-subscribe-submit]");
+			var endpoint = form.getAttribute("data-subscribe-endpoint") || "";
+
+			input.addEventListener("input", function () {
+				input.classList.remove("invalid");
+				setStatus(form, "", "");
+			});
+
+			form.addEventListener("submit", function (e) {
+				e.preventDefault();
+				var email = (input.value || "").trim();
+
+				if (!EMAIL_RE.test(email)) {
+					input.classList.add("invalid");
+					setStatus(form, "err", invalidMsg);
+					input.focus();
+					return;
+				}
+
+				submit.setAttribute("disabled", "true");
+				setStatus(form, "", pendingMsg);
+
+				var ok = function (body) {
+					submit.removeAttribute("disabled");
+					var msg = body.alreadyConfirmed
+						? alreadyConfirmedMsg
+						: body.hasOptin
+						? successOptinMsg
+						: successMsg;
+					setStatus(form, "ok", msg);
+					input.value = "";
+				};
+
+				var fail = function () {
+					submit.removeAttribute("disabled");
+					setStatus(form, "err", errorMsg);
+				};
+
+				try {
+					(async function () {
+						var r = await fetch(endpoint, {
+							method: "POST",
+							headers: {
+								"Content-Type": "application/json",
+								Accept: "application/json",
+							},
+							body: JSON.stringify({
+								email: email,
+								name: "",
+								lang: detectLang(),
+							}),
+						});
+						// 优先解析 body，业务成功/失败都用 JSON 中的 ok 字段判定
+						var j;
+						try {
+							j = await r.json();
+						} catch (_) {
+							j = {};
+						}
+						var res = { httpOk: r.ok, body: j || {} };
+						if (res.httpOk && res.body && res.body.ok === true) {
+							ok(res.body);
+						} else {
+							fail();
+						}
+					})().catch(function () {
+						fail();
+					});
+				} catch (err) {
+					fail();
+				}
+			});
+		}
+
+		function init() {
+			document
+				.querySelectorAll("[data-subscribe-form]")
+				.forEach(function (f) {
+					bind(f);
+				});
+		}
+
+		if (document.readyState === "loading") {
+			document.addEventListener("DOMContentLoaded", init);
+		} else {
+			init();
+		}
+	})();
+</script>

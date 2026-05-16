@@ -1,0 +1,8 @@
+# Nixpacks 构建配置
+# 固定 Node 版本，避免默认 Node 18 EOL 后 nixpkgs 移除导致的构建失败。
+# Astro 5 + @astrojs/node 9 要求 Node >= 18.17，选 22 LTS 最稳。
+
+providers = ["node"]
+
+[variables]
+NIXPACKS_NODE_VERSION = "22"
