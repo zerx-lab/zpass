@@ -5,48 +5,51 @@ name: Build Desktop
 # 目标矩阵（6 个组合，每个目标在原生 runner 上跑，回避交叉编译 CGO 难题）:
 #   - Windows  amd64 / arm64  → NSIS .exe 安装器 + 原始 .exe
 #   - macOS    amd64 / arm64  → .app bundle 用 ditto 打成 .zip
-#   - Linux    amd64 / arm64  → AppImage + .deb + .rpm + 裸 binary
+#   - Linux    amd64 / arm64  → AppImage(best-effort) + .deb + .rpm + 裸 binary
 #
 # 触发方式:
-#   1. workflow_dispatch  手动触发（不发 release，只产 artifact）
-#   2. push tags 'v*'     自动构建并发布 GitHub Release
+#   1. workflow_dispatch  手动触发（仅当 release=true + tag_name 时上传 release）
+#   2. push tags 'v*'     自动构建并上传到对应 tag 的 GitHub Release
 #
-# 注意：项目 Taskfile 中 APP_NAME="ZPassDesktop"（保持与 wails 模板一致），
-# workflow 内对产物的引用都用 ZPassDesktop 这个真名。最终 release 资产名通过
-# 重命名步骤换成更短的 ZPass-<os>-<arch> 形式。
+# 设计要点:
+#   - 直接把产物 push 到 GitHub Release，不走 actions/upload-artifact，
+#     避开 GitHub Actions 500 MB artifact 配额限制
+#   - 各 build job 独立调用 softprops/action-gh-release：第一个完成的 job
+#     会创建 release，后续 job append 自己的资产
+#   - 项目 Taskfile APP_NAME = "ZPassDesktop"，产物名按这个真名生成，
+#     最终通过重命名换成 ZPass-<os>-<arch> 的 release 资产名
 # -----------------------------------------------------------------------------
 
 on:
   workflow_dispatch:
     inputs:
       release:
-        description: '是否在构建完成后创建 GitHub Release（仅当填写 tag_name 时生效）'
+        description: '是否在构建完成后上传到 GitHub Release（需配合 tag_name）'
         required: false
         default: false
         type: boolean
       tag_name:
-        description: '可选：用于 Release 的 tag 名（如 v0.1.0），留空则只产 artifact'
+        description: '可选：Release 的 tag 名（如 v0.1.0），留空且 release=true 时也不会上传'
         required: false
         type: string
   push:
     tags:
       - 'v*'
 
-permissions:
-  contents: write  # 发布 Release 需要写权限
-
-# 同一 ref 上的并发构建互相取消，避免连续提交造成 runner 浪费
+# 同一 ref 上的并发构建互相取消，避免连续提交浪费 runner
 concurrency:
   group: desktop-build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # 主构建：6 个目标并行
-  # ---------------------------------------------------------------------------
   build:
     name: build (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
+
+    # build job 自己要 push asset 到 release，需要写权限
+    permissions:
+      contents: write
+
     strategy:
       fail-fast: false
       matrix:
@@ -165,27 +168,62 @@ jobs:
 
       # ---------- 5. 构建二进制 ----------
       # task build 会按链路自动跑：
-      #   common:go:mod:tidy → common:build:frontend → common:generate:icons → {windows|darwin|linux}:build:native → go build
+      #   common:go:mod:tidy → common:build:frontend → common:generate:icons
+      #   → {windows|darwin|linux}:build:native → go build
       - name: Build binary
         env:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: ${{ matrix.cgo }}
         run: task build ARCH=${{ matrix.goarch }}
 
-      # ---------- 6. 打包 ----------
-      # task package 按平台跑：
-      #   - windows: create:nsis:installer
-      #   - darwin : create:app:bundle (.app)
-      #   - linux  : create:appimage + create:deb + create:rpm + create:aur
-      - name: Package
+      # ---------- 6. 打包（Windows / macOS 走完整 package） ----------
+      - name: Package (Windows / macOS)
+        if: matrix.goos != 'linux'
         env:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: ${{ matrix.cgo }}
         run: task package ARCH=${{ matrix.goarch }}
 
-      # ---------- 7. 整理产物（macOS 必须用 ditto） ----------
-      # .app 是目录，用 actions/upload-artifact 直接上传会破坏 bundle 的
-      # 符号链接和扩展属性，必须先用 ditto 打成 zip
+      # ---------- 6'. 打包（Linux 拆分，每个格式 best-effort） ----------
+      # wails3 alpha 在 ARM64 runner 上 AppImage 生成会卡 2 分钟然后 rename 失败，
+      # 但 deb / rpm 是稳定的。改成分别调用、各自容错，确保至少能产出 deb + rpm
+      - name: Package (Linux, per-format best-effort)
+        if: matrix.goos == 'linux'
+        env:
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '1'
+        run: |
+          set +e
+          # generate:dotdesktop 是 appimage / deb / rpm 共用前置
+          task linux:generate:dotdesktop
+          DOTDESKTOP_RC=$?
+          echo "linux:generate:dotdesktop -> $DOTDESKTOP_RC"
+
+          task linux:create:deb
+          DEB_RC=$?
+          echo "linux:create:deb -> $DEB_RC"
+
+          task linux:create:rpm
+          RPM_RC=$?
+          echo "linux:create:rpm -> $RPM_RC"
+
+          # AppImage 在 ARM64 已知不稳定，失败仅警告
+          task linux:create:appimage
+          APPIMAGE_RC=$?
+          if [ $APPIMAGE_RC -ne 0 ]; then
+            echo "::warning title=AppImage failed::wails3 generate appimage 在 ${{ matrix.goarch }} 上失败，已跳过"
+          fi
+
+          # 只要 deb 或 rpm 至少一个产出就算成功
+          if [ $DEB_RC -ne 0 ] && [ $RPM_RC -ne 0 ]; then
+            echo "::error::deb 和 rpm 都失败了"
+            exit 1
+          fi
+          exit 0
+
+      # ---------- 7. 整理产物 ----------
+      # macOS: .app 是目录，必须用 ditto 打 zip，普通 zip 会破坏 bundle 的
+      # 符号链接和扩展属性
       - name: Repack macOS .app to .zip (with ditto)
         if: matrix.goos == 'darwin'
         run: |
@@ -197,11 +235,10 @@ jobs:
       - name: Rename Windows binary / installer
         if: matrix.goos == 'windows'
         run: |
-          # 裸 binary 加架构后缀
           if [ -f "bin/ZPassDesktop.exe" ]; then
             cp "bin/ZPassDesktop.exe" "bin/ZPass-windows-${{ matrix.goarch }}.exe"
           fi
-          # NSIS 安装器（项目 NSIS 模板默认输出 ZPassDesktop-<arch>-installer.exe）
+          # NSIS 默认输出 ZPassDesktop-<arch>-installer.exe（INFO_PROJECTNAME 默认 = APP_NAME）
           if [ -f "bin/ZPassDesktop-${{ matrix.goarch }}-installer.exe" ]; then
             cp "bin/ZPassDesktop-${{ matrix.goarch }}-installer.exe" \
                "bin/ZPass-windows-${{ matrix.goarch }}-installer.exe"
@@ -209,65 +246,61 @@ jobs:
           echo "--- bin/ contents ---"
           ls -lah bin/
 
-      - name: Rename Linux binary
+      - name: Rename Linux binary and rpm/deb
         if: matrix.goos == 'linux'
         run: |
+          # 裸 binary
           if [ -f "bin/ZPassDesktop" ]; then
             cp "bin/ZPassDesktop" "bin/ZPass-linux-${{ matrix.goarch }}"
           fi
+          # nfpm 默认产物名是 zpassdesktop.exe_*.{deb,rpm}（项目模板 typo，
+          # nfpm.yaml 里 name 写成了 zpassdesktop.exe），转成更清晰的命名
+          for f in bin/*.deb bin/*.rpm bin/*.AppImage; do
+            [ -e "$f" ] || continue
+            ext="${f##*.}"
+            cp "$f" "bin/ZPass-linux-${{ matrix.goarch }}.${ext}" || true
+          done
           echo "--- bin/ contents ---"
           ls -lah bin/
 
-      # ---------- 8. 上传 artifact ----------
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      # ---------- 8. 决定本次 run 的 release tag ----------
+      # push tag 触发 → 用 github.ref_name
+      # workflow_dispatch + release=true + tag_name 非空 → 用 inputs.tag_name
+      # 其他情况（仅手动验证编译）→ 不发 release
+      - name: Resolve release context
+        id: release_ctx
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" \
+               && "${{ inputs.release }}" == "true" \
+               && -n "${{ inputs.tag_name }}" ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ inputs.tag_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ---------- 9. 直接上传到 GitHub Release（绕过 artifact 配额） ----------
+      # softprops/action-gh-release@v2 行为:
+      #   - tag 对应的 release 不存在 → 创建（带 generate_release_notes）
+      #   - 已存在 → append 当前 job 的 files 到该 release
+      # 6 个 build job 各自 push 自己的资产，第一个到达的创建 release，其他 append
+      - name: Publish assets to GitHub Release
+        if: steps.release_ctx.outputs.publish == 'true'
+        uses: softprops/action-gh-release@v2
         with:
-          name: zpass-desktop-${{ matrix.target }}
-          # if-no-files-found: ignore 容忍单平台没产某种格式（如 macOS 无 .deb）
-          path: |
+          tag_name: ${{ steps.release_ctx.outputs.tag }}
+          name: ZPass Desktop ${{ steps.release_ctx.outputs.tag }}
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          files: |
             desktop/bin/ZPass-windows-${{ matrix.goarch }}.exe
             desktop/bin/ZPass-windows-${{ matrix.goarch }}-installer.exe
             desktop/bin/ZPass-macos-${{ matrix.goarch }}.zip
             desktop/bin/ZPass-linux-${{ matrix.goarch }}
-            desktop/bin/*.AppImage
-            desktop/bin/*.deb
-            desktop/bin/*.rpm
-            desktop/bin/*.pkg.tar.zst
-          if-no-files-found: ignore
-          retention-days: 30
-          compression-level: 6
-
-  # ---------------------------------------------------------------------------
-  # Release：仅在 push tag 或手动指定 tag_name + release=true 时跑
-  # ---------------------------------------------------------------------------
-  release:
-    name: Publish GitHub Release
-    needs: build
-    if: |
-      startsWith(github.ref, 'refs/tags/v') ||
-      (github.event_name == 'workflow_dispatch' && inputs.release == true && inputs.tag_name != '')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-
-      - name: List collected assets
-        run: |
-          echo "--- dist/ tree ---"
-          find dist -type f -printf '%p  (%s bytes)\n' | sort
-
-      - name: Create / update GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ inputs.tag_name || github.ref_name }}
-          name: ZPass Desktop ${{ inputs.tag_name || github.ref_name }}
-          generate_release_notes: true
-          fail_on_unmatched_files: false
-          files: |
-            dist/**
+            desktop/bin/ZPass-linux-${{ matrix.goarch }}.AppImage
+            desktop/bin/ZPass-linux-${{ matrix.goarch }}.deb
+            desktop/bin/ZPass-linux-${{ matrix.goarch }}.rpm
