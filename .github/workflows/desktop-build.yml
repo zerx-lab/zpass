@@ -1,0 +1,249 @@
+name: Build Desktop
+
+# ZPass Desktop 多平台打包 workflow
+# -----------------------------------------------------------------------------
+# 目标矩阵（6 个组合，每个目标在原生 runner 上跑，回避交叉编译 CGO 难题）:
+#   - Windows  amd64 / arm64  → NSIS .exe 安装器 + 原始 .exe
+#   - macOS    amd64 / arm64  → .app bundle 用 ditto 打成 .zip
+#   - Linux    amd64 / arm64  → AppImage + .deb + .rpm + 裸 binary
+#
+# 触发方式:
+#   1. workflow_dispatch  手动触发（不发 release，只产 artifact）
+#   2. push tags 'v*'     自动构建并发布 GitHub Release
+# -----------------------------------------------------------------------------
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: '是否在构建完成后创建 GitHub Release（仅当填写 tag_name 时生效）'
+        required: false
+        default: false
+        type: boolean
+      tag_name:
+        description: '可选：用于 Release 的 tag 名（如 v0.1.0），留空则只产 artifact'
+        required: false
+        type: string
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write  # 发布 Release 需要写权限
+
+# 同一 ref 上的并发构建互相取消，避免连续提交造成 runner 浪费
+concurrency:
+  group: desktop-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 主构建：6 个目标并行
+  # ---------------------------------------------------------------------------
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-amd64
+            runner: windows-latest
+            goos: windows
+            goarch: amd64
+            cgo: '0'
+          - target: windows-arm64
+            runner: windows-latest
+            goos: windows
+            goarch: arm64
+            cgo: '0'
+          - target: macos-amd64
+            runner: macos-13       # Intel 原生 runner，CGO 必须 native
+            goos: darwin
+            goarch: amd64
+            cgo: '1'
+          - target: macos-arm64
+            runner: macos-14       # Apple Silicon 原生 runner
+            goos: darwin
+            goarch: arm64
+            cgo: '1'
+          - target: linux-amd64
+            runner: ubuntu-22.04
+            goos: linux
+            goarch: amd64
+            cgo: '1'
+          - target: linux-arm64
+            runner: ubuntu-22.04-arm  # GitHub 公开仓库免费 ARM64 runner
+            goos: linux
+            goarch: arm64
+            cgo: '1'
+
+    env:
+      # nfpm.yaml 用 ${GIT_COMMITTER_NAME} / ${GIT_COMMITTER_EMAIL} 做模板替换，
+      # 在 CI 上必须显式设，否则生成的 .deb / .rpm 元数据里会出现空字符串
+      GIT_COMMITTER_NAME: github-actions
+      GIT_COMMITTER_EMAIL: github-actions@users.noreply.github.com
+      # nfpm.yaml 的 arch 字段引用了 ${GOARCH}
+      GOARCH: ${{ matrix.goarch }}
+      CGO_ENABLED: ${{ matrix.cgo }}
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: desktop
+
+    steps:
+      # ---------- 0. 检出 ----------
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ---------- 1. 工具链 ----------
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: desktop/go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+
+      - name: Install Task
+        uses: arduino/setup-task@v2
+        with:
+          version: '3.x'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Wails3 CLI
+        # Wails 3 仍在 alpha，跟着 v3-alpha 分支 latest 安装
+        # 项目 go.mod 当前锁定 v3.0.0-alpha.78
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@latest
+
+      # ---------- 2. 平台特定依赖 ----------
+      - name: Install Linux build deps (GTK3 + WebKit2GTK 4.1 + rpm)
+        if: matrix.goos == 'linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            rpm \
+            fuse libfuse2 \
+            file desktop-file-utils
+
+      - name: Install NSIS (Windows installer 打包工具)
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress
+
+      # ---------- 3. 前端依赖（独立 npm install，让 setup-node 的 cache 生效） ----------
+      - name: Install frontend dependencies
+        working-directory: desktop/frontend
+        run: npm ci
+
+      # ---------- 4. 构建二进制 ----------
+      # task build 会自动按链路跑：
+      #   common:go:mod:tidy → common:build:frontend → common:generate:icons → {windows|darwin|linux}:build:native → go build
+      - name: Build binary
+        run: task build ARCH=${{ matrix.goarch }}
+
+      # ---------- 5. 打包 ----------
+      # task package 会按平台跑：
+      #   - windows: create:nsis:installer
+      #   - darwin : create:app:bundle (.app)
+      #   - linux  : create:appimage + create:deb + create:rpm + create:aur
+      - name: Package
+        run: task package ARCH=${{ matrix.goarch }}
+
+      # ---------- 6. 整理产物 ----------
+      # macOS: .app 是目录，必须用 ditto 打包，普通 zip 会破坏 bundle 的符号链接和扩展属性
+      - name: Repack macOS .app to .zip (with ditto)
+        if: matrix.goos == 'darwin'
+        run: |
+          cd bin
+          ditto -c -k --sequesterRsrc --keepParent "ZPass.app" "ZPass-macos-${{ matrix.goarch }}.zip"
+          echo "--- bin/ contents ---"
+          ls -lah
+
+      # Windows: 顺便给 .exe 加上架构后缀，便于 release 资产命名清晰
+      - name: Rename Windows binary with arch suffix
+        if: matrix.goos == 'windows'
+        run: |
+          cp "bin/ZPass.exe" "bin/ZPass-windows-${{ matrix.goarch }}.exe"
+          # NSIS 安装器命名也加上明确架构（项目模板默认输出 ZPassDesktop-<arch>-installer.exe）
+          if [ -f "bin/ZPassDesktop-${{ matrix.goarch }}-installer.exe" ]; then
+            cp "bin/ZPassDesktop-${{ matrix.goarch }}-installer.exe" \
+               "bin/ZPass-windows-${{ matrix.goarch }}-installer.exe"
+          fi
+          echo "--- bin/ contents ---"
+          ls -lah bin/
+
+      # Linux: 重命名裸 binary 添加 arch 后缀
+      - name: Rename Linux binary with arch suffix
+        if: matrix.goos == 'linux'
+        run: |
+          if [ -f "bin/ZPass" ]; then
+            cp "bin/ZPass" "bin/ZPass-linux-${{ matrix.goarch }}"
+          fi
+          echo "--- bin/ contents ---"
+          ls -lah bin/
+
+      # ---------- 7. 上传 artifact ----------
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: zpass-desktop-${{ matrix.target }}
+          # 用 if-no-files-found: ignore 容忍单平台没产某种格式（如 macOS 无 .deb）
+          path: |
+            desktop/bin/ZPass-windows-${{ matrix.goarch }}.exe
+            desktop/bin/ZPass-windows-${{ matrix.goarch }}-installer.exe
+            desktop/bin/ZPass-macos-${{ matrix.goarch }}.zip
+            desktop/bin/ZPass-linux-${{ matrix.goarch }}
+            desktop/bin/*.AppImage
+            desktop/bin/*.deb
+            desktop/bin/*.rpm
+            desktop/bin/*.pkg.tar.zst
+          if-no-files-found: ignore
+          retention-days: 30
+          compression-level: 6
+
+  # ---------------------------------------------------------------------------
+  # Release：仅在 push tag 或手动指定 tag_name + release=true 时跑
+  # ---------------------------------------------------------------------------
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: |
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' && inputs.release == true && inputs.tag_name != '')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List collected assets
+        run: |
+          echo "--- dist/ tree ---"
+          find dist -type f -printf '%p  (%s bytes)\n' | sort
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag_name || github.ref_name }}
+          name: ZPass Desktop ${{ inputs.tag_name || github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          files: |
+            dist/**
