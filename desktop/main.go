@@ -101,7 +101,7 @@ func main() {
 	// 把 SshAgentService 反向装进 VaultService。
 	vaultService := NewVaultService(vaultDB)
 	sshAgentService := NewSshAgentService(vaultService)
-	vaultService.SetSshAgentNotifier(sshAgentService)
+	vaultService.setSshAgentNotifier(sshAgentService)
 	browserBridge := NewBrowserBridgeServer(vaultService)
 	if err := browserBridge.Start(); err != nil {
 		log.Printf("browser bridge disabled: %v", err)

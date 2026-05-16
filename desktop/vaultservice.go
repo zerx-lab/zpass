@@ -337,7 +337,7 @@ type VaultService struct {
 
 	// sshAgentNotifier 是 SSH agent 服务的后向通知接口
 	//
-	// 设置时机：由 main.go 在 service 实例创建后调 SetSshAgentNotifier
+	// 设置时机：由 main.go 在 service 实例创建后调 setSshAgentNotifier
 	// 注入，避免循环依赖（VaultService 不能直接 import SshAgentService
 	// 的具体类型 —— 二者同在 main 包不存在 import 物理问题，但语义
 	// 上仍是 vault 是底层、ssh agent 是上层）。
@@ -385,7 +385,7 @@ func NewVaultService(db *VaultDB) *VaultService {
 	return &VaultService{db: db}
 }
 
-// SetSshAgentNotifier 注入 SSH agent 服务的后向通知接口
+// setSshAgentNotifier 注入 SSH agent 服务的后向通知接口
 //
 // 由 main.go 在两个 service 都创建后调用一次。传 nil 可以解除通知
 // （主要单测场景）。
@@ -393,7 +393,12 @@ func NewVaultService(db *VaultDB) *VaultService {
 // 本方法不加锁 —— 预计仅在 main 启动期调用一次，运行期不会变。运行
 // 期动态切换 notifier 的场景（如重启 SSH agent 服务）不会出现，因为
 // SshAgentService 是进程级单例。
-func (s *VaultService) SetSshAgentNotifier(n SshAgentNotifier) {
+//
+// 注意：故意 unexported —— 这是后端依赖注入用，不应该被 wails3 binding
+// 暴露给前端。若改成 exported，wails3 binding generator 会扫到此方法
+// 参数中的 interface 类型 SshAgentNotifier，发出 JSON 反序列化警告，
+// 并且前端可借此 setter 解除 SSH agent 通知（意外的攻击面）。
+func (s *VaultService) setSshAgentNotifier(n SshAgentNotifier) {
 	s.sshAgentNotifier = n
 }
 
