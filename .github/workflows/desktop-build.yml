@@ -2,10 +2,10 @@ name: Build Desktop
 
 # ZPass Desktop 多平台打包 workflow
 # -----------------------------------------------------------------------------
-# 目标矩阵（6 个组合，每个目标在原生 runner 上跑，回避交叉编译 CGO 难题）:
+# 目标矩阵（当前 4 个组合，macOS 暂时注释掉等预算重置）:
 #   - Windows  amd64 / arm64  → NSIS .exe 安装器 + 原始 .exe
-#   - macOS    amd64 / arm64  → .app bundle 用 ditto 打成 .zip
 #   - Linux    amd64 / arm64  → AppImage(best-effort) + .deb + .rpm + 裸 binary
+#   - [暂停] macOS amd64 / arm64  → 等账户 Actions 预算重置后恢复
 #
 # 触发方式:
 #   1. workflow_dispatch  手动触发（仅当 release=true + tag_name 时上传 release）
@@ -24,17 +24,17 @@ on:
   workflow_dispatch:
     inputs:
       release:
-        description: '是否在构建完成后上传到 GitHub Release（需配合 tag_name）'
+        description: "是否在构建完成后上传到 GitHub Release（需配合 tag_name）"
         required: false
         default: false
         type: boolean
       tag_name:
-        description: '可选：Release 的 tag 名（如 v0.1.0），留空且 release=true 时也不会上传'
+        description: "可选：Release 的 tag 名（如 v0.1.0），留空且 release=true 时也不会上传"
         required: false
         type: string
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 # 同一 ref 上的并发构建互相取消，避免连续提交浪费 runner
 concurrency:
@@ -58,32 +58,39 @@ jobs:
             runner: windows-latest
             goos: windows
             goarch: amd64
-            cgo: '0'
+            cgo: "0"
           - target: windows-arm64
             runner: windows-latest
             goos: windows
             goarch: arm64
-            cgo: '0'
-          - target: macos-amd64
-            runner: macos-13       # Intel 原生 runner，CGO 必须 native
-            goos: darwin
-            goarch: amd64
-            cgo: '1'
-          - target: macos-arm64
-            runner: macos-14       # Apple Silicon 原生 runner
-            goos: darwin
-            goarch: arm64
-            cgo: '1'
+            cgo: "0"
+          # ⚠️ macOS 两个 target 临时注释掉，原因：
+          #   macos-13 / macos-14 runner 按 10× minutes 计费，多次重跑后
+          #   GitHub Actions 账户预算耗尽，所有 job 被系统层面拒绝启动:
+          #     "The job was not started because an Actions budget is preventing further use"
+          # 待账户预算重置（每月 1 号自动 reset，或在 GitHub Settings >
+          # Billing > Spending Limits 调高），再把下面两个 entry 取消注释
+          # 即可恢复完整 6 平台矩阵。
+          # - target: macos-amd64
+          #   runner: macos-13       # Intel 原生 runner，CGO 必须 native
+          #   goos: darwin
+          #   goarch: amd64
+          #   cgo: '1'
+          # - target: macos-arm64
+          #   runner: macos-14       # Apple Silicon 原生 runner
+          #   goos: darwin
+          #   goarch: arm64
+          #   cgo: '1'
           - target: linux-amd64
             runner: ubuntu-22.04
             goos: linux
             goarch: amd64
-            cgo: '1'
+            cgo: "1"
           - target: linux-arm64
-            runner: ubuntu-22.04-arm  # GitHub 公开仓库免费 ARM64 runner
+            runner: ubuntu-22.04-arm # GitHub 公开仓库免费 ARM64 runner
             goos: linux
             goarch: arm64
-            cgo: '1'
+            cgo: "1"
 
     env:
       # nfpm.yaml 用 ${GIT_COMMITTER_NAME} / ${GIT_COMMITTER_EMAIL} 做模板替换，
@@ -109,20 +116,20 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: "1.25"
           cache-dependency-path: desktop/go.sum
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
           cache: npm
           cache-dependency-path: desktop/frontend/package-lock.json
 
       - name: Install Task
         uses: arduino/setup-task@v2
         with:
-          version: '3.x'
+          version: "3.x"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       # ---------- 2. 平台特定依赖（必须在安装 wails3 CLI 之前） ----------
@@ -157,8 +164,8 @@ jobs:
       # 上无法执行。显式 unset GOARCH（让 go 用默认 host arch）。
       - name: Install Wails3 CLI
         env:
-          GOARCH: ''      # 用 host 架构编译 wails3 binary
-          CGO_ENABLED: '1'  # Linux 上 wails3 自身需要 CGO（链接 GTK）
+          GOARCH: "" # 用 host 架构编译 wails3 binary
+          CGO_ENABLED: "1" # Linux 上 wails3 自身需要 CGO（链接 GTK）
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@latest
 
       # ---------- 4. 前端依赖（显式触发，让 setup-node 的 npm cache 生效） ----------
@@ -191,7 +198,7 @@ jobs:
         if: matrix.goos == 'linux'
         env:
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: '1'
+          CGO_ENABLED: "1"
         run: |
           set +e
           # generate:dotdesktop 是 appimage / deb / rpm 共用前置
