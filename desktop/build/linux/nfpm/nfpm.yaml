@@ -1,67 +1,57 @@
-# Feel free to remove those if you don't want/need to use them.
-# Make sure to check the documentation at https://nfpm.goreleaser.com
+# nfpm 打包配置 —— 用于生成 ZPass Desktop 的 .deb / .rpm
+# 文档: https://nfpm.goreleaser.com
 #
-# The lines below are called `modelines`. See `:help modeline`
+# 注意:src 引用的是 desktop 项目根下相对路径产物,实际产出文件名跟项目
+# APP_NAME (= "ZPassDesktop") 一致,见 desktop/Taskfile.yml。
+#
+# 历史:此文件最早是 wails3 模板生成的,所有 binary 名都写成了
+# "zpassdesktop.exe"(显然是 Windows 模板复制过来漏改的 typo),
+# 导致 Linux 构建时 nfpm 找不到 src 文件失败。已统一修正为 ZPassDesktop。
 
-name: "zpassdesktop.exe"
+name: "zpass-desktop" # Linux 包名(影响 .deb / .rpm 输出文件名),按习俗用小写带连字符
 arch: ${GOARCH}
 platform: "linux"
 version: "0.1.0"
 section: "default"
 priority: "extra"
 maintainer: ${GIT_COMMITTER_NAME} <${GIT_COMMITTER_EMAIL}>
-description: "A ZPassDesktop application"
-vendor: "My Company"
-homepage: "https://wails.io"
+description: "ZPass — zero-knowledge password manager for desktop"
+vendor: "ZPass"
+homepage: "https://github.com/zerx-lab/zpass"
 license: "MIT"
 release: "1"
 
 contents:
-  - src: "./bin/zpassdesktop.exe"
-    dst: "/usr/local/bin/zpassdesktop.exe"
+  # 主程序二进制:dst 名跟 binary 输出名一致(ZPassDesktop),也跟
+  # generate:dotdesktop 写入 .desktop 文件里的 Exec= 字段一致
+  - src: "./bin/ZPassDesktop"
+    dst: "/usr/local/bin/ZPassDesktop"
+  # 应用图标:dst 文件名(去扩展名后)跟 .desktop 里 Icon= 字段值一致
   - src: "./build/appicon.png"
-    dst: "/usr/share/icons/hicolor/128x128/apps/zpassdesktop.exe.png"
-  - src: "./build/linux/zpassdesktop.exe.desktop"
-    dst: "/usr/share/applications/zpassdesktop.exe.desktop"
+    dst: "/usr/share/icons/hicolor/128x128/apps/ZPassDesktop.png"
+  # .desktop 文件:Taskfile generate:dotdesktop 产出 ZPassDesktop.desktop
+  - src: "./build/linux/ZPassDesktop.desktop"
+    dst: "/usr/share/applications/ZPassDesktop.desktop"
 
-# Default dependencies for Debian 12/Ubuntu 22.04+ with WebKit 4.1
+# 默认依赖(Debian 12 / Ubuntu 22.04+ 以 WebKit 4.1 为标准)
 depends:
   - libgtk-3-0
   - libwebkit2gtk-4.1-0
 
-# Distribution-specific overrides for different package formats and WebKit versions
+# 按打包格式分别覆写依赖(不同发行版的包名规则不同)
 overrides:
-  # RPM packages for RHEL/CentOS/AlmaLinux/Rocky Linux (WebKit 4.0)
+  # RPM packages for RHEL/CentOS/AlmaLinux/Rocky Linux
   rpm:
     depends:
       - gtk3
       - webkit2gtk4.1
-  
-  # Arch Linux packages (WebKit 4.1)  
+
+  # Arch Linux packages
   archlinux:
     depends:
       - gtk3
       - webkit2gtk-4.1
 
-# scripts section to ensure desktop database is updated after install
+# 安装后脚本:刷新桌面文件数据库,让应用立刻出现在系统菜单
 scripts:
   postinstall: "./build/linux/nfpm/scripts/postinstall.sh"
-  # You can also add preremove, postremove if needed
-  # preremove: "./build/linux/nfpm/scripts/preremove.sh"
-  # postremove: "./build/linux/nfpm/scripts/postremove.sh"
-
-# replaces:
-#   - foobar
-# provides:
-#   - bar
-# depends:
-#   - gtk3
-#   - libwebkit2gtk
-# recommends:
-#   - whatever
-# suggests:
-#   - something-else
-# conflicts:
-#   - not-foo
-#   - not-bar
-# changelog: "changelog.yaml"
