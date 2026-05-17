@@ -164,6 +164,9 @@ func handleNativeVault(vault *VaultService, msg nativeEnvelope) nativeResponse {
 
 func dispatchNativeVault(vault *VaultService, msg nativeEnvelope) (any, error) {
 	switch msg.Type {
+	case "ping":
+		// liveness 探测：仅证明 bridge 可达，不碰 vault。
+		return map[string]bool{"alive": true}, nil
 	case "status":
 		return vault.Status()
 	case "queryLogins":

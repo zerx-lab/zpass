@@ -2,7 +2,14 @@
 
 package main
 
-import "testing"
+import (
+	filepathpkg "path/filepath"
+	"testing"
+	"time"
+)
+
+// filepath_join 是 filepathpkg.Join 的局部别名，让测试内联调用保持简洁。
+func filepath_join(parts ...string) string { return filepathpkg.Join(parts...) }
 
 func TestNativeURLMatchesOrigin(t *testing.T) {
 	tests := []struct {
@@ -50,5 +57,34 @@ func TestNativeItemURLs(t *testing.T) {
 	got := itemURLs(fields)
 	if len(got) != 2 {
 		t.Fatalf("len(itemURLs)=%d, want 2: %#v", len(got), got)
+	}
+}
+
+// TestDispatchMessageGUIUnavailable验证 bridge 不可达 + GUI binary 找不到
+// 时，dispatchMessage 返回结构化 errCodeDesktopUnavailable，不会陷入任何
+// vault 直读路径。
+//
+// HOME / USERPROFILE 指到 t.TempDir() 以避免读到真实用户的
+func TestDispatchMessageGUIUnavailable(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	// 明确指向一个不存在的 GUI binary，让 ensureGUIRunning 决定性失败
+	t.Setenv("ZPASS_GUI_BIN", filepath_join(tmp, "nope-doesnt-exist"))
+	// 清理 launcher 状态，避免受上一个测试冷却期影响
+	guiLauncherMu.Lock()
+	guiLauncherLastTry = time.Time{}
+	guiLauncherBin = ""
+	guiLauncherMu.Unlock()
+
+	resp := dispatchMessage(nativeEnvelope{ID: "test-1", Type: "status"})
+	if resp.OK {
+		t.Fatalf("expected !OK when GUI unavailable; got %+v", resp)
+	}
+	if resp.ID != "test-1" {
+		t.Fatalf("want response id echoed, got %q", resp.ID)
+	}
+	if resp.Error != errCodeDesktopUnavailable {
+		t.Fatalf("want errCodeDesktopUnavailable, got %q", resp.Error)
 	}
 }

@@ -23,10 +23,20 @@ async function handleMessage(
 ): Promise<ExtensionResponse> {
   const req = message as ExtensionRequest;
   if (!req || typeof req !== "object" || typeof req.type !== "string") {
-    return { ok: false, error: "Invalid extension request." };
+    return { ok: false, error: "无效的扩展请求。" };
   }
 
   try {
+    if (req.type === "zpass.ping") {
+      const result = await bridge.ping();
+      return { ok: true, result };
+    }
+
+    if (req.type === "zpass.launchDesktop") {
+      const result = await bridge.launchDesktop();
+      return { ok: true, result };
+    }
+
     if (req.type === "zpass.status") {
       const status = await bridge.status();
       return { ok: true, result: status };
@@ -41,6 +51,25 @@ async function handleMessage(
       return { ok: false, error: "ZPass 只支持 http 和 https 页面。" };
     }
 
+    // 统一参数缺失提示文案——可能是扩展内部逻辑 bug，推给用户的入口都使用中文
+    const missingItemId = { ok: false as const, error: "缺少条目 ID。" };
+    const missingPasskeyRpId = {
+      ok: false as const,
+      error: "缺少 Passkey rpId。",
+    };
+    const missingPasskeyRegistration = {
+      ok: false as const,
+      error: "缺少 Passkey 注册字段。",
+    };
+    const missingPasskeyAssertion = {
+      ok: false as const,
+      error: "缺少 Passkey 验证字段。",
+    };
+    const missingPasskeyDelete = {
+      ok: false as const,
+      error: "缺少 Passkey 删除字段。",
+    };
+
     if (req.type === "zpass.queryLogins") {
       const result = await bridge.queryLogins({ origin, url: tab.url });
       return { ok: true, result };
@@ -48,7 +77,7 @@ async function handleMessage(
 
     if (req.type === "zpass.revealLogin") {
       if (!req.itemId) {
-        return { ok: false, error: "Missing vault item id." };
+        return missingItemId;
       }
       const result = await bridge.revealLogin({
         origin,
@@ -62,7 +91,7 @@ async function handleMessage(
       const payload = parsePasskeyPayload<{ rpId?: unknown }>(req.payload);
       const rpId = stringField(payload, "rpId");
       if (!rpId) {
-        return { ok: false, error: "Missing passkey rpId." };
+        return missingPasskeyRpId;
       }
       const result = await bridge.passkeyList({ origin, url: tab.url, rpId });
       return { ok: true, result };
@@ -74,7 +103,7 @@ async function handleMessage(
       const userId = stringField(payload, "userId");
       const userName = stringField(payload, "userName");
       if (!rpId || !userId || !userName) {
-        return { ok: false, error: "Missing passkey registration fields." };
+        return missingPasskeyRegistration;
       }
       const createRequest = {
         origin,
@@ -99,7 +128,7 @@ async function handleMessage(
       const credentialId = stringField(payload, "credentialId");
       const clientDataHash = stringField(payload, "clientDataHash");
       if (!rpId || !credentialId || !clientDataHash) {
-        return { ok: false, error: "Missing passkey assertion fields." };
+        return missingPasskeyAssertion;
       }
       const result = await bridge.passkeySign({
         origin,
@@ -117,7 +146,7 @@ async function handleMessage(
       const itemId = stringField(payload, "itemId");
       const credentialId = stringField(payload, "credentialId");
       if (!rpId || (!itemId && !credentialId)) {
-        return { ok: false, error: "Missing passkey delete fields." };
+        return missingPasskeyDelete;
       }
       const deleteRequest = { origin, url: tab.url, rpId };
       if (itemId) Object.assign(deleteRequest, { itemId });
@@ -128,7 +157,7 @@ async function handleMessage(
 
     if (req.type === "zpass.generateLoginTotp") {
       if (!req.itemId) {
-        return { ok: false, error: "Missing vault item id." };
+        return missingItemId;
       }
       const result = await bridge.generateLoginTotp({
         origin,
@@ -140,10 +169,10 @@ async function handleMessage(
 
     if (req.type === "zpass.fillActiveTab") {
       if (!req.itemId) {
-        return { ok: false, error: "Missing vault item id." };
+        return missingItemId;
       }
       if (tab.id === undefined) {
-        return { ok: false, error: "Cannot access the active tab." };
+        return { ok: false, error: "无法访问当前标签页。" };
       }
       const secret = await bridge.revealLogin({
         origin,
@@ -179,7 +208,7 @@ async function handleMessage(
       };
     }
 
-    return { ok: false, error: `Unknown request type: ${req.type}` };
+    return { ok: false, error: `未知请求类型：${req.type}` };
   } catch (error) {
     return {
       ok: false,

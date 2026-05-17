@@ -1,6 +1,7 @@
 import {
   NATIVE_HOST_NAME,
   type GenerateLoginTotpRequest,
+  type LaunchDesktopResult,
   type LoginSecret,
   type LoginTotpCode,
   type NativeRequest,
@@ -14,6 +15,7 @@ import {
   type PasskeyListRequest,
   type PasskeyListResult,
   type PasskeySignRequest,
+  type PingResult,
   type QueryLoginsResult,
   type RevealLoginRequest,
   type VaultStatus,
@@ -31,6 +33,17 @@ export class NativeBridge {
   private port: Browser.runtime.Port | null = null;
   private readonly pending = new Map<string, Pending>();
   private seq = 0;
+
+  // ping 探测 GUI 是否在线，不会触发 spawn。用于 popup 首屏 liveness 判断。
+  // 超时取较短值，避免用户在「desktop 未启」状态下看到长时间 spinner。
+  async ping(): Promise<PingResult> {
+    return this.send("ping", undefined, 2000);
+  }
+
+  // launchDesktop 显式拉起 GUI（用户点「启动 Desktop」按钮触发）。
+  async launchDesktop(): Promise<LaunchDesktopResult> {
+    return this.send("launchDesktop");
+  }
 
   async status(): Promise<VaultStatus> {
     return this.send("status");
@@ -73,6 +86,7 @@ export class NativeBridge {
   private send<TResult, TPayload = unknown>(
     type: NativeRequest<TPayload>["type"],
     payload?: TPayload,
+    timeoutMs: number = REQUEST_TIMEOUT_MS,
   ): Promise<TResult> {
     const port = this.ensurePort();
     const id = `${Date.now().toString(36)}-${++this.seq}`;
@@ -85,7 +99,7 @@ export class NativeBridge {
       const timer = globalThis.setTimeout(() => {
         this.pending.delete(id);
         reject(new Error("ZPass Desktop did not respond."));
-      }, REQUEST_TIMEOUT_MS);
+      }, timeoutMs);
       this.pending.set(id, {
         resolve: (value) => resolve(value as TResult),
         reject,

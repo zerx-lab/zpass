@@ -7,6 +7,8 @@ export interface ActiveTabInfo {
 
 export interface ExtensionRequest {
   type:
+    | "zpass.ping"
+    | "zpass.launchDesktop"
     | "zpass.status"
     | "zpass.queryLogins"
     | "zpass.revealLogin"
@@ -29,6 +31,8 @@ export interface ExtensionResponse<T = unknown> {
 export interface NativeRequest<TPayload = unknown> {
   id: string;
   type:
+    | "ping"
+    | "launchDesktop"
     | "status"
     | "queryLogins"
     | "revealLogin"
@@ -38,6 +42,16 @@ export interface NativeRequest<TPayload = unknown> {
     | "passkeyDelete"
     | "generateLoginTotp";
   payload?: TPayload;
+}
+
+// PingResult —— nativehost 转发给 GUI bridge，仅代表 liveness。
+export interface PingResult {
+  alive: boolean;
+}
+
+// LaunchDesktopResult —— nativehost 拉起 GUI 后立即返回，
+export interface LaunchDesktopResult {
+  launched: boolean;
 }
 
 export interface NativeResponse<TResult = unknown> {

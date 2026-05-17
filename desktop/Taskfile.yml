@@ -105,9 +105,11 @@ tasks:
   nativehost:build:
     summary: Build the browser native messaging host into bin/
     desc: |
-      Compiles the stdio native messaging bridge used by extension.
-      The binary intentionally reuses the desktop VaultService and only serves
-      autofill data while the vault is unlocked or trusted-device unlock succeeds.
+      Compiles the stdio native messaging bridge used by the extension.
+      The binary is a thin forwarder: it never opens the vault DB directly.
+      All requests are proxied to the running Desktop GUI over a localhost HTTP
+      bridge (token-authenticated). If the GUI is not running the host will
+      spawn it and wait for the bridge to come online before retrying.
     cmds:
       - cmd: go build -tags nativehost -trimpath -ldflags="-s -w" -o bin/zpass-native-host .
         platforms: [linux, darwin]

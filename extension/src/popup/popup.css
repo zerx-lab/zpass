@@ -476,6 +476,36 @@ body {
   }
 }
 
+/* ============ 按钮旋转动画（刷新/重试反馈） ============ */
+
+.zp-spin-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transform-origin: center;
+}
+
+.zp-spin-icon[data-spinning="true"] {
+  animation: zp-spin 0.7s linear infinite;
+}
+
+@keyframes zp-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 按钮禁用态（包含点击后的 in-flight 状态）：透明 + 取消交互 */
+.zp-btn[disabled],
+.zp-icon-btn[disabled] {
+  opacity: 0.65;
+  cursor: progress;
+  pointer-events: none;
+}
+
 /* ============ 减少动效偏好 ============ */
 @media (prefers-reduced-motion: reduce) {
   *,

@@ -50,10 +50,11 @@ export default defineContentScript({
         );
         const form = activeForm ?? findLoginForms(document)[0];
         if (!form) {
-          return {
-            ok: false,
-            error: "No fillable login form found in this frame.",
-          };
+          // 本 frame 没有可填充的表单 —— 不返回应答，让主 frame
+          // 或其他 frame 的 listener 应答。返回 undefined 会让 sender
+          // 看到 sendResponse 不被调用。allFrames:true 下多 frame 同时收
+          // 到广播，只有能处理的那个应该应答。
+          return undefined;
         }
         // 走 controller.performFill 不是裸调 fillLoginForm，让 filling 守卫生效
         controller.performFill(form, msg.secret);
