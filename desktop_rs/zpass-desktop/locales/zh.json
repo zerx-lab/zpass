@@ -43,5 +43,19 @@
   "vault.item.notes": "备注",
 
   "common.loading": "加载中…",
-  "common.error": "发生错误。"
+  "common.error": "发生错误。",
+
+  "nav.vault": "保险库",
+  "nav.totp": "TOTP",
+  "nav.generator": "生成器",
+  "nav.importExport": "导入",
+
+  "totp.title": "TOTP 验证码",
+  "totp.subtitle": "保险库中所有基于时间的一次性密码。",
+
+  "generator.title": "密码生成器",
+  "generator.subtitle": "生成强密码。完全本地计算。",
+
+  "importExport.title": "导入与导出",
+  "importExport.subtitle": "导入明文 JSON 或导出快照。"
 }

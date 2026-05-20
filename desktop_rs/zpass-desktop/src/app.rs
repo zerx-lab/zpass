@@ -13,17 +13,33 @@ use gpui::{
 use gpui_component::{ActiveTheme as _, Root, ThemeMode};
 
 use crate::i18n;
-use crate::screens::{OnboardingView, UnlockView, VaultView, WelcomeView};
+use crate::screens::{
+    GeneratorView, ImportExportView, OnboardingView, TotpView, UnlockView, VaultView, WelcomeView,
+};
 use crate::services::vault::{VaultHandle, open_default_vault};
 use crate::theme::Theme;
+use crate::widgets::sidebar::{NavTarget, sidebar};
 
-/// 高层屏幕枚举。Phase B 只有 4 个屏。
+/// 高层屏幕枚举。Phase C 终态 7 个屏（其中 3 个由 sidebar 触达）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
     Welcome,
     Onboarding,
     Unlock,
     Vault,
+    Totp,
+    Generator,
+    ImportExport,
+}
+
+impl Screen {
+    /// 是否为 sidebar 顶级屏（解锁后才可见）。
+    pub fn is_top_level(&self) -> bool {
+        matches!(
+            self,
+            Screen::Vault | Screen::Totp | Screen::Generator | Screen::ImportExport
+        )
+    }
 }
 
 /// 屏幕间的"切屏意图"。其它字段（如错误提示）通过 AppState 传。
@@ -33,6 +49,9 @@ pub enum RouteIntent {
     GoOnboarding,
     GoUnlock,
     GoVault,
+    GoTotp,
+    GoGenerator,
+    GoImportExport,
     /// 锁定 vault（vault 屏「锁定」按钮）。
     LockVault,
 }
@@ -104,6 +123,9 @@ pub struct WorkspaceView {
     onboarding: Entity<OnboardingView>,
     unlock: Entity<UnlockView>,
     vault: Entity<VaultView>,
+    totp: Entity<TotpView>,
+    generator: Entity<GeneratorView>,
+    import_export: Entity<ImportExportView>,
 }
 
 impl WorkspaceView {
@@ -113,12 +135,18 @@ impl WorkspaceView {
         let onboarding = cx.new(|cx| OnboardingView::new(window, cx, vault.clone()));
         let unlock = cx.new(|cx| UnlockView::new(window, cx, vault.clone()));
         let vault_view = cx.new(|cx| VaultView::new(window, cx, vault.clone()));
+        let totp = cx.new(|cx| TotpView::new(cx, vault.clone()));
+        let generator = cx.new(|cx| GeneratorView::new(window, cx));
+        let import_export = cx.new(|cx| ImportExportView::new(cx, vault.clone()));
         Self {
             screen: initial,
             welcome,
             onboarding,
             unlock,
             vault: vault_view,
+            totp,
+            generator,
+            import_export,
         }
     }
 
@@ -128,6 +156,9 @@ impl WorkspaceView {
             RouteIntent::GoOnboarding => self.screen = Screen::Onboarding,
             RouteIntent::GoUnlock => self.screen = Screen::Unlock,
             RouteIntent::GoVault => self.screen = Screen::Vault,
+            RouteIntent::GoTotp => self.screen = Screen::Totp,
+            RouteIntent::GoGenerator => self.screen = Screen::Generator,
+            RouteIntent::GoImportExport => self.screen = Screen::ImportExport,
             RouteIntent::LockVault => {
                 let vault = cx.global::<AppState>().vault.clone();
                 let _ = vault.service().lock();
@@ -151,10 +182,34 @@ impl Render for WorkspaceView {
             Screen::Onboarding => self.onboarding.clone().into(),
             Screen::Unlock => self.unlock.clone().into(),
             Screen::Vault => self.vault.clone().into(),
+            Screen::Totp => self.totp.clone().into(),
+            Screen::Generator => self.generator.clone().into(),
+            Screen::ImportExport => self.import_export.clone().into(),
         };
 
         // notification layer 由 Root 渲染；本视图只负责 titlebar + 当前屏。
         let notification_layer = Root::render_notification_layer(window, cx);
+
+        // 解锁后的顶级屏才显示 sidebar；welcome/onboarding/unlock 用全宽布局。
+        let show_sidebar = self.screen.is_top_level();
+        let active_nav = match self.screen {
+            Screen::Vault => Some(NavTarget::Vault),
+            Screen::Totp => Some(NavTarget::Totp),
+            Screen::Generator => Some(NavTarget::Generator),
+            Screen::ImportExport => Some(NavTarget::ImportExport),
+            _ => None,
+        };
+
+        let content_row = if show_sidebar {
+            div()
+                .flex()
+                .flex_row()
+                .size_full()
+                .child(sidebar(theme, active_nav))
+                .child(div().flex_1().h_full().child(body))
+        } else {
+            div().flex_1().w_full().child(body)
+        };
 
         div()
             .flex()
@@ -165,7 +220,7 @@ impl Render for WorkspaceView {
             .font_family(crate::theme::tokens::fonts::SANS)
             .text_size(px(14.0))
             .child(crate::widgets::titlebar::titlebar(theme))
-            .child(div().flex_1().w_full().child(body))
+            .child(content_row)
             .children(notification_layer)
     }
 }

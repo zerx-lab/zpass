@@ -43,5 +43,19 @@
   "vault.item.notes": "Notes",
 
   "common.loading": "Loading…",
-  "common.error": "Something went wrong."
+  "common.error": "Something went wrong.",
+
+  "nav.vault": "Vault",
+  "nav.totp": "TOTP",
+  "nav.generator": "Generator",
+  "nav.importExport": "Import",
+
+  "totp.title": "TOTP codes",
+  "totp.subtitle": "All time-based one-time codes from your vault.",
+
+  "generator.title": "Generator",
+  "generator.subtitle": "Generate strong passwords. Entirely local.",
+
+  "importExport.title": "Import & Export",
+  "importExport.subtitle": "Import plaintext JSON or export a snapshot."
 }
