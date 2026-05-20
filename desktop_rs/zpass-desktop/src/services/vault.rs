@@ -237,6 +237,18 @@ pub fn password_strength_label(pw: &str) -> &'static str {
     }
 }
 
+/// 编译期断言：`Arc<VaultService<SqliteVaultStore>>` 必须是 `Send`，否则
+/// `screens/unlock.rs` 与 `screens/onboarding.rs` 把 KDF 调用推到
+/// `cx.background_executor().spawn(...)` 的方案就无法编译。
+///
+/// 此断言挂在 cfg(test) 下零运行时开销，但任何打破 Send 的回归（例如给 VaultService
+/// 加一个 `Rc<...>` 字段）都会让 `cargo check --tests` 失败。
+#[cfg(test)]
+const _: fn() = || {
+    fn assert_send<T: Send>() {}
+    assert_send::<std::sync::Arc<VaultService<SqliteVaultStore>>>();
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;

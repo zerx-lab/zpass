@@ -5,6 +5,11 @@
 //! - 两次输入必须一致。
 //!
 //! 满足条件后调用 `VaultService::initialize` 并跳转到 vault 屏。
+//!
+//! ## 异步初始化
+//! `initialize` 内部跑 Argon2id KDF（桌面默认 1–2s），必须推到
+//! `cx.background_executor().spawn(...)` 后台线程，否则主线程冻结、按钮无反馈。
+//! 期间 `submitting=true`，Button 进 loading 状态（自动 spinner）+ 重入 guard。
 
 use std::sync::Arc;
 
@@ -13,10 +18,9 @@ use gpui::{
     Window, div, prelude::*, px,
 };
 use gpui_component::{
-    WindowExt as _,
+    Disableable as _,
     button::{Button, ButtonVariants as _},
     input::{Input, InputEvent, InputState},
-    notification::NotificationType,
     v_flex,
 };
 use zeroize::Zeroizing;
@@ -32,6 +36,8 @@ pub struct OnboardingView {
     pub(super) password_state: Entity<InputState>,
     pub(super) confirm_state: Entity<InputState>,
     pub(super) error_key: Option<&'static str>,
+    /// 正在跑 KDF / vault.initialize 的标志（同 `UnlockView::submitting`）。
+    pub(super) submitting: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -86,6 +92,7 @@ impl OnboardingView {
             password_state,
             confirm_state,
             error_key: None,
+            submitting: false,
             _subscriptions: vec![sub_pw, sub_confirm, sub_enter],
         }
     }
@@ -100,11 +107,17 @@ impl OnboardingView {
         Zeroizing::new(self.confirm_state.read(cx).value().as_ref().to_owned())
     }
 
-    /// 提交：校验 + 调用 vault.initialize；错误用 notification 弹出。
-    fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// 提交：先做同步校验（长度、一致性），再异步跑 `initialize`（含 KDF）。
+    pub(super) fn submit(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        // 重入 guard：必须是第一行。
+        if self.submitting {
+            return;
+        }
+
         let password = self.current_password(cx);
         let confirm = self.current_confirm(cx);
 
+        // 同步校验不进 submitting 态（毫秒内返回，无需 loading）。
         if password.chars().count() < 8 {
             self.error_key = Some("onboarding.error.tooShort");
             cx.notify();
@@ -116,23 +129,44 @@ impl OnboardingView {
             return;
         }
 
-        match self.vault.service().initialize(password.as_str()) {
-            Ok(()) => {
-                self.error_key = None;
-                cx.notify();
-                dispatch(cx, RouteIntent::GoVault);
-            }
-            Err(VaultError::AlreadyInitialized) => {
-                self.error_key = None;
-                cx.notify();
-                dispatch(cx, RouteIntent::GoUnlock);
-            }
-            Err(_) => {
-                self.error_key = Some("common.error");
-                window.push_notification((NotificationType::Error, i18n::t("common.error")), cx);
-                cx.notify();
-            }
-        }
+        let svc = self.vault.service();
+
+        // 立刻反馈：进入 submitting，Button 切 loading。
+        self.submitting = true;
+        self.error_key = None;
+        cx.notify();
+
+        let bg = cx.background_executor().clone();
+        cx.spawn(async move |this, async_cx| {
+            // KDF 在后台线程。`Arc<VaultService<SqliteVaultStore>>: Send`，编译期断言
+            // 见 services/vault.rs 末尾的 _assert_send。
+            let result = bg
+                .spawn(async move { svc.initialize(password.as_str()) })
+                .await;
+
+            // 回主线程；window 在 KDF 期间关闭则 update 返 Err，直接 drop。
+            let _ = this.update(async_cx, |this, cx| {
+                this.submitting = false;
+                match result {
+                    Ok(()) => {
+                        this.error_key = None;
+                        cx.notify();
+                        dispatch(cx, RouteIntent::GoVault);
+                    }
+                    Err(VaultError::AlreadyInitialized) => {
+                        // 与同步版本对齐：已初始化是无害状态，直接路由到 unlock。
+                        this.error_key = None;
+                        cx.notify();
+                        dispatch(cx, RouteIntent::GoUnlock);
+                    }
+                    Err(_) => {
+                        this.error_key = Some("common.error");
+                        cx.notify();
+                    }
+                }
+            });
+        })
+        .detach();
     }
 }
 
@@ -174,6 +208,12 @@ impl Render for OnboardingView {
             );
         }
 
+        let submit_label_key = if self.submitting {
+            "onboarding.submitting"
+        } else {
+            "onboarding.submit"
+        };
+
         col.child(
             div()
                 .mt(px(16.0))
@@ -182,11 +222,14 @@ impl Render for OnboardingView {
                 .child(
                     Button::new("onboarding-submit")
                         .primary()
-                        .label(i18n::t("onboarding.submit"))
+                        .loading(self.submitting)
+                        .disabled(self.submitting)
+                        .label(i18n::t(submit_label_key))
                         .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
                 )
                 .child(
                     Button::new("onboarding-back")
+                        .disabled(self.submitting)
                         .label("Back")
                         .on_click(|_, _, cx| dispatch(cx, RouteIntent::GoWelcome)),
                 ),

@@ -126,7 +126,8 @@ fn onboarding_strength_updates(cx: &mut TestAppContext) {
     );
 }
 
-/// 3. unlock 错密码：触发 error_key = unlock.error.invalid + 弹出 NotificationType::Error toast。
+/// 3. unlock 错密码：异步 KDF 跑完后触发 `error_key = unlock.error.invalid`
+///    并把 `submitting` 复位为 `false`（红色 error label 渲染由 i18n 键覆盖）。
 #[gpui::test]
 fn unlock_wrong_password_shows_error(cx: &mut TestAppContext) {
     let vault = setup(cx);
@@ -136,7 +137,7 @@ fn unlock_wrong_password_shows_error(cx: &mut TestAppContext) {
         .expect("init");
     vault.service().lock().expect("lock");
 
-    // 用 Root 包裹，否则 window.push_notification 会 panic。
+    // 用 Root 包裹（保留：异步路径未来若再加 toast，Root 是必需的）。
     let (root_window, view) = add_window_with_root::<UnlockView, _>(cx, |window, cx| {
         UnlockView::new(window, cx, vault.clone())
     });
@@ -149,13 +150,197 @@ fn unlock_wrong_password_shows_error(cx: &mut TestAppContext) {
     update_in_window(cx, &root_window, &view, |v, window, cx| {
         v.submit(window, cx)
     });
+    // submit 返回后是异步 task，需要把执行器跑到 parked 才能看到结果。
     cx.run_until_parked();
 
-    let err = view.read_with(cx, |v, _| v.error_key);
+    let (err, submitting) = view.read_with(cx, |v, _| (v.error_key, v.submitting));
     assert_eq!(
         err,
         Some("unlock.error.invalid"),
         "错密码必须把 error_key 设为 unlock.error.invalid"
+    );
+    assert!(!submitting, "异步任务完成后 submitting 必须复位为 false");
+}
+
+/// 3b. unlock submit 中间态：submit 调用后、KDF 完成前，
+///     `submitting == true`，确保 UI 能立刻把 Button 切到 loading 状态。
+///
+/// 测试做法：用 `update_in_window` 同步调 submit 但**不**调 run_until_parked —
+/// 此时异步 task 已经 spawn 出去但还没跑，view state 必须已经反映 submitting=true。
+#[gpui::test]
+fn unlock_submit_shows_submitting_state(cx: &mut TestAppContext) {
+    let vault = setup(cx);
+    vault.service().initialize("test-password-123").expect("init");
+    vault.service().lock().expect("lock");
+
+    let (root_window, view) = add_window_with_root::<UnlockView, _>(cx, |window, cx| {
+        UnlockView::new(window, cx, vault.clone())
+    });
+
+    update_in_window(cx, &root_window, &view, |v, window, cx| {
+        v.password_state.update(cx, |s, cx| {
+            s.set_value("test-password-123", window, cx);
+        });
+    });
+
+    // 调 submit 但故意不 run_until_parked。
+    update_in_window(cx, &root_window, &view, |v, window, cx| {
+        v.submit(window, cx);
+    });
+
+    let (submitting, err) = view.read_with(cx, |v, _| (v.submitting, v.error_key));
+    assert!(submitting, "submit 调用返回时 submitting 必须立刻为 true");
+    assert_eq!(err, None, "进入 submitting 时必须先清除旧 error_key");
+
+    // 把后续异步收尾，避免影响后续测试：跑完整流程后 submitting 应该回到 false。
+    cx.run_until_parked();
+    let submitting_after = view.read_with(cx, |v, _| v.submitting);
+    assert!(
+        !submitting_after,
+        "run_until_parked 后异步 task 应已完成，submitting 复位"
+    );
+}
+
+/// 3c. unlock submit 重入 guard：在 submitting=true 期间再次调 submit
+///     必须 no-op（不消费新密码值，不再次触发 KDF）。
+///
+/// 验证方法：第一次 submit 用错误密码进入 submitting；不 run_until_parked；
+/// 然后把输入改成正确密码并再次 submit。run_until_parked 后必须仍然得到
+/// error_key（第一次的 KDF 结果），证明第二次 submit 没起效。
+#[gpui::test]
+fn unlock_submit_reentry_blocked(cx: &mut TestAppContext) {
+    let vault = setup(cx);
+    vault.service().initialize("correct-pw-12345").expect("init");
+    vault.service().lock().expect("lock");
+
+    let (root_window, view) = add_window_with_root::<UnlockView, _>(cx, |window, cx| {
+        UnlockView::new(window, cx, vault.clone())
+    });
+
+    // 第一次：错密码触发 submit，立刻进 submitting。
+    update_in_window(cx, &root_window, &view, |v, window, cx| {
+        v.password_state.update(cx, |s, cx| {
+            s.set_value("wrong-pw", window, cx);
+        });
+    });
+    update_in_window(cx, &root_window, &view, |v, window, cx| {
+        v.submit(window, cx);
+    });
+    assert!(view.read_with(cx, |v, _| v.submitting));
+
+    // 第二次（重入）：现在把密码改成正确的，再 submit。guard 应当让这次成为 no-op。
+    update_in_window(cx, &root_window, &view, |v, window, cx| {
+        v.password_state.update(cx, |s, cx| {
+            s.set_value("correct-pw-12345", window, cx);
+        });
+    });
+    update_in_window(cx, &root_window, &view, |v, window, cx| {
+        v.submit(window, cx);
+    });
+
+    // 重入 guard 起效的**直接**证据：第二次 submit 之后 submitting 仍是 true，
+    // 意味着没有新 task 被 spawn（否则状态机会被搅乱）。这比依赖 executor
+    // 调度顺序的 error_key 断言更直接，独立于 task 完成顺序。
+    assert!(
+        view.read_with(cx, |v, _| v.submitting),
+        "第二次 submit 必须被 guard 早返回阻止，submitting 保持 true"
+    );
+
+    // 跑完：第一次 KDF（错密码）结果应当 win，error_key 被设上。
+    cx.run_until_parked();
+    let (err, submitting) = view.read_with(cx, |v, _| (v.error_key, v.submitting));
+    assert_eq!(
+        err,
+        Some("unlock.error.invalid"),
+        "重入 guard 必须让第二次 submit no-op，第一次错密码 KDF 结果应胜出"
+    );
+    assert!(!submitting);
+}
+
+/// 3e. onboarding 同步校验失败时**不**进入 submitting：
+///     防止有人不小心把 `self.submitting = true` 移到校验之前的回归。
+#[gpui::test]
+fn onboarding_sync_validation_does_not_enter_submitting(cx: &mut TestAppContext) {
+    let vault = setup(cx);
+    let (root_window, view) = add_window_with_root::<OnboardingView, _>(cx, |window, cx| {
+        OnboardingView::new(window, cx, vault.clone())
+    });
+
+    // 案例 A：密码过短（< 8 字符）。
+    update_in_window(cx, &root_window, &view, |v, window, cx| {
+        v.password_state.update(cx, |s, cx| {
+            s.set_value("short", window, cx);
+        });
+        v.confirm_state.update(cx, |s, cx| {
+            s.set_value("short", window, cx);
+        });
+    });
+    update_in_window(cx, &root_window, &view, |v, window, cx| {
+        v.submit(window, cx);
+    });
+    let (submitting, err) = view.read_with(cx, |v, _| (v.submitting, v.error_key));
+    assert!(
+        !submitting,
+        "短密码校验失败时不应进入 submitting（否则 Button 永远 loading）"
+    );
+    assert_eq!(err, Some("onboarding.error.tooShort"));
+
+    // 案例 B：两次输入不一致。
+    update_in_window(cx, &root_window, &view, |v, window, cx| {
+        v.password_state.update(cx, |s, cx| {
+            s.set_value("Abcdefgh1234", window, cx);
+        });
+        v.confirm_state.update(cx, |s, cx| {
+            s.set_value("DIFFERENT12345", window, cx);
+        });
+    });
+    update_in_window(cx, &root_window, &view, |v, window, cx| {
+        v.submit(window, cx);
+    });
+    let (submitting, err) = view.read_with(cx, |v, _| (v.submitting, v.error_key));
+    assert!(!submitting, "密码不一致校验失败时不应进入 submitting");
+    assert_eq!(err, Some("onboarding.error.mismatch"));
+}
+
+/// 3d. onboarding submit 异步完成：正确强密码 → KDF 完成 → submitting 复位、
+///     vault.initialized 变为 true、error_key 为 None（路由跳转由 dispatch 处理，
+///     非本测试断言对象 — 跨 view 路由测试见 vault_lists_items）。
+#[gpui::test]
+fn onboarding_submit_async_completes(cx: &mut TestAppContext) {
+    let vault = setup(cx);
+    let (root_window, view) = add_window_with_root::<OnboardingView, _>(cx, |window, cx| {
+        OnboardingView::new(window, cx, vault.clone())
+    });
+
+    // 强密码（长度 ≥ 8 且通过 strength）。
+    let pw = "Abcdefgh1234!@#$";
+    update_in_window(cx, &root_window, &view, |v, window, cx| {
+        v.password_state.update(cx, |s, cx| {
+            s.set_value(pw, window, cx);
+        });
+        v.confirm_state.update(cx, |s, cx| {
+            s.set_value(pw, window, cx);
+        });
+    });
+
+    // 提交：同步校验过 → 进入 submitting → spawn KDF。
+    update_in_window(cx, &root_window, &view, |v, window, cx| {
+        v.submit(window, cx);
+    });
+    assert!(
+        view.read_with(cx, |v, _| v.submitting),
+        "校验通过后必须立刻进入 submitting"
+    );
+
+    // 跑完异步：KDF 完成、vault 初始化、submitting 复位。
+    cx.run_until_parked();
+
+    let (submitting, err) = view.read_with(cx, |v, _| (v.submitting, v.error_key));
+    assert!(!submitting, "异步完成后 submitting 必须复位");
+    assert_eq!(err, None, "成功初始化不应留下 error_key");
+    assert!(
+        vault.service().status().expect("status").initialized,
+        "异步 initialize 必须真的把 vault 标记为已初始化"
     );
 }
 
