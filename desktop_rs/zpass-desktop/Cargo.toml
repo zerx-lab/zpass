@@ -14,12 +14,14 @@ path = "src/main.rs"
 [dependencies]
 gpui.workspace = true
 gpui_platform.workspace = true
+gpui-component.workspace = true
+gpui-component-assets.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 parking_lot.workspace = true
 anyhow.workspace = true
+# 主密码 / login 密码经 UI 流转时即时包 Zeroizing<String>；见 screens/{onboarding,unlock,vault}.rs。
 zeroize.workspace = true
-uuid.workspace = true
 zpass-crypto = { path = "../../crates/zpass-crypto" }
 zpass-vault-format = { path = "../../crates/zpass-vault-format" }
 zpass-vault-store = { path = "../../crates/zpass-vault-store" }
@@ -29,3 +31,5 @@ zpass-config = { path = "../../crates/zpass-config" }
 
 [dev-dependencies]
 zpass-vault-service = { path = "../../crates/zpass-vault-service", features = ["test-helpers"] }
+# gpui 的 test-support feature 提供 TestAppContext + #[gpui::test] runtime。
+gpui = { workspace = true, features = ["test-support"] }

@@ -7,9 +7,10 @@
 use std::sync::{Arc, Mutex, OnceLock};
 
 use gpui::{
-    App, AppContext, Bounds, Context, Entity, IntoElement, ParentElement, Render, SharedString,
-    Styled, Window, WindowBounds, WindowKind, WindowOptions, div, prelude::*, px,
+    App, AppContext, Bounds, Context, Entity, IntoElement, ParentElement, Render, Styled, Window,
+    WindowBounds, WindowKind, WindowOptions, div, prelude::*, px,
 };
+use gpui_component::{ActiveTheme as _, Root, ThemeMode};
 
 use crate::i18n;
 use crate::screens::{OnboardingView, UnlockView, VaultView, WelcomeView};
@@ -36,19 +37,45 @@ pub enum RouteIntent {
     LockVault,
 }
 
-/// 全局只读上下文。修改通过 [`update_state`]。
+/// 全局只读上下文。修改通过 [`set_theme`] / Phase C 的 settings 屏。
+///
+/// `locale` 当前未用（i18n 通过模块内静态 `CURRENT` 路由）；Phase C 接入 settings
+/// 切换语言时会读它，留作位 placeholder。
+#[allow(dead_code)]
 pub struct AppState {
     pub vault: Arc<VaultHandle>,
     pub locale: i18n::Locale,
     pub theme: Theme,
-    /// onboarding / unlock 屏的实时错误提示（在表单本地复制后清除）。
-    pub last_error_key: Option<&'static str>,
 }
 
 impl gpui::Global for AppState {}
 
-pub fn update_state(cx: &mut App, mutate: impl FnOnce(&mut AppState)) {
-    cx.update_global::<AppState, _>(|state, _| mutate(state));
+/// 切换主题。`mode` 为 None 则在 dark / light 之间切换。
+///
+/// 同时联动 gpui-component 的 ActiveTheme（让 Input/Button 等组件的颜色跟随）。
+pub fn set_theme(cx: &mut App, mode: ThemeMode) {
+    let new_theme = if mode == ThemeMode::Light {
+        Theme::light()
+    } else {
+        Theme::dark()
+    };
+    cx.update_global::<AppState, _>(|state, _| {
+        state.theme = new_theme;
+    });
+    // gpui-component 的 Theme 也同步切换，让 Input/Button 跟随。
+    gpui_component::Theme::change(mode, None, cx);
+    cx.refresh_windows();
+}
+
+/// 切换到下一个主题（dark <-> light）。供 titlebar 按钮使用。
+pub fn toggle_theme(cx: &mut App) {
+    let current_mode = gpui_component::Theme::global(cx).mode;
+    let next = if current_mode == ThemeMode::Light {
+        ThemeMode::Dark
+    } else {
+        ThemeMode::Light
+    };
+    set_theme(cx, next);
 }
 
 /// 路由队列。
@@ -80,12 +107,12 @@ pub struct WorkspaceView {
 }
 
 impl WorkspaceView {
-    pub fn new(_window: &mut Window, cx: &mut Context<Self>, vault: Arc<VaultHandle>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>, vault: Arc<VaultHandle>) -> Self {
         let initial = initial_screen(&vault);
         let welcome = cx.new(|cx| WelcomeView::new(cx, vault.clone()));
-        let onboarding = cx.new(|cx| OnboardingView::new(cx, vault.clone()));
-        let unlock = cx.new(|cx| UnlockView::new(cx, vault.clone()));
-        let vault_view = cx.new(|cx| VaultView::new(cx, vault.clone()));
+        let onboarding = cx.new(|cx| OnboardingView::new(window, cx, vault.clone()));
+        let unlock = cx.new(|cx| UnlockView::new(window, cx, vault.clone()));
+        let vault_view = cx.new(|cx| VaultView::new(window, cx, vault.clone()));
         Self {
             screen: initial,
             welcome,
@@ -112,7 +139,7 @@ impl WorkspaceView {
 }
 
 impl Render for WorkspaceView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // 每帧 drain 路由意图。
         for intent in drain_intents() {
             self.apply_intent(intent, cx);
@@ -126,16 +153,20 @@ impl Render for WorkspaceView {
             Screen::Vault => self.vault.clone().into(),
         };
 
+        // notification layer 由 Root 渲染；本视图只负责 titlebar + 当前屏。
+        let notification_layer = Root::render_notification_layer(window, cx);
+
         div()
             .flex()
             .flex_col()
             .size_full()
             .bg(theme.bg)
             .text_color(theme.text)
-            .font_family(SharedString::from(crate::theme::tokens::fonts::SANS))
+            .font_family(crate::theme::tokens::fonts::SANS)
             .text_size(px(14.0))
             .child(crate::widgets::titlebar::titlebar(theme))
             .child(div().flex_1().w_full().child(body))
+            .children(notification_layer)
     }
 }
 
@@ -155,6 +186,9 @@ fn initial_screen(vault: &VaultHandle) -> Screen {
 }
 
 /// 进程启动入口（`application().run(|cx| launch(cx))`）。
+///
+/// 这里必须用 `cx.spawn(...)` 异步打开窗口，因为 `WorkspaceView` 的构造需要 `Window`
+/// 与 gpui-component 内部状态的初始化（[`gpui_component::init`] 已在 main 里同步调用）。
 pub fn launch(cx: &mut App) {
     let vault = match open_default_vault() {
         Ok(handle) => Arc::new(handle),
@@ -163,24 +197,33 @@ pub fn launch(cx: &mut App) {
 
     let locale = i18n::default_locale();
     i18n::set_current_locale(locale);
+
+    // 默认 dark 主题；gpui-component 的 Theme 也对齐到 Dark。
     cx.set_global(AppState {
         vault: vault.clone(),
         locale,
         theme: Theme::dark(),
-        last_error_key: None,
     });
+    gpui_component::Theme::change(ThemeMode::Dark, None, cx);
 
     let bounds = Bounds::centered(None, gpui::size(px(960.0), px(640.0)), cx);
-    let _ = cx.open_window(
-        WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(bounds)),
-            window_background: gpui::WindowBackgroundAppearance::Opaque,
-            window_min_size: Some(gpui::size(px(720.0), px(480.0))),
-            kind: WindowKind::Normal,
-            ..Default::default()
-        },
-        move |window, cx| cx.new(|cx| WorkspaceView::new(window, cx, vault.clone())),
-    );
+    let window_options = WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        window_background: gpui::WindowBackgroundAppearance::Opaque,
+        window_min_size: Some(gpui::size(px(720.0), px(480.0))),
+        kind: WindowKind::Normal,
+        ..Default::default()
+    };
+
+    cx.spawn(async move |cx| {
+        cx.open_window(window_options, |window, cx| {
+            let workspace = cx.new(|cx| WorkspaceView::new(window, cx, vault.clone()));
+            // Root 提供 notification layer 与 dialog 容器；必须是窗口第一级子节点。
+            cx.new(|cx| Root::new(workspace, window, cx).bg(cx.theme().background))
+        })
+        .expect("Failed to open window");
+    })
+    .detach();
 
     cx.activate(true);
 }

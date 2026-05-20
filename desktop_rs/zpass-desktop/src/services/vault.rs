@@ -1,14 +1,13 @@
 //! Vault 服务胶水层（spec/11 § 8）。
 //!
 //! - `VaultHandle` 包装 `Arc<VaultService<SqliteVaultStore>>`，跨线程共享。
-//! - `GpuiEventSink` 实现 `VaultEventSink`，把后端事件**通过 crossbeam-channel
+//! - `GpuiEventSink` 实现 `VaultEventSink`，把后端事件**通过 channel
 //!   异步**送到一个 GPUI Entity（避免在 vault 写锁内回调 UI 路径而死锁，见
 //!   spec/05a § 3.1 反例）。
 //! - `VaultSubject` 是该 Entity；上层用 `cx.subscribe(&subject, |...|)` 订阅。
 
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::thread;
 
 use anyhow::{Context as _, Result};
 use gpui::{App, AppContext, Entity, EventEmitter};
@@ -16,11 +15,15 @@ use parking_lot::Mutex;
 
 use zpass_vault_format::ItemType;
 use zpass_vault_service::{
-    NewItem, SystemClock, VaultError, VaultEvent, VaultEventSink, VaultService, VaultStatus,
+    NewItem, VaultError, VaultEvent, VaultEventSink, VaultService, VaultStatus,
 };
 use zpass_vault_store::SqliteVaultStore;
 
 /// UI 端事件（与 `VaultEvent` 1:1 但脱了 `Send + ?Sync` 约束）。
+///
+/// Phase B 当前只在 vault 屏 match `Item*` / `Locked` 三类；其余字段（id / item_type）
+/// 留给 Phase C 的 totp / passkey 屏使用，因此暂时挂 `#[allow(dead_code)]`。
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum VaultUiEvent {
     Initialized,
@@ -32,9 +35,10 @@ pub enum VaultUiEvent {
     ItemDeleted { id: String },
 }
 
-impl From<&VaultEvent> for VaultUiEvent {
-    fn from(e: &VaultEvent) -> Self {
-        match e {
+impl VaultUiEvent {
+    /// `VaultEvent` 中 Phase B **不**关心的事件转 `None`，避免发到 UI。
+    fn from_backend(e: &VaultEvent) -> Option<Self> {
+        Some(match e {
             VaultEvent::Initialized => VaultUiEvent::Initialized,
             VaultEvent::Unlocked => VaultUiEvent::Unlocked,
             VaultEvent::Locked => VaultUiEvent::Locked,
@@ -51,8 +55,8 @@ impl From<&VaultEvent> for VaultUiEvent {
             // Phase B 不订阅 SSH / 信任设备事件
             VaultEvent::TrustedDeviceEnabled
             | VaultEvent::TrustedDeviceDisabled
-            | VaultEvent::SshKeyDecryptedForSigning { .. } => VaultUiEvent::Unlocked, // never reached in Phase B
-        }
+            | VaultEvent::SshKeyDecryptedForSigning { .. } => return None,
+        })
     }
 }
 
@@ -60,11 +64,9 @@ impl From<&VaultEvent> for VaultUiEvent {
 pub struct VaultSubject;
 impl EventEmitter<VaultUiEvent> for VaultSubject {}
 
-/// Phase B 的 vault 句柄。所有阻塞调用都在调用方使用 `cx.background_spawn`。
+/// Phase B 的 vault 句柄。所有阻塞调用都同步执行（Phase B vault 操作都是毫秒级 SQLite）。
 pub struct VaultHandle {
     inner: Arc<VaultService<SqliteVaultStore>>,
-    // GpuiEventSink → channel sender；后台线程把事件转发到 UI Entity。
-    event_tx: Sender<VaultUiEvent>,
     subject: Mutex<Option<Entity<VaultSubject>>>,
     bridge_started: std::sync::OnceLock<()>,
     event_rx_holder: Mutex<Option<Receiver<VaultUiEvent>>>,
@@ -80,103 +82,53 @@ impl VaultHandle {
         self.inner.status()
     }
 
-    pub fn is_unlocked(&self) -> bool {
-        self.inner.is_unlocked()
-    }
-
-    /// 取（或初始化）UI 订阅 subject。第一次调用启动一个后台桥线程，把
-    /// `event_rx` 的事件转发到 entity 的 `cx.emit(...)`。
-    pub fn gpui_subject(&self, cx: &mut App) -> Entity<VaultSubject> {
+    /// 取（或初始化）UI 订阅 subject。第一次调用启动一个后台桥任务，把
+    /// channel 的事件用 `AsyncApp::update` 投递回 main thread，调用 `cx.emit(...)`。
+    pub fn gpui_subject(self: &Arc<Self>, cx: &mut App) -> Entity<VaultSubject> {
         if let Some(s) = self.subject.lock().clone() {
             return s;
         }
         let subject = cx.new(|_| VaultSubject);
         *self.subject.lock() = Some(subject.clone());
 
-        // 启动转发桥：把 channel 收到的 event 用 cx.update_entity 发给 entity。
         if self.bridge_started.set(()).is_ok() {
             let Some(rx) = self.event_rx_holder.lock().take() else {
                 return subject;
             };
-            let subject_for_thread = subject.clone();
-            let weak = subject_for_thread.downgrade();
-            // 用 GPUI 的 background_executor，避免引入 tokio。
-            cx.background_executor()
-                .spawn(async move {
-                    while let Ok(event) = rx.recv() {
-                        let Some(_handle) = weak.upgrade() else {
-                            break;
-                        };
-                        // 通过 cx.update_entity 在 main thread 上 emit。
-                        // 这里我们没有 cx；GPUI 提供 `App::spawn`/`update` 的全局入口在
-                        // 较新的 API 里是 `App::quit` 之类，跨线程通常用 `cx.update_global`。
-                        // Phase B 简化：仅打印，让 UI 通过轮询读 vault.status 推动。
-                        //
-                        // TODO(phase B 完善): 用 `AppContext::update_entity` 跨线程 emit。
-                        let _ = event;
+            let weak = subject.downgrade();
+            // cx.spawn 在 main 线程上执行 async block，闭包内的 AsyncApp 不需要 Send。
+            // 阻塞 `rx.recv()` 改成非阻塞 `try_recv` + 让出（Phase B 事件量很小，
+            // 简单忙等可接受；真需要时换 `smol::channel`）。
+            cx.spawn(async move |async_cx| {
+                use std::time::Duration;
+                loop {
+                    match rx.try_recv() {
+                        Ok(event) => {
+                            let Some(handle) = weak.upgrade() else {
+                                break;
+                            };
+                            async_cx.update(|cx| {
+                                handle.update(cx, |_, cx| {
+                                    cx.emit(event.clone());
+                                });
+                            });
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Empty) => {
+                            // 让出 ~16ms（一帧）；GPUI 的 timer API。
+                            async_cx
+                                .background_executor()
+                                .timer(Duration::from_millis(16))
+                                .await;
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
                     }
-                })
-                .detach();
+                }
+            })
+            .detach();
         }
 
         subject
     }
-
-    /// `Initialize` 包装：让调用方用 `cx.background_spawn` 跑。
-    pub async fn initialize_async(self: Arc<Self>, password: String) -> Result<(), VaultError> {
-        let inner = self.inner.clone();
-        // 阻塞调用放进 blocking 线程池：GPUI background_executor 是允许阻塞的执行器。
-        smol_block_in_place(move || inner.initialize(&password))
-    }
-
-    pub async fn unlock_async(self: Arc<Self>, password: String) -> Result<(), VaultError> {
-        let inner = self.inner.clone();
-        smol_block_in_place(move || inner.unlock(&password))
-    }
-
-    pub async fn lock_async(self: Arc<Self>) -> Result<(), VaultError> {
-        let inner = self.inner.clone();
-        smol_block_in_place(move || inner.lock())
-    }
-
-    pub async fn list_items_async(
-        self: Arc<Self>,
-    ) -> Result<Vec<zpass_vault_service::ItemSummary>, VaultError> {
-        let inner = self.inner.clone();
-        smol_block_in_place(move || inner.list_items())
-    }
-
-    pub async fn get_item_async(
-        self: Arc<Self>,
-        id: String,
-    ) -> Result<zpass_vault_format::ItemPayloadV1, VaultError> {
-        let inner = self.inner.clone();
-        smol_block_in_place(move || inner.get_item(&id))
-    }
-
-    pub async fn create_login_async(
-        self: Arc<Self>,
-        new: NewItem,
-    ) -> Result<zpass_vault_service::ItemSummary, VaultError> {
-        let inner = self.inner.clone();
-        smol_block_in_place(move || inner.create_item(new))
-    }
-
-    pub async fn delete_item_async(self: Arc<Self>, id: String) -> Result<(), VaultError> {
-        let inner = self.inner.clone();
-        smol_block_in_place(move || inner.delete_item(&id))
-    }
-}
-
-/// 跨平台「在当前线程里执行同步阻塞代码」helper。
-///
-/// GPUI 的 `background_executor` 任务本来就是允许阻塞的（不像 tokio），所以
-/// 这里其实就是直接 call。包一层是给后续可能换 executor 的余地。
-fn smol_block_in_place<F, T>(f: F) -> T
-where
-    F: FnOnce() -> T,
-{
-    f()
 }
 
 /// 内部 sink：通过 channel 把后端事件投递给 UI bridge。
@@ -187,7 +139,9 @@ struct GpuiEventSink {
 impl VaultEventSink for GpuiEventSink {
     fn on_event(&self, event: &VaultEvent) {
         // 反例（spec/05a § 3.1）：不要在这里回调 vault；只入队。
-        let _ = self.tx.send(event.into());
+        if let Some(ui_ev) = VaultUiEvent::from_backend(event) {
+            let _ = self.tx.send(ui_ev);
+        }
     }
 }
 
@@ -196,17 +150,40 @@ pub fn open_default_vault() -> Result<VaultHandle> {
     let path = zpass_vault_store::default_vault_path().context("resolve default vault path")?;
     let store = SqliteVaultStore::open(&path).context("open SQLite vault store")?;
     let (tx, rx) = channel::<VaultUiEvent>();
-    let sink: Box<dyn VaultEventSink> = Box::new(GpuiEventSink { tx: tx.clone() });
+    let sink: Box<dyn VaultEventSink> = Box::new(GpuiEventSink { tx });
     let svc = VaultService::new(store, vec![sink]);
-    let _ = SystemClock; // 类型重新导出兜底
-    let _ = thread::current; // 避免未用警告
-    Ok(VaultHandle {
-        inner: Arc::new(svc),
-        event_tx: tx,
-        subject: Mutex::new(None),
-        bridge_started: std::sync::OnceLock::new(),
-        event_rx_holder: Mutex::new(Some(rx)),
-    })
+    Ok(VaultHandle::wrap(Arc::new(svc), rx))
+}
+
+impl VaultHandle {
+    /// 内部入口：把已组装的 service + rx 打包。
+    fn wrap(inner: Arc<VaultService<SqliteVaultStore>>, rx: Receiver<VaultUiEvent>) -> Self {
+        VaultHandle {
+            inner,
+            subject: Mutex::new(None),
+            bridge_started: std::sync::OnceLock::new(),
+            event_rx_holder: Mutex::new(Some(rx)),
+        }
+    }
+
+    /// 测试构造：in-memory SQLite + 弱 KDF 参数。仅在测试编译时可见。
+    #[cfg(test)]
+    pub fn new_in_memory_for_test() -> Result<Self> {
+        use zpass_crypto::Argon2idParams;
+        use zpass_vault_service::SystemClock;
+        let store = SqliteVaultStore::open_in_memory().context("open in-memory sqlite")?;
+        let (tx, rx) = channel::<VaultUiEvent>();
+        let sink: Box<dyn VaultEventSink> = Box::new(GpuiEventSink { tx });
+        let weak = Argon2idParams {
+            memory_kib: 8 * 1024,
+            iterations: 1,
+            parallelism: 1,
+            key_len: 32,
+        };
+        let svc =
+            VaultService::with_clock_and_params(store, vec![sink], Box::new(SystemClock), weak);
+        Ok(VaultHandle::wrap(Arc::new(svc), rx))
+    }
 }
 
 /// 便捷构造：把 `NewItem` 拼出来给 onboarding/vault 屏用。
@@ -251,19 +228,19 @@ pub fn password_strength_label(pw: &str) -> &'static str {
     if pw.chars().any(|c| !c.is_ascii_alphanumeric()) {
         classes += 1;
     }
-    let score = match (len, classes) {
+    match (len, classes) {
         (l, _) if l < 8 => "onboarding.strength.weak",
         (l, c) if l >= 16 && c >= 3 => "onboarding.strength.veryStrong",
         (l, c) if l >= 12 && c >= 3 => "onboarding.strength.strong",
         (_, c) if c >= 2 => "onboarding.strength.fair",
         _ => "onboarding.strength.weak",
-    };
-    score
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc::channel as std_channel;
 
     #[test]
     fn password_strength_weak_for_short() {
@@ -290,18 +267,30 @@ mod tests {
         );
     }
 
+    /// 验证 sink → channel 链路：emit 一个 `VaultEvent` 后，channel 必须收到对应 UI 事件。
+    /// （emit → entity 这一段需 GPUI 上下文，由 `#[gpui::test]` 覆盖。）
     #[test]
-    fn vault_ui_event_conversion() {
-        let e = VaultEvent::ItemCreated {
-            id: "x".into(),
+    fn sink_forwards_events_to_channel() {
+        let (tx, rx) = std_channel::<VaultUiEvent>();
+        let sink = GpuiEventSink { tx };
+        sink.on_event(&VaultEvent::Initialized);
+        sink.on_event(&VaultEvent::Unlocked);
+        sink.on_event(&VaultEvent::ItemCreated {
+            id: "abc".into(),
             item_type: ItemType::Login,
-        };
-        match VaultUiEvent::from(&e) {
-            VaultUiEvent::ItemCreated { id, item_type } => {
-                assert_eq!(id, "x");
-                assert_eq!(item_type, ItemType::Login);
-            }
-            other => panic!("unexpected: {other:?}"),
-        }
+        });
+        // SSH 事件应被过滤掉
+        sink.on_event(&VaultEvent::SshKeyDecryptedForSigning {
+            item_id: "xyz".into(),
+        });
+
+        let collected: Vec<VaultUiEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+        assert_eq!(collected.len(), 3);
+        assert!(matches!(collected[0], VaultUiEvent::Initialized));
+        assert!(matches!(collected[1], VaultUiEvent::Unlocked));
+        assert!(matches!(
+            collected[2],
+            VaultUiEvent::ItemCreated { ref id, .. } if id == "abc"
+        ));
     }
 }

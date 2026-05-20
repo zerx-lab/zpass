@@ -1,15 +1,14 @@
 //! Welcome 屏：欢迎 + 「Create vault / Open vault」分流。
 //!
-//! Phase B 简化：vault 文件在固定路径（`config_root/vault.db`），两个按钮
-//! 实际做同一件事——切到 onboarding 或 unlock，由 vault 是否 initialized 决定。
-//!
-//! NOTE：按钮点击通过 `WorkspaceView` 全局 message 路由（见 `crate::app::route`），
-//! 此处只负责渲染。
+//! Phase B 简化：vault 文件在固定路径（`config_root/vault.db`）。
+//! 两个按钮根据 vault 是否已初始化分流到 onboarding 或 unlock。
 
 use std::sync::Arc;
 
-use gpui::{
-    Context, IntoElement, ParentElement, Render, SharedString, Styled, Window, div, prelude::*, px,
+use gpui::{Context, IntoElement, ParentElement, Render, SharedString, Styled, Window, div, px};
+use gpui_component::{
+    button::{Button, ButtonVariants as _},
+    v_flex,
 };
 
 use crate::app::{AppState, RouteIntent};
@@ -24,6 +23,12 @@ pub struct WelcomeView {
 impl WelcomeView {
     pub fn new(_cx: &mut Context<Self>, vault: Arc<VaultHandle>) -> Self {
         Self { vault }
+    }
+
+    /// 仅测试用：暴露内部 vault 句柄给 `#[gpui::test]` 断言 wiring 一致。
+    #[cfg(test)]
+    pub(super) fn vault_arc(&self) -> &Arc<VaultHandle> {
+        &self.vault
     }
 }
 
@@ -42,10 +47,8 @@ impl Render for WelcomeView {
             RouteIntent::GoOnboarding
         };
 
-        div()
+        v_flex()
             .size_full()
-            .flex()
-            .flex_col()
             .items_center()
             .justify_center()
             .gap(px(24.0))
@@ -56,16 +59,17 @@ impl Render for WelcomeView {
                     .mt(px(24.0))
                     .flex()
                     .gap(px(12.0))
-                    .child(primary_button(
-                        theme,
-                        i18n::t("welcome.create"),
-                        create_intent,
-                    ))
-                    .child(secondary_button(
-                        theme,
-                        i18n::t("welcome.open"),
-                        RouteIntent::GoUnlock,
-                    )),
+                    .child(
+                        Button::new("welcome-create")
+                            .primary()
+                            .label(i18n::t("welcome.create"))
+                            .on_click(move |_, _, cx| crate::app::dispatch(cx, create_intent)),
+                    )
+                    .child(
+                        Button::new("welcome-open")
+                            .label(i18n::t("welcome.open"))
+                            .on_click(|_, _, cx| crate::app::dispatch(cx, RouteIntent::GoUnlock)),
+                    ),
             )
     }
 }
@@ -83,46 +87,4 @@ fn subtitle(theme: Theme, label: &'static str) -> impl IntoElement {
         .text_size(px(14.0))
         .text_color(theme.text_2)
         .child(SharedString::from(label))
-}
-
-pub(crate) fn primary_button(
-    theme: Theme,
-    label: &'static str,
-    intent: RouteIntent,
-) -> impl IntoElement {
-    button_inner(theme, label, theme.accent, theme.accent_ink, intent)
-}
-
-pub(crate) fn secondary_button(
-    theme: Theme,
-    label: &'static str,
-    intent: RouteIntent,
-) -> impl IntoElement {
-    button_inner(theme, label, theme.bg_elev_2, theme.text, intent)
-}
-
-fn button_inner(
-    _theme: Theme,
-    label: &'static str,
-    bg: gpui::Hsla,
-    fg: gpui::Hsla,
-    intent: RouteIntent,
-) -> impl IntoElement {
-    div()
-        .id(SharedString::from(format!("btn-{label}")))
-        .min_w(px(160.0))
-        .px(px(16.0))
-        .py(px(10.0))
-        .rounded(px(crate::theme::tokens::sizes::RADIUS_PX))
-        .bg(bg)
-        .text_color(fg)
-        .text_size(px(14.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .cursor_pointer()
-        .child(SharedString::from(label))
-        .on_click(move |_event, _window, cx| {
-            crate::app::dispatch(cx, intent);
-        })
 }

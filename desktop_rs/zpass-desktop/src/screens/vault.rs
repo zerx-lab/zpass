@@ -1,36 +1,98 @@
-//! Vault 屏：item 列表 + "新建 demo login" + "锁定" 按钮。
+//! Vault 屏：item 列表 + 搜索框 + 新建 login 表单。
 //!
-//! Phase B 简化：
-//! - 列表只展示 `name` + `username`（解密 item 后渲染）。
-//! - 新建按钮直接创建一个固定 demo login（不弹输入框）。
-//! - 删除按钮放在 item 行尾。
-//! - 主密码 / 详细字段编辑留给 Phase C。
+//! Phase B 范围：
+//! - 列表展示 `name` + 类型，按搜索框过滤（client-side substring match）。
+//! - 「新建 login」按钮展开一个表单（name / username / password 3 个 Input），保存后追加到列表。
+//! - 每行尾端的「删除」按钮即时移除。
+//! - 不实现编辑 / 详情查看 / 非 login 类型（留 Phase C）。
+//!
+//! 事件订阅：构造时通过 `VaultHandle::gpui_subject(cx)` 拿到 subject，订阅 `ItemCreated`
+//! / `ItemDeleted` / `Locked` 即可重刷列表。
 
 use std::sync::Arc;
 
 use gpui::{
-    App, Context, IntoElement, ParentElement, Render, SharedString, Styled, Window, div,
-    prelude::*, px,
+    App, Context, Entity, IntoElement, ParentElement, Render, SharedString, Styled, Subscription,
+    Window, div, prelude::*, px,
 };
-use uuid::Uuid;
+use gpui_component::{
+    Sizable as _,
+    button::{Button, ButtonVariants as _},
+    input::{Input, InputEvent, InputState},
+    v_flex,
+};
 
 use crate::app::{AppState, RouteIntent, dispatch};
 use crate::i18n;
-use crate::services::vault::{VaultHandle, new_login};
+use crate::services::vault::{VaultHandle, VaultUiEvent, new_login};
 use crate::theme::Theme;
 
 pub struct VaultView {
     vault: Arc<VaultHandle>,
-    items: Vec<zpass_vault_service::ItemSummary>,
-    refresh_pending: bool,
+    pub(super) items: Vec<zpass_vault_service::ItemSummary>,
+    pub(super) search_state: Entity<InputState>,
+    /// 新建表单是否展开。
+    pub(super) form_open: bool,
+    pub(super) name_state: Entity<InputState>,
+    pub(super) username_state: Entity<InputState>,
+    pub(super) password_state: Entity<InputState>,
+    pub(super) form_error: Option<&'static str>,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl VaultView {
-    pub fn new(cx: &mut Context<Self>, vault: Arc<VaultHandle>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>, vault: Arc<VaultHandle>) -> Self {
+        let search_state = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(i18n::t("vault.search.placeholder"))
+                .clean_on_escape()
+        });
+        let name_state =
+            cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("vault.item.name")));
+        let username_state =
+            cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t("vault.item.username")));
+        let password_state = cx.new(|cx| {
+            InputState::new(window, cx)
+                .masked(true)
+                .placeholder(i18n::t("vault.item.password"))
+        });
+
+        // 订阅 vault 事件：item create/delete/lock 时刷新列表。
+        let subject = vault.gpui_subject(cx);
+        let sub_vault = cx.subscribe(&subject, {
+            move |this: &mut Self, _, ev: &VaultUiEvent, cx| match ev {
+                VaultUiEvent::ItemCreated { .. }
+                | VaultUiEvent::ItemDeleted { .. }
+                | VaultUiEvent::ItemUpdated { .. } => {
+                    this.refresh(cx);
+                    cx.notify();
+                }
+                VaultUiEvent::Locked => {
+                    this.items.clear();
+                    dispatch(cx, RouteIntent::GoUnlock);
+                }
+                _ => {}
+            }
+        });
+        // 搜索框变化 → 触发重渲染。
+        let sub_search = cx.subscribe_in(&search_state, window, {
+            move |_this: &mut Self, _, ev: &InputEvent, _window, cx| {
+                if matches!(ev, InputEvent::Change) {
+                    cx.notify();
+                }
+            }
+        });
+
         let mut this = Self {
             vault,
             items: Vec::new(),
-            refresh_pending: true,
+            search_state,
+            form_open: false,
+            name_state,
+            username_state,
+            password_state,
+            form_error: None,
+            _subscriptions: vec![sub_vault, sub_search],
         };
         this.refresh(cx);
         this
@@ -40,7 +102,6 @@ impl VaultView {
         match self.vault.service().list_items() {
             Ok(items) => {
                 self.items = items;
-                self.refresh_pending = false;
             }
             Err(_) => {
                 // vault 已锁 → 切回 unlock。
@@ -50,17 +111,48 @@ impl VaultView {
         }
     }
 
-    fn create_demo_login(&mut self, cx: &mut Context<Self>) {
-        let suffix = &Uuid::new_v4().to_string()[..8];
+    pub(super) fn open_form(&mut self, cx: &mut Context<Self>) {
+        self.form_open = true;
+        self.form_error = None;
+        cx.notify();
+    }
+
+    fn cancel_form(&mut self, cx: &mut Context<Self>) {
+        self.form_open = false;
+        self.form_error = None;
+        cx.notify();
+    }
+
+    /// 表单提交：3 字段都非空才创建；事件桥会触发 `refresh`，但为可测性这里也立刻 refresh 一次。
+    pub(super) fn save_form(&mut self, cx: &mut Context<Self>) {
+        let name = self.name_state.read(cx).value().clone();
+        let username = self.username_state.read(cx).value().clone();
+        // 密码即时包 Zeroizing；name / username 不算敏感。
+        let password =
+            zeroize::Zeroizing::new(self.password_state.read(cx).value().as_ref().to_owned());
+
+        if name.trim().is_empty() {
+            self.form_error = Some("common.error");
+            cx.notify();
+            return;
+        }
+
         let new = new_login(
-            &format!("Demo login {suffix}"),
-            "demo-user",
-            "demo-password",
-            Some("https://example.com"),
+            name.as_ref(),
+            username.as_ref(),
+            password.as_str(),
+            None,
             None,
         );
         if self.vault.service().create_item(new).is_ok() {
+            self.form_open = false;
+            self.form_error = None;
+            // 清空表单字段（gpui-component 的 InputState 没有 reset 公开 API，
+            // Phase B 不强求；Phase C 增加 generator 时再统一处理）。
             self.refresh(cx);
+            cx.notify();
+        } else {
+            self.form_error = Some("common.error");
             cx.notify();
         }
     }
@@ -74,13 +166,22 @@ impl VaultView {
     fn lock(&mut self, cx: &mut Context<Self>) {
         dispatch(cx, RouteIntent::LockVault);
     }
+
+    fn filtered_items(&self, cx: &Context<Self>) -> Vec<zpass_vault_service::ItemSummary> {
+        let query = self.search_state.read(cx).value().to_lowercase();
+        if query.is_empty() {
+            return self.items.clone();
+        }
+        self.items
+            .iter()
+            .filter(|it| it.name.to_lowercase().contains(&query))
+            .cloned()
+            .collect()
+    }
 }
 
 impl Render for VaultView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if self.refresh_pending {
-            self.refresh(cx);
-        }
         let theme = cx.global::<AppState>().theme;
 
         let header = div()
@@ -90,6 +191,7 @@ impl Render for VaultView {
             .flex()
             .items_center()
             .justify_between()
+            .gap(px(12.0))
             .border_b_1()
             .border_color(theme.line)
             .child(
@@ -100,19 +202,80 @@ impl Render for VaultView {
             )
             .child(
                 div()
+                    .flex_1()
+                    .max_w(px(360.0))
+                    .child(Input::new(&self.search_state).small()),
+            )
+            .child(
+                div()
                     .flex()
                     .gap(px(8.0))
                     .child(
-                        button(theme, "vault-new", i18n::t("vault.new"), true)
-                            .on_click(cx.listener(|this, _, _, cx| this.create_demo_login(cx))),
+                        Button::new("vault-new")
+                            .primary()
+                            .small()
+                            .label(i18n::t("vault.new"))
+                            .on_click(cx.listener(|this, _, _, cx| this.open_form(cx))),
                     )
                     .child(
-                        button(theme, "vault-lock", i18n::t("vault.lock"), false)
+                        Button::new("vault-lock")
+                            .small()
+                            .label(i18n::t("vault.lock"))
                             .on_click(cx.listener(|this, _, _, cx| this.lock(cx))),
                     ),
             );
 
-        let list = if self.items.is_empty() {
+        let form_section: Option<gpui::AnyElement> = if self.form_open {
+            Some(
+                v_flex()
+                    .w_full()
+                    .px(px(24.0))
+                    .py(px(16.0))
+                    .gap(px(8.0))
+                    .border_b_1()
+                    .border_color(theme.line)
+                    .bg(theme.bg_elev)
+                    .child(
+                        div()
+                            .text_size(px(13.0))
+                            .text_color(theme.text_2)
+                            .child(SharedString::from(i18n::t("vault.new"))),
+                    )
+                    .child(Input::new(&self.name_state).small())
+                    .child(Input::new(&self.username_state).small())
+                    .child(Input::new(&self.password_state).small().mask_toggle())
+                    .children(self.form_error.map(|err| {
+                        div()
+                            .text_size(px(12.0))
+                            .text_color(theme.danger)
+                            .child(SharedString::from(i18n::t(err)))
+                    }))
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(8.0))
+                            .child(
+                                Button::new("vault-form-save")
+                                    .primary()
+                                    .small()
+                                    .label(i18n::t("vault.save"))
+                                    .on_click(cx.listener(|this, _, _, cx| this.save_form(cx))),
+                            )
+                            .child(
+                                Button::new("vault-form-cancel")
+                                    .small()
+                                    .label(i18n::t("vault.cancel"))
+                                    .on_click(cx.listener(|this, _, _, cx| this.cancel_form(cx))),
+                            ),
+                    )
+                    .into_any_element(),
+            )
+        } else {
+            None
+        };
+
+        let filtered = self.filtered_items(cx);
+        let list: gpui::AnyElement = if filtered.is_empty() {
             div()
                 .w_full()
                 .py(px(48.0))
@@ -121,25 +284,25 @@ impl Render for VaultView {
                 .text_color(theme.text_3)
                 .text_size(px(13.0))
                 .child(SharedString::from(i18n::t("vault.empty")))
+                .into_any_element()
         } else {
-            let mut list = div().w_full().flex().flex_col();
-            for item in self.items.clone() {
+            let mut list_col = v_flex().w_full();
+            for item in filtered {
                 let id = item.id.clone();
-                list = list.child(item_row(
+                list_col = list_col.child(item_row(
                     theme,
                     &item,
                     cx.listener(move |this, _, _, cx| this.delete(id.clone(), cx)),
                 ));
             }
-            list
+            list_col.into_any_element()
         };
 
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .child(header)
-            .child(list)
+        let mut body = v_flex().size_full().child(header);
+        if let Some(form) = form_section {
+            body = body.child(form);
+        }
+        body.child(list)
     }
 }
 
@@ -159,9 +322,7 @@ fn item_row(
         .border_color(theme.line_soft)
         .hover(|s| s.bg(theme.bg_hover))
         .child(
-            div()
-                .flex()
-                .flex_col()
+            v_flex()
                 .child(
                     div()
                         .text_size(px(14.0))
@@ -176,39 +337,10 @@ fn item_row(
                 ),
         )
         .child(
-            div()
-                .id(SharedString::from(format!("del-{}", item.id)))
-                .px(px(10.0))
-                .py(px(6.0))
-                .rounded(px(crate::theme::tokens::sizes::RADIUS_SM_PX))
-                .bg(theme.bg_elev_2)
-                .text_color(theme.danger)
-                .text_size(px(12.0))
-                .cursor_pointer()
-                .child(SharedString::from(i18n::t("vault.delete")))
+            Button::new(SharedString::from(format!("del-{}", item.id)))
+                .danger()
+                .small()
+                .label(i18n::t("vault.delete"))
                 .on_click(on_delete),
         )
-}
-
-fn button(
-    theme: Theme,
-    id: &'static str,
-    label: &'static str,
-    primary: bool,
-) -> gpui::Stateful<gpui::Div> {
-    let (bg, fg) = if primary {
-        (theme.accent, theme.accent_ink)
-    } else {
-        (theme.bg_elev_2, theme.text)
-    };
-    div()
-        .id(id)
-        .px(px(14.0))
-        .py(px(8.0))
-        .rounded(px(crate::theme::tokens::sizes::RADIUS_PX))
-        .bg(bg)
-        .text_color(fg)
-        .text_size(px(13.0))
-        .cursor_pointer()
-        .child(SharedString::from(label))
 }

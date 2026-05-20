@@ -14,6 +14,8 @@ pub enum Locale {
 }
 
 impl Locale {
+    /// 用于持久化 / API 序列化。Phase B 当前不持久化，Phase C 接 settings 时使用。
+    #[allow(dead_code)]
     pub fn code(self) -> &'static str {
         match self {
             Locale::En => "en",
@@ -21,7 +23,8 @@ impl Locale {
         }
     }
 
-    /// 从字符串还原 locale；未知返回 `En`。
+    /// 从字符串还原 locale；未知返回 `En`。Phase C 的 settings 读取磁盘 prefs 时使用。
+    #[allow(dead_code)]
     pub fn parse(s: &str) -> Self {
         match s {
             "zh" | "zh-CN" | "zh-Hans" => Locale::Zh,
@@ -78,15 +81,15 @@ fn current_cell() -> &'static std::sync::RwLock<Locale> {
 
 /// 从环境变量推导默认 locale。
 pub fn default_locale() -> Locale {
-    if let Ok(lang) = std::env::var("LANG") {
-        if lang.starts_with("zh") {
-            return Locale::Zh;
-        }
+    if let Ok(lang) = std::env::var("LANG")
+        && lang.starts_with("zh")
+    {
+        return Locale::Zh;
     }
-    if let Ok(lang) = std::env::var("LC_ALL") {
-        if lang.starts_with("zh") {
-            return Locale::Zh;
-        }
+    if let Ok(lang) = std::env::var("LC_ALL")
+        && lang.starts_with("zh")
+    {
+        return Locale::Zh;
     }
     Locale::En
 }

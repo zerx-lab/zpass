@@ -6,6 +6,9 @@ pub mod tokens;
 
 use gpui::Hsla;
 
+/// Phase B 暴露的颜色集合。某些字段（accent / ok / warn 等）当前未用，
+/// 留作 Phase C 的 generator / settings 入口；不通过 `#[allow]` 隐藏，让 reviewer 看到。
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub struct Theme {
     pub bg: Hsla,

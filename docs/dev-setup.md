@@ -95,6 +95,44 @@ cargo check -p zpass-crypto -p zpass-vault-format --target thumbv7em-none-eabihf
 
 ## 6. Phase B 入场清单（提前列出）
 
-- [ ] 把 `Cargo.toml` 中 `gpui` 行补上 `rev = "<具体 SHA>"`。
-- [ ] 跑 `cargo build -p zpass-desktop`（首次约 5 分钟，拉取 GPUI 及其传递依赖）。
+- [ ] 把 `Cargo.toml` 中 `gpui` 行补上 `rev = "<具体 SHA>"`（**仍未做**，见 § 7）。
+- [x] 跑 `cargo build -p zpass-desktop`（首次约 5 分钟，拉取 GPUI 及其传递依赖）。
 - [ ] 装 `sccache` + `mold`（强烈推荐）。
+
+## 7. Phase B 退场实际偏离
+
+### 7.1 GPUI / gpui-component 仍未 pin commit SHA
+
+`spec/11 § 2` 要求 `gpui = { git = "...", rev = "<40 字符 SHA>" }`。Phase B 退场时
+workspace `Cargo.toml` 中 `gpui`、`gpui_platform`、`gpui-component`、`gpui-component-assets`
+**仍未 pin**。原因：`Cargo.lock` 已经把 gpui 解析到 `068d64edd637be2e7e2a44b99ef4965550885b67`，
+日常 `cargo build` / `cargo test` 命中 lockfile，工作流不受影响。
+
+风险：跨机器同步 lockfile 后 `cargo update -p gpui` 会让两个仓库走偏。Phase C 起把
+pin 加上去（独立提交）。
+
+### 7.2 引入 gpui-component（计划之外的依赖）
+
+`spec/15 § 3` Phase B 范围表没有列 gpui-component，但用户在 Phase B 期间评估后
+决定全量采用：
+
+- `Input` / `Button` / `Notification` / `Root` / `WindowExt` 大幅减少自绘工作量。
+- 与 spec/00 § D6（设计 tokens 单一真相源）不冲突 —— gpui-component 的 ThemeColor
+  与 ZPass 自有 `theme/tokens.rs` 并存，前者驱动 gpui-component 组件，后者驱动
+  自绘部分。两套主题通过 `app::set_theme()` 同步切换（dark/light）。
+
+后续 spec 更新计划：把 gpui-component 写入 `spec/15 § 3` 的 Phase B 范围表（已
+在本仓库本次提交中完成）。
+
+### 7.3 Onboarding / Unlock 的密码强度计算是 pull-based
+
+gpui-component `InputState::set_value` 不触发 `InputEvent::Change`（见
+`crates/ui/src/input/state.rs:717` `emit_events = false`），因此「订阅密码变化更新
+strength label」的 push 模型在测试中无法工作。改为：
+
+- `OnboardingView::strength_key(&self, cx: &App) -> &'static str` 每次 `render` 调用，
+  从当前 `password_state.value()` 实时计算。
+- 用户真实键盘输入仍会触发 `InputEvent::Change`（让 `error_key` 清空 + 重渲染），
+  从而经 `strength_key()` 反映到 UI。
+
+测试中通过 `set_value` 注入密码即可；不需要模拟键盘。

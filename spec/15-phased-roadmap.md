@@ -67,15 +67,17 @@ cargo check -p zpass-crypto -p zpass-vault-format --target thumbv7em-none-eabihf
 | 任务                                                                                          | 落点                                          |
 | --------------------------------------------------------------------------------------------- | --------------------------------------------- |
 | 创建 `zpass-desktop` crate + `cargo build -p zpass-desktop` 跑通空窗口                       | `desktop_rs/zpass-desktop/`                   |
+| 引入 `gpui-component` + `gpui-component-assets`（Input / Button / Notification / Root / WindowExt） | workspace `Cargo.toml` + `desktop_rs/zpass-desktop/Cargo.toml` |
 | 主题 tokens 自动生成脚本                                                                       | `scripts/sync-tokens.py` + `tokens.rs`        |
 | i18n 嵌入式字符串表（en + zh）                                                                 | `desktop_rs/zpass-desktop/locales/`           |
 | 自定义 frameless 标题栏 + 拖拽区                                                               | `desktop_rs/zpass-desktop/src/widgets/titlebar.rs` |
 | **welcome** 屏：欢迎 + 「Create vault / Open vault」分流                                       | `screens/welcome.rs`                          |
 | **onboarding** 屏：设主密码（含强度校验）                                                       | `screens/onboarding.rs`                       |
 | **unlock** 屏：输主密码 + 错误提示                                                              | `screens/unlock.rs`                           |
-| **vault** 屏：item 列表 + 搜索框 + 新建 / 编辑 login                                            | `screens/vault/`                              |
+| **vault** 屏：item 列表 + 搜索框 + 新建 login（内联表单，3 字段）                                | `screens/vault.rs`                            |
 | `VaultService` 通过 GPUI 胶水层（`services/vault.rs`）接入                                     | `desktop_rs/zpass-desktop/src/services/vault.rs` |
 | 一个 `GpuiEventSink`（实现 `VaultEventSink`）让 UI 自动响应 vault 事件                        | `services/vault.rs`                           |
+| `app::set_theme` / `toggle_theme` 同步 ZPass theme 与 gpui-component ThemeMode                | `app.rs`                                       |
 
 ### **不**做
 

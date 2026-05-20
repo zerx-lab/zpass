@@ -9,3 +9,6 @@ pub use onboarding::OnboardingView;
 pub use unlock::UnlockView;
 pub use vault::VaultView;
 pub use welcome::WelcomeView;
+
+#[cfg(test)]
+mod tests;
