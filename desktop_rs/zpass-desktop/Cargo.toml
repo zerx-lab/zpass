@@ -30,6 +30,7 @@ zpass-platform = { path = "../../crates/zpass-platform" }
 zpass-config = { path = "../../crates/zpass-config" }
 zpass-otp = { path = "../../crates/zpass-otp" }
 zpass-passkey = { path = "../../crates/zpass-passkey" }
+zpass-ssh-agent-proto = { path = "../../crates/zpass-ssh-agent-proto" }
 # 桌面层 services（Phase C）
 rfd.workspace = true
 rxing.workspace = true

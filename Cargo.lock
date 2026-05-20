@@ -9239,6 +9239,7 @@ dependencies = [
  "zpass-otp",
  "zpass-passkey",
  "zpass-platform",
+ "zpass-ssh-agent-proto",
  "zpass-vault-format",
  "zpass-vault-service",
  "zpass-vault-store",

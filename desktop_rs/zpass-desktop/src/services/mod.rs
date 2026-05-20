@@ -18,4 +18,7 @@ pub mod otp;
 pub mod passkey;
 #[allow(dead_code)]
 pub mod qr;
+// Phase D：SSH agent 控制通道 server。D5 screens/ssh_agent.rs 接入后消费。
+#[allow(dead_code)]
+pub mod ssh_agent_host;
 pub mod vault;

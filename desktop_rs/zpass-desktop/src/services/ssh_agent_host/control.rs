@@ -1,0 +1,365 @@
+//! GUI 侧控制通道：listen on `control.sock`，accept agent，握手，循环处理消息。
+//!
+//! 关键设计（spec/08 § 3）：
+//! - GUI 是 server；agent 重连免去 GUI 重启 = ssh-agent 失效的 UX 痛点
+//! - 通过 channel 把 SignRequest 派到 vault 操作，签完再回写 SignReply
+//! - 任一侧 EOF / error → close connection；agent 自己会按 backoff 重连
+
+use std::io::{Read, Write};
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
+
+use anyhow::{Context as _, Result, anyhow};
+use parking_lot::Mutex;
+use zpass_ssh_agent_proto::{
+    AgentMessage, AuditDecisionWire, AuditEntryWire, CapabilityToken, PublicKeyEntry, decode_frame,
+    encode_frame,
+};
+use zpass_vault_format::{AuditEntry as VaultAuditEntry, FieldValue};
+use zpass_vault_service::VaultService;
+use zpass_vault_store::SqliteVaultStore;
+
+use super::signer::sign_with_vault_key;
+use super::state::SshHostState;
+use super::token::{control_sock_path, load_or_create_token, token_path};
+
+/// 启动 host 监听线程；调用者通常在 settings 屏 toggle ON 时调一次。
+///
+/// 返回 `Ok(())` 表示线程已 detach 启动；进程退出时由 OS 回收。重复调用是安全的
+/// （bind 会失败，第二次调用直接退出）。
+pub fn start_host_thread(
+    vault: Arc<VaultService<SqliteVaultStore>>,
+    state: SshHostState,
+) -> Result<()> {
+    let token_p = token_path()?;
+    let sock_p = control_sock_path()?;
+    let token = load_or_create_token(&token_p)?;
+    // 删 stale sock（与 zpass-agent 一致）
+    let _ = std::fs::remove_file(&sock_p);
+
+    thread::spawn(move || {
+        if let Err(e) = run_accept_loop(sock_p, token, vault, state) {
+            eprintln!("ssh-agent-host: accept loop exited: {e:#}");
+        }
+    });
+    Ok(())
+}
+
+fn run_accept_loop(
+    sock_p: PathBuf,
+    token: CapabilityToken,
+    vault: Arc<VaultService<SqliteVaultStore>>,
+    state: SshHostState,
+) -> Result<()> {
+    #[cfg(unix)]
+    let listener = std::os::unix::net::UnixListener::bind(&sock_p)
+        .with_context(|| format!("bind {}", sock_p.display()))?;
+    #[cfg(not(unix))]
+    compile_error!("Windows named pipe in this sub-phase not wired");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&sock_p, std::fs::Permissions::from_mode(0o600));
+    }
+
+    eprintln!(
+        "ssh-agent-host: listening on {} (waiting for agent)",
+        sock_p.display()
+    );
+
+    for incoming in listener.incoming() {
+        let stream = match incoming {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("ssh-agent-host: accept error: {e}");
+                continue;
+            }
+        };
+        let token = token.clone();
+        let vault = vault.clone();
+        let state = state.clone();
+        thread::spawn(move || {
+            state.set_agent_connected(true);
+            if let Err(e) = handle_agent(stream, token, vault.clone(), state.clone()) {
+                eprintln!("ssh-agent-host: agent session error: {e:#}");
+            }
+            state.set_agent_connected(false);
+        });
+    }
+    Ok(())
+}
+
+fn handle_agent(
+    mut stream: std::os::unix::net::UnixStream,
+    token: CapabilityToken,
+    vault: Arc<VaultService<SqliteVaultStore>>,
+    state: SshHostState,
+) -> Result<()> {
+    stream.set_read_timeout(Some(Duration::from_secs(60))).ok();
+
+    // 1) 发 Hello{nonce}
+    let mut nonce = [0u8; 32];
+    getrandom::getrandom(&mut nonce).map_err(|e| anyhow!("CSPRNG: {e}"))?;
+    write_msg(&mut stream, &AgentMessage::Hello { nonce })?;
+
+    // 2) 等 HelloReply{nonce, hmac}
+    let reply = read_msg(&mut stream)?;
+    let (reply_nonce, hmac) = match reply {
+        AgentMessage::HelloReply { nonce: rn, hmac: h } => (rn, h),
+        other => return Err(anyhow!("expected HelloReply, got {other:?}")),
+    };
+    if reply_nonce != nonce {
+        return Err(anyhow!("HelloReply nonce mismatch"));
+    }
+    if !token.verify_hmac(&nonce, &hmac) {
+        return Err(anyhow!("HelloReply HMAC verification failed"));
+    }
+    eprintln!("ssh-agent-host: handshake ok");
+
+    // 3) 推 OpState + PushKeys
+    let unlocked = vault.is_unlocked();
+    write_msg(&mut stream, &AgentMessage::OpState { unlocked })?;
+    let keys = collect_ssh_public_keys(&vault);
+    write_msg(&mut stream, &AgentMessage::PushKeys { keys })?;
+
+    // 4) 主循环：阻塞读，每条消息分发
+    // 用一个 mutex 包 stream 是为了将来若想从其它线程主动推 OpState/PushKeys 时可写。
+    // 当前实现里只 handle_agent 线程写，所以直接 borrow stream。
+    let _writer_lock: Arc<Mutex<()>> = Arc::new(Mutex::new(()));
+
+    stream
+        .set_read_timeout(Some(Duration::from_secs(300))) // 5min idle 后断
+        .ok();
+    loop {
+        let msg = match read_msg(&mut stream) {
+            Ok(m) => m,
+            Err(e) => {
+                // EOF / timeout → 退出此 session（agent 会自动重连）
+                eprintln!("ssh-agent-host: read end: {e}");
+                return Ok(());
+            }
+        };
+        match msg {
+            AgentMessage::SignRequest {
+                request_id,
+                key_blob,
+                data,
+                flags,
+            } => {
+                let reply = sign_for_agent(&vault, &key_blob, &data, flags, &state);
+                write_msg(
+                    &mut stream,
+                    &AgentMessage::SignReply {
+                        request_id,
+                        signature: reply,
+                    },
+                )?;
+            }
+            AgentMessage::AuditEntry { entry } => {
+                state.push_audit(entry.clone());
+                if let Err(e) = persist_audit(&vault, entry) {
+                    eprintln!("ssh-agent-host: failed to persist audit: {e}");
+                }
+            }
+            AgentMessage::Bye => {
+                eprintln!("ssh-agent-host: agent sent Bye");
+                return Ok(());
+            }
+            other => {
+                eprintln!("ssh-agent-host: unexpected message: {other:?}");
+            }
+        }
+    }
+}
+
+/// 给 agent 的 sign request 实际做签名 + 审计字段。
+fn sign_for_agent(
+    vault: &VaultService<SqliteVaultStore>,
+    key_blob: &[u8],
+    data: &[u8],
+    flags: u32,
+    state: &SshHostState,
+) -> Result<Vec<u8>, String> {
+    // vault 锁定状态：拒签 + 记审计
+    if !vault.is_unlocked() {
+        record_local_audit(vault, key_blob, AuditDecisionWire::VaultLocked, state);
+        return Err("vault locked".into());
+    }
+    // 在 vault 中找匹配 key_blob 的 SSH item
+    let item_id = match find_item_id_for_key_blob(vault, key_blob) {
+        Some(id) => id,
+        None => {
+            record_local_audit(vault, key_blob, AuditDecisionWire::KeyNotFound, state);
+            return Err("key not found".into());
+        }
+    };
+    // D4：调 sign_with_vault_key 用 ssh-key 签名
+    match sign_with_vault_key(vault, &item_id, data, flags) {
+        Ok(sig) => {
+            record_local_audit(vault, key_blob, AuditDecisionWire::Approved, state);
+            Ok(sig)
+        }
+        Err(e) => {
+            let msg = format!("{e}");
+            record_local_audit(
+                vault,
+                key_blob,
+                AuditDecisionWire::Error(msg.clone()),
+                state,
+            );
+            Err(msg)
+        }
+    }
+}
+
+/// 用 OpenSSH 公钥 blob 在 vault 中找对应 SSH item。
+///
+/// D3 实现：扫 list_items()，对每条 ssh 类型 item 比较 public_key 字段（OpenSSH wire blob）。
+/// 性能可接受（SSH key 数量典型 < 20）。
+fn find_item_id_for_key_blob(
+    vault: &VaultService<SqliteVaultStore>,
+    blob: &[u8],
+) -> Option<String> {
+    use zpass_vault_format::{FieldValue, ItemType};
+    let summaries = vault.list_items().ok()?;
+    for s in summaries {
+        if s.r#type != ItemType::Ssh {
+            continue;
+        }
+        if let Ok(payload) = vault.get_item(&s.id) {
+            // public_key 在 vault 中存 base64 或 wire bytes —— 这里假设 Bytes 存 wire；
+            // 如果是 base64 Text，未来 D5 settings UI 应规范化。
+            match payload.fields.get("public_key") {
+                Some(FieldValue::Bytes(b)) if b == blob => return Some(s.id),
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
+/// 收集 vault 中所有 SSH item 作为 PublicKeyEntry 推给 agent。
+fn collect_ssh_public_keys(vault: &VaultService<SqliteVaultStore>) -> Vec<PublicKeyEntry> {
+    use zpass_vault_format::{FieldValue, ItemType};
+    let mut out = Vec::new();
+    let Ok(summaries) = vault.list_items() else {
+        return out;
+    };
+    for s in summaries {
+        if s.r#type != ItemType::Ssh {
+            continue;
+        }
+        let Ok(payload) = vault.get_item(&s.id) else {
+            continue;
+        };
+        let blob = match payload.fields.get("public_key") {
+            Some(FieldValue::Bytes(b)) => b.clone(),
+            _ => continue,
+        };
+        let comment = match payload.fields.get("comment") {
+            Some(FieldValue::Text(c)) => c.clone(),
+            _ => s.name.clone(),
+        };
+        out.push(PublicKeyEntry {
+            item_id: s.id,
+            blob,
+            comment,
+        });
+    }
+    out
+}
+
+/// GUI 侧自己也记一份审计（避免完全依赖 agent → GUI 这条链路）。
+fn record_local_audit(
+    vault: &VaultService<SqliteVaultStore>,
+    _key_blob: &[u8],
+    decision: AuditDecisionWire,
+    state: &SshHostState,
+) {
+    let entry = AuditEntryWire {
+        created_at: now_ms(),
+        fingerprint: "<unknown>".into(),
+        key_comment: "".into(),
+        client_pid: None,
+        client_exe: None,
+        decision,
+    };
+    state.push_audit(entry.clone());
+    let _ = persist_audit(vault, entry);
+}
+
+/// 把 AuditEntryWire 落到 vault-format::AuditEntry 的 `{kind, timestamp_ms, details}` 结构。
+///
+/// vault-format 的 schema 是通用 K/V details map（spec/03 § 3.4）；本函数把 SSH
+/// 审计的具体字段塞进 details，kind 固定为 "ssh-sign"。
+fn persist_audit(vault: &VaultService<SqliteVaultStore>, e: AuditEntryWire) -> Result<()> {
+    let mut details: std::collections::BTreeMap<String, FieldValue> = Default::default();
+    details.insert("fingerprint".into(), FieldValue::Text(e.fingerprint));
+    if !e.key_comment.is_empty() {
+        details.insert("key_comment".into(), FieldValue::Text(e.key_comment));
+    }
+    if let Some(pid) = e.client_pid {
+        details.insert("client_pid".into(), FieldValue::Number(pid as i64));
+    }
+    if let Some(exe) = e.client_exe {
+        details.insert("client_exe".into(), FieldValue::Text(exe));
+    }
+    details.insert(
+        "decision".into(),
+        FieldValue::Text(decision_to_str(e.decision)),
+    );
+    let entry = VaultAuditEntry {
+        kind: "ssh-sign".into(),
+        timestamp_ms: e.created_at,
+        details,
+    };
+    vault
+        .append_audit(entry)
+        .map(|_id| ())
+        .map_err(|e| anyhow!("append_audit: {e:?}"))
+}
+
+fn decision_to_str(d: AuditDecisionWire) -> String {
+    match d {
+        AuditDecisionWire::Approved => "approved".into(),
+        AuditDecisionWire::DeclinedByUser => "declined-by-user".into(),
+        AuditDecisionWire::TrustedCache => "trusted-cache".into(),
+        AuditDecisionWire::VaultLocked => "vault-locked".into(),
+        AuditDecisionWire::KeyNotFound => "key-not-found".into(),
+        AuditDecisionWire::Timeout => "timeout".into(),
+        AuditDecisionWire::Error(s) => format!("error:{s}"),
+    }
+}
+
+fn now_ms() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn write_msg(w: &mut impl Write, msg: &AgentMessage) -> Result<()> {
+    let bytes = encode_frame(msg).map_err(|e| anyhow!("encode: {e}"))?;
+    w.write_all(&bytes).context("write frame")?;
+    w.flush().context("flush frame")?;
+    Ok(())
+}
+
+fn read_msg(r: &mut impl Read) -> Result<AgentMessage> {
+    let mut len_buf = [0u8; 4];
+    r.read_exact(&mut len_buf).context("read frame length")?;
+    let len = u32::from_be_bytes(len_buf);
+    if len > 16 * 1024 * 1024 {
+        return Err(anyhow!("frame too large: {len}"));
+    }
+    let mut body = vec![0u8; len as usize];
+    r.read_exact(&mut body).context("read frame body")?;
+    let mut full = Vec::with_capacity(4 + body.len());
+    full.extend_from_slice(&len_buf);
+    full.extend_from_slice(&body);
+    decode_frame(&full).map_err(|e| anyhow!("decode: {e}"))
+}
