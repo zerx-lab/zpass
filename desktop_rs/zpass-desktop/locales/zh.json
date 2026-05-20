@@ -42,6 +42,20 @@
   "vault.item.url": "网址",
   "vault.item.notes": "备注",
 
+  "vault.filter.all": "全部",
+  "vault.filter.login": "登录",
+  "vault.filter.card": "卡片",
+  "vault.filter.note": "笔记",
+  "vault.filter.identity": "身份",
+  "vault.filter.ssh": "SSH",
+  "vault.filter.totp": "TOTP",
+  "vault.filter.passkey": "Passkey",
+
+  "vault.detail.empty": "选择左侧条目查看详情。",
+  "vault.detail.show": "显示",
+  "vault.detail.hide": "隐藏",
+  "vault.detail.copy": "复制",
+
   "common.loading": "加载中…",
   "common.error": "发生错误。",
 
