@@ -66,6 +66,7 @@
 
   "totp.title": "TOTP codes",
   "totp.subtitle": "All time-based one-time codes from your vault.",
+  "totp.empty": "No TOTP-bearing items yet.",
 
   "generator.title": "Generator",
   "generator.subtitle": "Generate strong passwords. Entirely local.",

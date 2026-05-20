@@ -66,6 +66,7 @@
 
   "totp.title": "TOTP 验证码",
   "totp.subtitle": "保险库中所有基于时间的一次性密码。",
+  "totp.empty": "尚无含 TOTP 的条目。",
 
   "generator.title": "密码生成器",
   "generator.subtitle": "生成强密码。完全本地计算。",
