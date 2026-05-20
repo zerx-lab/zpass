@@ -70,6 +70,20 @@
 
   "generator.title": "密码生成器",
   "generator.subtitle": "生成强密码。完全本地计算。",
+  "generator.regenerate": "重新生成",
+  "generator.copy": "复制",
+  "generator.length": "长度",
+  "generator.entropy": "熵",
+  "generator.error": "至少勾选一种字符类。",
+  "generator.class.lowercase": "小写",
+  "generator.class.uppercase": "大写",
+  "generator.class.digits": "数字",
+  "generator.class.symbols": "符号",
+  "generator.class.avoidAmbiguous": "排除易混 0/O/1/l/I",
+  "generator.strength.weak": "弱",
+  "generator.strength.fair": "一般",
+  "generator.strength.strong": "强",
+  "generator.strength.veryStrong": "极强",
 
   "importExport.title": "导入与导出",
   "importExport.subtitle": "导入明文 JSON 或导出快照。"

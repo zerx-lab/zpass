@@ -70,6 +70,20 @@
 
   "generator.title": "Generator",
   "generator.subtitle": "Generate strong passwords. Entirely local.",
+  "generator.regenerate": "Regenerate",
+  "generator.copy": "Copy",
+  "generator.length": "Length",
+  "generator.entropy": "Entropy",
+  "generator.error": "Pick at least one character class.",
+  "generator.class.lowercase": "a-z",
+  "generator.class.uppercase": "A-Z",
+  "generator.class.digits": "0-9",
+  "generator.class.symbols": "!@#$",
+  "generator.class.avoidAmbiguous": "Avoid 0/O/1/l/I",
+  "generator.strength.weak": "Weak",
+  "generator.strength.fair": "Fair",
+  "generator.strength.strong": "Strong",
+  "generator.strength.veryStrong": "Very strong",
 
   "importExport.title": "Import & Export",
   "importExport.subtitle": "Import plaintext JSON or export a snapshot."
