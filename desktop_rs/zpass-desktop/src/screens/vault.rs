@@ -582,11 +582,11 @@ fn build_field_rows(
 ) -> Vec<AnyElement> {
     match p.r#type {
         ItemType::Login => login_rows(p, revealed, theme, cx),
-        ItemType::Card => card_rows(p, theme, cx),
+        ItemType::Card => card_rows(p, revealed, theme, cx),
         ItemType::Note => note_rows(p, theme, cx),
         ItemType::Identity => identity_rows(p, theme, cx),
-        ItemType::Ssh => ssh_rows(p, theme, cx),
-        ItemType::Totp => totp_rows(p, theme, cx),
+        ItemType::Ssh => ssh_rows(p, revealed, theme, cx),
+        ItemType::Totp => totp_rows(p, revealed, theme, cx),
         ItemType::Passkey => passkey_rows(p, theme),
     }
 }
@@ -599,7 +599,11 @@ fn s_field(p: &ItemPayloadV1, key: &str) -> Option<String> {
 }
 
 /// 普通字段行（label + value + copy 按钮）。
+///
+/// `field_key` 是稳定的存储键（如 "username" / "password"），用作 GPUI 元素 id，
+/// 避免与翻译后 label 同名冲突。
 fn plain_row(
+    field_key: &str,
     label: &str,
     value: &str,
     mono: bool,
@@ -607,7 +611,7 @@ fn plain_row(
     cx: &mut Context<VaultView>,
 ) -> AnyElement {
     let value_for_copy = value.to_string();
-    let copy_id: SharedString = format!("copy-{label}").into();
+    let copy_id: SharedString = format!("copy-{field_key}").into();
     let mut val = div().flex_1().text_size(px(13.0)).text_color(theme.text);
     if mono {
         val = val.font_family(crate::theme::tokens::fonts::MONO);
@@ -642,6 +646,7 @@ fn plain_row(
 
 /// Masked 字段行：可点击眼睛 toggle reveal_password。
 fn masked_row(
+    field_key: &str,
     label: &str,
     value: &str,
     revealed: bool,
@@ -660,8 +665,8 @@ fn masked_row(
     }
     val = val.child(display);
     let value_for_copy = value.to_string();
-    let copy_id: SharedString = format!("copy-{label}").into();
-    let eye_id: SharedString = format!("eye-{label}").into();
+    let copy_id: SharedString = format!("copy-{field_key}").into();
+    let eye_id: SharedString = format!("eye-{field_key}").into();
     let eye_label = i18n::t(if revealed {
         "vault.detail.hide"
     } else {
@@ -709,6 +714,7 @@ fn login_rows(
     let mut out = Vec::new();
     if let Some(v) = s_field(p, "username") {
         out.push(plain_row(
+            "username",
             i18n::t("vault.item.username"),
             &v,
             true,
@@ -718,6 +724,7 @@ fn login_rows(
     }
     if let Some(v) = s_field(p, "password") {
         out.push(masked_row(
+            "password",
             i18n::t("vault.item.password"),
             &v,
             revealed,
@@ -727,18 +734,45 @@ fn login_rows(
         ));
     }
     if let Some(v) = s_field(p, "url") {
-        out.push(plain_row(i18n::t("vault.item.url"), &v, false, theme, cx));
+        out.push(plain_row(
+            "url",
+            i18n::t("vault.item.url"),
+            &v,
+            false,
+            theme,
+            cx,
+        ));
     }
     if let Some(v) = s_field(p, "notes") {
-        out.push(plain_row(i18n::t("vault.item.notes"), &v, false, theme, cx));
+        out.push(plain_row(
+            "notes",
+            i18n::t("vault.item.notes"),
+            &v,
+            false,
+            theme,
+            cx,
+        ));
     }
     if let Some(v) = s_field(p, "totp") {
-        out.push(masked_row("TOTP secret", &v, revealed, true, theme, cx));
+        out.push(masked_row(
+            "totp",
+            "TOTP secret",
+            &v,
+            revealed,
+            true,
+            theme,
+            cx,
+        ));
     }
     out
 }
 
-fn card_rows(p: &ItemPayloadV1, theme: Theme, cx: &mut Context<VaultView>) -> Vec<AnyElement> {
+fn card_rows(
+    p: &ItemPayloadV1,
+    revealed: bool,
+    theme: Theme,
+    cx: &mut Context<VaultView>,
+) -> Vec<AnyElement> {
     let mut out = Vec::new();
     for (key, label, masked, mono) in [
         ("holder", "Card holder", false, false),
@@ -750,9 +784,9 @@ fn card_rows(p: &ItemPayloadV1, theme: Theme, cx: &mut Context<VaultView>) -> Ve
     ] {
         if let Some(v) = s_field(p, key) {
             if masked {
-                out.push(masked_row(label, &v, false, mono, theme, cx));
+                out.push(masked_row(key, label, &v, revealed, mono, theme, cx));
             } else {
-                out.push(plain_row(label, &v, mono, theme, cx));
+                out.push(plain_row(key, label, &v, mono, theme, cx));
             }
         }
     }
@@ -762,7 +796,14 @@ fn card_rows(p: &ItemPayloadV1, theme: Theme, cx: &mut Context<VaultView>) -> Ve
 fn note_rows(p: &ItemPayloadV1, theme: Theme, cx: &mut Context<VaultView>) -> Vec<AnyElement> {
     let mut out = Vec::new();
     if let Some(v) = s_field(p, "notes") {
-        out.push(plain_row(i18n::t("vault.item.notes"), &v, false, theme, cx));
+        out.push(plain_row(
+            "notes",
+            i18n::t("vault.item.notes"),
+            &v,
+            false,
+            theme,
+            cx,
+        ));
     }
     out
 }
@@ -778,39 +819,67 @@ fn identity_rows(p: &ItemPayloadV1, theme: Theme, cx: &mut Context<VaultView>) -
         ("notes", "Notes"),
     ] {
         if let Some(v) = s_field(p, key) {
-            out.push(plain_row(label, &v, false, theme, cx));
+            out.push(plain_row(key, label, &v, false, theme, cx));
         }
     }
     out
 }
 
-fn ssh_rows(p: &ItemPayloadV1, theme: Theme, cx: &mut Context<VaultView>) -> Vec<AnyElement> {
+fn ssh_rows(
+    p: &ItemPayloadV1,
+    revealed: bool,
+    theme: Theme,
+    cx: &mut Context<VaultView>,
+) -> Vec<AnyElement> {
     let mut out = Vec::new();
     if let Some(v) = s_field(p, "public_key") {
-        out.push(plain_row("Public key", &v, true, theme, cx));
+        out.push(plain_row("public_key", "Public key", &v, true, theme, cx));
     }
     if let Some(v) = s_field(p, "private_key") {
-        out.push(masked_row("Private key", &v, false, true, theme, cx));
+        out.push(masked_row(
+            "private_key",
+            "Private key",
+            &v,
+            revealed,
+            true,
+            theme,
+            cx,
+        ));
     }
     if let Some(v) = s_field(p, "passphrase") {
-        out.push(masked_row("Passphrase", &v, false, true, theme, cx));
+        out.push(masked_row(
+            "passphrase",
+            "Passphrase",
+            &v,
+            revealed,
+            true,
+            theme,
+            cx,
+        ));
     }
     if let Some(v) = s_field(p, "notes") {
-        out.push(plain_row("Notes", &v, false, theme, cx));
+        out.push(plain_row("notes", "Notes", &v, false, theme, cx));
     }
     out
 }
 
-fn totp_rows(p: &ItemPayloadV1, theme: Theme, cx: &mut Context<VaultView>) -> Vec<AnyElement> {
+fn totp_rows(
+    p: &ItemPayloadV1,
+    revealed: bool,
+    theme: Theme,
+    cx: &mut Context<VaultView>,
+) -> Vec<AnyElement> {
     let mut out = Vec::new();
     if let Some(v) = s_field(p, "secret").or_else(|| s_field(p, "totp")) {
-        out.push(masked_row("Secret", &v, false, true, theme, cx));
+        out.push(masked_row(
+            "secret", "Secret", &v, revealed, true, theme, cx,
+        ));
     }
     if let Some(v) = s_field(p, "issuer") {
-        out.push(plain_row("Issuer", &v, false, theme, cx));
+        out.push(plain_row("issuer", "Issuer", &v, false, theme, cx));
     }
     if let Some(v) = s_field(p, "account") {
-        out.push(plain_row("Account", &v, false, theme, cx));
+        out.push(plain_row("account", "Account", &v, false, theme, cx));
     }
     out
 }
