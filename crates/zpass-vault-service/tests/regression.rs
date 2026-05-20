@@ -636,3 +636,63 @@ fn test_event_sink_panic_does_not_crash() {
     let n = *cnt.lock().unwrap();
     assert!(n >= 3, "Counting sink 应收到 ≥3 个事件，实际 {n}");
 }
+
+// ===================== HOTP counter persistence =====================
+
+/// Pre-C1 回归：`advance_hotp_counter` 使用字段键 `"hotp_counter"`（spec/06 § 4.3，
+/// 对应 Go `desktop/totpservice.go:227`）。修复前是 `"counter"`，会导致 counter desync。
+#[test]
+fn test_advance_hotp_counter_uses_hotp_counter_field() {
+    let v = fresh_service();
+    v.initialize("password 1234").unwrap();
+
+    // 用 HOTP 类型创建一条，初始 counter = 5（用 hotp_counter 字段）
+    let mut fields = BTreeMap::new();
+    fields.insert("secret".into(), FieldValue::Text("JBSWY3DPEHPK3PXP".into()));
+    fields.insert("hotp_counter".into(), FieldValue::Number(5));
+    let new = NewItem {
+        r#type: ItemType::Totp, // ItemType::Hotp 未定义；与 Go 一致用 Totp + fields["otp_type"]="hotp"
+        name: "HOTP test".into(),
+        fields,
+    };
+    let summary = v.create_item(new).unwrap();
+    let id = summary.id;
+
+    // 推进一次：5 → 6
+    let next = v.advance_hotp_counter(&id).unwrap();
+    assert_eq!(next, 6);
+
+    // 再读 item，确认字段名是 hotp_counter（不是 counter）
+    let payload = v.get_item(&id).unwrap();
+    match payload.fields.get("hotp_counter") {
+        Some(FieldValue::Number(n)) => assert_eq!(*n, 6),
+        other => panic!("expected hotp_counter = Number(6), got {other:?}"),
+    }
+    // 旧的 "counter" 键不应被引入
+    assert!(!payload.fields.contains_key("counter"));
+}
+
+/// 缺 hotp_counter 字段时从 0 起步、写回也用正确键名。
+#[test]
+fn test_advance_hotp_counter_initializes_from_zero() {
+    let v = fresh_service();
+    v.initialize("password 1234").unwrap();
+
+    let mut fields = BTreeMap::new();
+    fields.insert("secret".into(), FieldValue::Text("JBSWY3DPEHPK3PXP".into()));
+    // 不设 hotp_counter
+    let new = NewItem {
+        r#type: ItemType::Totp,
+        name: "HOTP fresh".into(),
+        fields,
+    };
+    let summary = v.create_item(new).unwrap();
+    let next = v.advance_hotp_counter(&summary.id).unwrap();
+    assert_eq!(next, 1);
+
+    let payload = v.get_item(&summary.id).unwrap();
+    match payload.fields.get("hotp_counter") {
+        Some(FieldValue::Number(n)) => assert_eq!(*n, 1),
+        other => panic!("expected hotp_counter = Number(1), got {other:?}"),
+    }
+}
