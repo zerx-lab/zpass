@@ -16,6 +16,7 @@ use zpass_vault_service::{NewItem, VaultError, VaultService};
 use zpass_vault_store::VaultStore;
 
 #[derive(Debug)]
+#[allow(dead_code)] // UnknownType / Vault(_) 仅通过 {:?} Debug 路径传到 UI
 pub enum ImportError {
     UnsupportedExportVersion,
     Parse,

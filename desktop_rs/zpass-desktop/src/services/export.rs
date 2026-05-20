@@ -33,6 +33,7 @@ struct ExportedItem {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)] // Vault(_) 仅通过 {:?} Debug 路径传到 UI；UI 不读其内部
 pub enum ExportError {
     Vault(VaultError),
     Serialize,

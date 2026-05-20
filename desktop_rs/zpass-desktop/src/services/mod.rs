@@ -5,15 +5,12 @@
 //! 2. 把 `VaultEventSink` 转成 `cx.emit(VaultUiEvent)`。
 //! 3. 测试时用 `cx.executor().advance_clock(...)` 控制时间。
 
-// Phase C 服务先就位、screens 在 C4-C8 才挂入；先放宽 dead_code 让 crate 层 API
-// 完整暴露而不阻塞 clippy gate。C9 final pass 时再收紧。
-#[allow(dead_code)]
+// Phase C 服务全部就位。clipboard / export / generator / import / vault 已被
+// C5-C8 screens 完整消费；otp / passkey / qr 暴露的 API 表面更广（含 Phase E
+// 浏览器桥与未来 HOTP 详情按钮所需路径），保留 dead_code 标记直到对应消费点接入。
 pub mod clipboard;
-#[allow(dead_code)]
 pub mod export;
-#[allow(dead_code)]
 pub mod generator;
-#[allow(dead_code)]
 pub mod import;
 #[allow(dead_code)]
 pub mod otp;
