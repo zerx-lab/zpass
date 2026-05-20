@@ -64,6 +64,12 @@ rxing = { version = "0.5", default-features = false }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 arboard = { version = "3", default-features = false }
 
+# === SSH agent host（Phase D）===
+# ssh-key: 解析 OpenSSH PEM + 签名（Ed25519 / ECDSA / RSA / DSA）。
+# ssh-encoding: 把 ssh_key::Signature 编成 SSH wire 格式（agent SIGN_RESPONSE 用）。
+ssh-key = { version = "0.6", default-features = false, features = ["alloc", "ed25519", "ecdsa", "rsa", "p256"] }
+ssh-encoding = { version = "0.2", default-features = false, features = ["alloc"] }
+
 # === 并发 / 工具 ===
 parking_lot = "0.12"
 thiserror = "1"

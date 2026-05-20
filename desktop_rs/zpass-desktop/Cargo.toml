@@ -37,6 +37,10 @@ rxing.workspace = true
 image.workspace = true
 arboard.workspace = true
 getrandom.workspace = true
+ssh-key.workspace = true
+ssh-encoding.workspace = true
+# ssh-key 的 Signer<Signature> impl 来自 signature crate；ssh-key 没 re-export 它。
+signature = "2"
 
 [dev-dependencies]
 zpass-vault-service = { path = "../../crates/zpass-vault-service", features = ["test-helpers"] }
