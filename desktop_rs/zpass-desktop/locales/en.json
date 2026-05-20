@@ -16,6 +16,7 @@
   "onboarding.strength.strong": "Strong",
   "onboarding.strength.veryStrong": "Very strong",
   "onboarding.submit": "Create vault",
+  "onboarding.submitting": "Creating vault…",
   "onboarding.error.mismatch": "Passwords do not match.",
   "onboarding.error.tooShort": "Password must be at least 8 characters.",
 
@@ -23,6 +24,7 @@
   "unlock.subtitle": "Enter your master password to continue.",
   "unlock.password.placeholder": "Master password",
   "unlock.submit": "Unlock",
+  "unlock.submitting": "Unlocking…",
   "unlock.error.invalid": "Invalid master password.",
 
   "vault.title": "Vault",

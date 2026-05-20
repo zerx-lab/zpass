@@ -1,7 +1,13 @@
 //! Unlock 屏：输主密码解锁。
 //!
-//! 使用 gpui-component 的 `Input`（masked）。错误时弹一个 `NotificationType::Error` toast
-//! 同时把 `error_key` 设为 `unlock.error.invalid`，供测试断言。
+//! 使用 gpui-component 的 `Input`（masked）。错误时把 `error_key` 设为
+//! `unlock.error.invalid`，渲染时显示为红色提示（供测试断言）。
+//!
+//! ## 异步解锁
+//! Argon2id KDF 在桌面默认参数下需 1–2s，**必须**通过
+//! `cx.background_executor().spawn(...)` 推到后台线程，否则 GPUI 主线程会卡死、
+//! 按钮无反馈。期间 `submitting=true`，Button 进 loading 状态（自动 spinner +
+//! 不响应 click），且 Enter 重入被 guard 早返回阻止。
 
 use std::sync::Arc;
 
@@ -10,10 +16,9 @@ use gpui::{
     Window, div, prelude::*, px,
 };
 use gpui_component::{
-    WindowExt as _,
+    Disableable as _,
     button::{Button, ButtonVariants as _},
     input::{Input, InputEvent, InputState},
-    notification::NotificationType,
     v_flex,
 };
 use zeroize::Zeroizing;
@@ -27,6 +32,8 @@ pub struct UnlockView {
     vault: Arc<VaultHandle>,
     pub(super) password_state: Entity<InputState>,
     pub(super) error_key: Option<&'static str>,
+    /// 正在跑 KDF / vault.unlock 的标志。`true` 期间 submit 早返回、Button loading+disabled。
+    pub(super) submitting: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -60,29 +67,55 @@ impl UnlockView {
             vault,
             password_state,
             error_key: None,
+            submitting: false,
             _subscriptions: vec![sub_enter, sub_change],
         }
     }
 
-    pub(super) fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn submit(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        // 重入 guard：必须是第一行。KDF 进行中再次 Enter / click 都直接忽略。
+        if self.submitting {
+            return;
+        }
+
         // 副本即时 zero（gpui-component 的 InputState 自己持有 SharedString，无法 zero；
         // 但我们传给 vault 的字符串至少不在我们的栈上留印迹）。
         let password = Zeroizing::new(self.password_state.read(cx).value().as_ref().to_owned());
-        match self.vault.service().unlock(password.as_str()) {
-            Ok(()) => {
-                self.error_key = None;
-                cx.notify();
-                dispatch(cx, RouteIntent::GoVault);
-            }
-            Err(_) => {
-                self.error_key = Some("unlock.error.invalid");
-                window.push_notification(
-                    (NotificationType::Error, i18n::t("unlock.error.invalid")),
-                    cx,
-                );
-                cx.notify();
-            }
-        }
+        let svc = self.vault.service();
+
+        // 立刻反馈：进入 submitting 状态，清掉旧错误。Render 会把 Button 切到 loading。
+        self.submitting = true;
+        self.error_key = None;
+        cx.notify();
+
+        // 把阻塞 KDF 推到 background executor 上的后台线程。
+        // background_executor.spawn 要求 future Send；`Arc<VaultService<SqliteVaultStore>>`
+        // 是 Send（编译期断言见 services/vault.rs 末尾的 _assert_send）。
+        let bg = cx.background_executor().clone();
+        cx.spawn(async move |this, async_cx| {
+            // 在后台线程跑同步 KDF。`async move { ... }` 把同步代码包成立即 ready 的
+            // future；executor 会把它分到一个线程池 worker 上执行。
+            let result = bg
+                .spawn(async move { svc.unlock(password.as_str()) })
+                .await;
+
+            // 回主线程：window 可能在 KDF 期间关闭，update 会返 Err，此时直接 drop。
+            let _ = this.update(async_cx, |this, cx| {
+                this.submitting = false;
+                match result {
+                    Ok(()) => {
+                        this.error_key = None;
+                        cx.notify();
+                        dispatch(cx, RouteIntent::GoVault);
+                    }
+                    Err(_) => {
+                        this.error_key = Some("unlock.error.invalid");
+                        cx.notify();
+                    }
+                }
+            });
+        })
+        .detach();
     }
 }
 
@@ -112,11 +145,19 @@ impl Render for UnlockView {
             );
         }
 
+        let label_key = if self.submitting {
+            "unlock.submitting"
+        } else {
+            "unlock.submit"
+        };
+
         col.child(
             div().mt(px(16.0)).child(
                 Button::new("unlock-submit")
                     .primary()
-                    .label(i18n::t("unlock.submit"))
+                    .loading(self.submitting)
+                    .disabled(self.submitting)
+                    .label(i18n::t(label_key))
                     .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
             ),
         )
