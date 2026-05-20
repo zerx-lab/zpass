@@ -16,6 +16,9 @@
 use std::io::{self, Read, Write};
 
 pub const SSH_AGENT_FAILURE: u8 = 5;
+/// 当前 zpass-agent 不发 SUCCESS（除了 IDENTITIES_ANSWER 和 SIGN_RESPONSE，它们用各自 op）；
+/// 常量留作完整性。
+#[allow(dead_code)]
 pub const SSH_AGENT_SUCCESS: u8 = 6;
 pub const SSH_AGENTC_REQUEST_IDENTITIES: u8 = 11;
 pub const SSH_AGENT_IDENTITIES_ANSWER: u8 = 12;

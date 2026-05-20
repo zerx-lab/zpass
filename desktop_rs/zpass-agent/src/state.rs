@@ -61,6 +61,10 @@ impl SharedState {
     }
 
     /// 找一个 key blob 对应的 vault item_id（用于 SIGN_REQUEST 路由）。
+    ///
+    /// 当前实现的控制通道把 key_blob 整体转给 GUI，由 GUI 自己查 vault；本函数留作
+    /// 未来「agent 本地查 cache」优化路径的入口（暂未消费）。
+    #[allow(dead_code)]
     pub fn find_key_item_id(&self, blob: &[u8]) -> Option<String> {
         let inner = self.inner.lock();
         inner
@@ -118,6 +122,10 @@ impl SharedState {
 }
 
 /// 一次性 channel 持有：方便从 handler 线程把 SignRequest 推给控制通道线程。
+///
+/// 当前 main.rs 直接用 `mpsc::channel` 拆 sender/receiver；本类型留作未来若需要
+/// 给 handler 加方法封装时使用。
+#[allow(dead_code)]
 pub struct SignRouter {
     pub tx: Sender<SignDispatch>,
 }
@@ -130,13 +138,15 @@ pub struct SignDispatch {
 }
 
 impl SignRouter {
+    #[allow(dead_code)]
     pub fn new() -> (Self, std::sync::mpsc::Receiver<SignDispatch>) {
         let (tx, rx) = channel();
         (Self { tx }, rx)
     }
 }
 
-/// 标记一次实验的开始时间（用于审计字段 created_at 等）。
+/// 标记一次实验的开始时间（用于审计字段 created_at 等）。GUI 侧实际填充。
+#[allow(dead_code)]
 pub fn now_unix_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
