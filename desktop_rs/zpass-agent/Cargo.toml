@@ -1,12 +1,19 @@
 [package]
 name = "zpass-agent"
-version = "0.0.0"
+version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "SSH agent 守护进程（Phase D 实现）"
+description = "ZPass SSH agent 守护进程（spec/08）"
 publish = false
 
 [[bin]]
 name = "zpass-agent"
 path = "src/main.rs"
+
+[dependencies]
+zpass-ssh-agent-proto = { path = "../../crates/zpass-ssh-agent-proto" }
+zpass-platform = { path = "../../crates/zpass-platform" }
+parking_lot.workspace = true
+anyhow.workspace = true
+zeroize.workspace = true

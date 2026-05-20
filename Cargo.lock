@@ -9182,7 +9182,14 @@ checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
 
 [[package]]
 name = "zpass-agent"
-version = "0.0.0"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "parking_lot",
+ "zeroize",
+ "zpass-platform",
+ "zpass-ssh-agent-proto",
+]
 
 [[package]]
 name = "zpass-browser-bridge"
