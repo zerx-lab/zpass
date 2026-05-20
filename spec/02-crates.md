@@ -172,10 +172,12 @@
 
 - **路径**：`crates/zpass-passkey/`
 - **一句话**：WebAuthn ES256 凭据生成、CBOR / COSE 编码、断言签名；私钥材料的输入由调用方提供。
-- **移动端可复用**：✅ `no_std + alloc`
+- **移动端可复用**：⚠️ 当前为 **std-required**（详见 `16-open-questions.md` OQ-7）。
+  移动端 v2+ 通过自实现最小 PKCS#8/SPKI 编解码恢复 `no_std + alloc`。
 - **直接依赖**：
-  - `p256`（RustCrypto）— `default-features = false`，启用 `ecdsa` + `alloc`
-  - `ciborium`（no_std 友好）
+  - `p256`（RustCrypto）— `default-features = false`，启用 `ecdsa + alloc + pem + pkcs8 + std`。
+    `pem` feature 是 p256 暴露 `EncodePrivateKey` / `EncodePublicKey` 的入口，间接拉 `std`。
+  - `ciborium`（no_std 友好；当前 crate 整体已 std，但保持 CBOR 库轻量）
   - `sha2`（RustCrypto）
 - **公开 API**：
   ```rust
@@ -358,7 +360,7 @@
 | 3   | zpass-vault-store      | ❌     | vault-format, rusqlite, platform                    |
 | 4   | zpass-vault-service    | ✅     | crypto, vault-format, vault-store(trait), parking_lot, zeroize |
 | 5   | zpass-otp              | ✅     | hmac, sha1, sha2, data-encoding                     |
-| 6   | zpass-passkey          | ✅     | p256, ciborium, sha2                                |
+| 6   | zpass-passkey          | ⚠️*    | p256(+pem+pkcs8+std), ciborium, sha2 — *v2+ 恢复 no_std（OQ-7） |
 | 7   | zpass-trusted-device   | ❌     | windows-sys (cfg windows)                           |
 | 8   | zpass-ssh-agent-proto  | ⚠️     | ciborium, hmac, sha2                                |
 | 9   | zpass-browser-bridge   | ❌     | tiny_http, serde_json, publicsuffix, subtle         |

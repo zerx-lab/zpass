@@ -1,8 +1,27 @@
 [package]
 name = "zpass-passkey"
-version = "0.0.0"
+version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "WebAuthn ES256 凭据生成与签名（Phase C 实现）"
+description = "WebAuthn authenticator: ES256 keygen / register / assert（spec/07）"
 publish = false
+
+[features]
+default = ["os-rng"]
+# 在嵌入式 / no_std target 上跑 `cargo check --no-default-features` 时关掉。
+os-rng = ["dep:getrandom"]
+
+[dependencies]
+# p256：ECDSA P-256 + PKCS#8 / SPKI DER 编解码（用于持久化与浏览器扩展验签）。
+# pem feature 是 p256 暴露 EncodePrivateKey / EncodePublicKey 实现的入口（即使
+# 我们只用 DER 而不用 PEM）。pkcs8 + std 是其传递依赖。
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "alloc", "pem", "pkcs8", "std"] }
+ciborium = { workspace = true }
+ciborium-io = { workspace = true }
+sha2 = { workspace = true }
+getrandom = { workspace = true, optional = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+hex-literal = { workspace = true }
