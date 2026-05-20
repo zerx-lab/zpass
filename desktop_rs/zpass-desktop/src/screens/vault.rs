@@ -61,7 +61,8 @@ impl VaultView {
         let subject = vault.gpui_subject(cx);
         let sub_vault = cx.subscribe(&subject, {
             move |this: &mut Self, _, ev: &VaultUiEvent, cx| match ev {
-                VaultUiEvent::ItemCreated { .. }
+                VaultUiEvent::Unlocked
+                | VaultUiEvent::ItemCreated { .. }
                 | VaultUiEvent::ItemDeleted { .. }
                 | VaultUiEvent::ItemUpdated { .. } => {
                     this.refresh(cx);
@@ -83,7 +84,10 @@ impl VaultView {
             }
         });
 
-        let mut this = Self {
+        // 不在构造时 refresh：构造发生在 WorkspaceView::new 装配阶段，此时 vault
+        // 大概率还未解锁，提前调 list_items() 会 dispatch(GoUnlock) 干扰初始路由
+        // （即使当前屏是 Welcome）。改由 Render 在 vault 解锁后主动调 refresh。
+        Self {
             vault,
             items: Vec::new(),
             search_state,
@@ -93,9 +97,7 @@ impl VaultView {
             password_state,
             form_error: None,
             _subscriptions: vec![sub_vault, sub_search],
-        };
-        this.refresh(cx);
-        this
+        }
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
@@ -182,6 +184,12 @@ impl VaultView {
 
 impl Render for VaultView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 首次渲染时（vault 已解锁但 items 还空）保险刷一次：路由切到 vault 屏后
+        // `Unlocked` 事件可能已经发完，无法补触发。
+        if self.items.is_empty() && self.vault.service().is_unlocked() {
+            // is_unlocked 是 Phase A 公开 API；这里同步快查，避开 list_items() 抛错。
+            self.refresh(cx);
+        }
         let theme = cx.global::<AppState>().theme;
 
         let header = div()
