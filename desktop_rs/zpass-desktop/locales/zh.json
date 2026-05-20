@@ -1,0 +1,45 @@
+{
+  "app.title": "ZPass",
+  "app.tagline": "零知识密码管理器",
+
+  "welcome.heading": "欢迎使用 ZPass",
+  "welcome.subtitle": "本地零知识密码保险库。",
+  "welcome.create": "创建新保险库",
+  "welcome.open": "打开已有保险库",
+
+  "onboarding.heading": "创建保险库",
+  "onboarding.subtitle": "选择一个强主密码。它永远不会离开本设备。",
+  "onboarding.password.placeholder": "主密码",
+  "onboarding.confirm.placeholder": "再次输入主密码",
+  "onboarding.strength.weak": "弱",
+  "onboarding.strength.fair": "一般",
+  "onboarding.strength.strong": "强",
+  "onboarding.strength.veryStrong": "极强",
+  "onboarding.submit": "创建保险库",
+  "onboarding.error.mismatch": "两次输入的密码不一致。",
+  "onboarding.error.tooShort": "密码至少 8 个字符。",
+
+  "unlock.heading": "解锁保险库",
+  "unlock.subtitle": "输入主密码以继续。",
+  "unlock.password.placeholder": "主密码",
+  "unlock.submit": "解锁",
+  "unlock.error.invalid": "主密码错误。",
+
+  "vault.title": "保险库",
+  "vault.search.placeholder": "搜索条目",
+  "vault.empty": "暂无条目。在下方创建第一条登录。",
+  "vault.new": "新建登录",
+  "vault.lock": "锁定",
+  "vault.delete": "删除",
+  "vault.save": "保存",
+  "vault.cancel": "取消",
+
+  "vault.item.name": "名称",
+  "vault.item.username": "用户名",
+  "vault.item.password": "密码",
+  "vault.item.url": "网址",
+  "vault.item.notes": "备注",
+
+  "common.loading": "加载中…",
+  "common.error": "发生错误。"
+}

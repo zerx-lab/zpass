@@ -1,0 +1,8 @@
+[package]
+name = "zpass-browser-bridge"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "GUI 内的浏览器扩展 loopback HTTP 桥（Phase E 实现）"
+publish = false

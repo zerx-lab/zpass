@@ -1,0 +1,8 @@
+[package]
+name = "zpass-otp"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "TOTP / HOTP / Steam Guard 纯计算（Phase C 实现）"
+publish = false

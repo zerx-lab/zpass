@@ -1,0 +1,8 @@
+[package]
+name = "zpass-ssh-agent-proto"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "zpass-desktop 与 zpass-agent 之间的 wire protocol（Phase D 实现）"
+publish = false

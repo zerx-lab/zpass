@@ -1,0 +1,22 @@
+[package]
+name = "zpass-vault-store"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "VaultStore trait + SqliteVaultStore + InMemoryStore（桌面 SQLite）"
+publish = false
+
+[features]
+default = ["sqlite", "in-memory"]
+sqlite = ["dep:rusqlite"]
+in-memory = []
+
+[dependencies]
+rusqlite = { workspace = true, optional = true }
+thiserror.workspace = true
+zpass-vault-format = { path = "../zpass-vault-format" }
+zpass-platform = { path = "../zpass-platform" }
+
+[dev-dependencies]
+tempfile.workspace = true

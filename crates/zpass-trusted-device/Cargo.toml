@@ -1,0 +1,8 @@
+[package]
+name = "zpass-trusted-device"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "跨平台设备绑定密钥包装（Phase F 实现：Windows DPAPI）"
+publish = false

@@ -1,0 +1,12 @@
+[package]
+name = "zpass-agent"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "SSH agent 守护进程（Phase D 实现）"
+publish = false
+
+[[bin]]
+name = "zpass-agent"
+path = "src/main.rs"

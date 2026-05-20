@@ -1,0 +1,12 @@
+[package]
+name = "zpass-native-host"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "浏览器扩展 stdio native messaging 桥（Phase E 实现）"
+publish = false
+
+[[bin]]
+name = "zpass-native-host"
+path = "src/main.rs"

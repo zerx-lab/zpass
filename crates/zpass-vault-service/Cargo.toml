@@ -1,0 +1,28 @@
+[package]
+name = "zpass-vault-service"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "VaultService 高层 API：Initialize / Unlock / Lock / CRUD / 事件总线"
+publish = false
+
+[features]
+# `test-helpers` 暴露 `with_clock_and_params` 等仅测试用的构造器（弱 KDF / MockClock 注入）。
+# 仅允许被 dev-dependencies 启用；生产 binary 必须不开此 feature。
+# 详见 spec/04 § 7 与 spec/12 § 4.2。
+test-helpers = []
+
+[dependencies]
+parking_lot.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+zpass-crypto = { path = "../zpass-crypto" }
+zpass-vault-format = { path = "../zpass-vault-format" }
+zpass-vault-store = { path = "../zpass-vault-store", default-features = false, features = ["in-memory"] }
+
+[dev-dependencies]
+zpass-vault-service = { path = ".", features = ["test-helpers"] }
+zpass-vault-store = { path = "../zpass-vault-store", default-features = false, features = ["in-memory", "sqlite"] }
+tempfile.workspace = true

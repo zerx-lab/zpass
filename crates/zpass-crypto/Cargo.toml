@@ -1,0 +1,24 @@
+[package]
+name = "zpass-crypto"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Argon2id KDF + XChaCha20-Poly1305 AEAD + 零化（no_std + alloc）"
+publish = false
+
+[features]
+# 桌面 / 移动端默认走 OS CSPRNG。
+# 在嵌入式 / no_std target 上跑 `cargo check --no-default-features` 时关掉，
+# `random_bytes` / `random_key` 等接口将编译消失（由调用方提供等价能力）。
+default = ["os-rng"]
+os-rng = ["dep:getrandom"]
+
+[dependencies]
+argon2.workspace = true
+chacha20poly1305.workspace = true
+getrandom = { workspace = true, optional = true }
+zeroize.workspace = true
+
+[dev-dependencies]
+hex-literal.workspace = true

@@ -1,0 +1,79 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/zpass-crypto",
+    "crates/zpass-vault-format",
+    "crates/zpass-vault-store",
+    "crates/zpass-vault-service",
+    "crates/zpass-otp",
+    "crates/zpass-passkey",
+    "crates/zpass-trusted-device",
+    "crates/zpass-ssh-agent-proto",
+    "crates/zpass-browser-bridge",
+    "crates/zpass-config",
+    "crates/zpass-platform",
+    "desktop_rs/zpass-desktop",
+    "desktop_rs/zpass-agent",
+    "desktop_rs/zpass-native-host",
+]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.95"
+license = "GPL-3.0-or-later"
+
+[workspace.dependencies]
+# === GPUI 依赖（用户指定，Phase B 才实际拉取；Phase A 仅占位）===
+# NOTE: 用户决定不 pin commit SHA，与 spec/14 § 1 的 `rev = "<PHASE-A-PIN>"` 偏离。
+# 见 docs/dev-setup.md。
+gpui = { git = "https://github.com/zed-industries/zed" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit", "x11", "wayland"] }
+gpui-component = { git = "https://github.com/longbridge/gpui-component" }
+gpui-component-assets = { git = "https://github.com/longbridge/gpui-component" }
+
+# === 序列化 ===
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1" }
+ciborium = { version = "0.2", default-features = false }
+ciborium-io = { version = "0.2", default-features = false }
+
+# === 加密 ===
+argon2 = { version = "0.5", default-features = false, features = ["alloc"] }
+chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
+getrandom = { version = "0.2", default-features = false }
+zeroize = { version = "1.7", features = ["derive"] }
+hmac = { version = "0.12", default-features = false }
+sha1 = { version = "0.10", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "alloc"] }
+data-encoding = { version = "2", default-features = false, features = ["alloc"] }
+subtle = "2"
+
+# === 存储 / 桥 ===
+rusqlite = { version = "0.31", features = ["bundled", "blob"] }
+tiny_http = "0.12"
+ureq = { version = "2", default-features = false, features = ["tls"] }
+publicsuffix = "2"
+
+# === 并发 / 工具 ===
+parking_lot = "0.12"
+thiserror = "1"
+anyhow = "1"
+uuid = { version = "1", features = ["v4"] }
+
+# === 平台 ===
+windows-sys = { version = "0.52", features = ["Win32_Security_Cryptography", "Win32_Foundation"] }
+
+# === Dev-only ===
+tempfile = "3"
+hex-literal = "0.4"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
+
+[profile.release-native-host]
+inherits = "release"
+opt-level = "s"
+panic = "abort"

@@ -1,0 +1,31 @@
+[package]
+name = "zpass-desktop"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "GPUI 桌面主程序"
+publish = false
+
+[[bin]]
+name = "zpass-desktop"
+path = "src/main.rs"
+
+[dependencies]
+gpui.workspace = true
+gpui_platform.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+parking_lot.workspace = true
+anyhow.workspace = true
+zeroize.workspace = true
+uuid.workspace = true
+zpass-crypto = { path = "../../crates/zpass-crypto" }
+zpass-vault-format = { path = "../../crates/zpass-vault-format" }
+zpass-vault-store = { path = "../../crates/zpass-vault-store" }
+zpass-vault-service = { path = "../../crates/zpass-vault-service" }
+zpass-platform = { path = "../../crates/zpass-platform" }
+zpass-config = { path = "../../crates/zpass-config" }
+
+[dev-dependencies]
+zpass-vault-service = { path = "../../crates/zpass-vault-service", features = ["test-helpers"] }

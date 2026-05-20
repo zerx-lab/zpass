@@ -1,0 +1,21 @@
+[package]
+name = "zpass-vault-format"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Vault 磁盘字节布局：AAD 常量、ItemPayloadV1 CBOR、VaultMetaBlob（no_std + alloc）"
+publish = false
+
+[features]
+# 与 zpass-crypto 的 feature 对齐，让上层可以一次性关掉 os-rng。
+default = ["os-rng"]
+os-rng = ["zpass-crypto/os-rng"]
+
+[dependencies]
+serde = { workspace = true }
+ciborium = { workspace = true }
+ciborium-io = { workspace = true }
+zpass-crypto = { path = "../zpass-crypto", default-features = false }
+
+[dev-dependencies]

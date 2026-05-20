@@ -1,0 +1,45 @@
+{
+  "app.title": "ZPass",
+  "app.tagline": "Zero-knowledge password manager",
+
+  "welcome.heading": "Welcome to ZPass",
+  "welcome.subtitle": "Your local, zero-knowledge password vault.",
+  "welcome.create": "Create a new vault",
+  "welcome.open": "Open existing vault",
+
+  "onboarding.heading": "Create your vault",
+  "onboarding.subtitle": "Choose a strong master password. It will never leave this device.",
+  "onboarding.password.placeholder": "Master password",
+  "onboarding.confirm.placeholder": "Confirm master password",
+  "onboarding.strength.weak": "Weak",
+  "onboarding.strength.fair": "Fair",
+  "onboarding.strength.strong": "Strong",
+  "onboarding.strength.veryStrong": "Very strong",
+  "onboarding.submit": "Create vault",
+  "onboarding.error.mismatch": "Passwords do not match.",
+  "onboarding.error.tooShort": "Password must be at least 8 characters.",
+
+  "unlock.heading": "Unlock vault",
+  "unlock.subtitle": "Enter your master password to continue.",
+  "unlock.password.placeholder": "Master password",
+  "unlock.submit": "Unlock",
+  "unlock.error.invalid": "Invalid master password.",
+
+  "vault.title": "Vault",
+  "vault.search.placeholder": "Search items",
+  "vault.empty": "No items yet. Create your first login below.",
+  "vault.new": "New login",
+  "vault.lock": "Lock",
+  "vault.delete": "Delete",
+  "vault.save": "Save",
+  "vault.cancel": "Cancel",
+
+  "vault.item.name": "Name",
+  "vault.item.username": "Username",
+  "vault.item.password": "Password",
+  "vault.item.url": "URL",
+  "vault.item.notes": "Notes",
+
+  "common.loading": "Loading…",
+  "common.error": "Something went wrong."
+}

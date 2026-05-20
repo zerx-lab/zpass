@@ -1,0 +1,11 @@
+[package]
+name = "zpass-platform"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "跨平台路径解析与 OS 检测"
+publish = false
+
+[dependencies]
+thiserror.workspace = true

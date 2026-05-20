@@ -1,0 +1,16 @@
+[package]
+name = "zpass-config"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "原子 JSON 读写 ~/.config/zpass/<ns>.json"
+publish = false
+
+[dependencies]
+serde_json.workspace = true
+thiserror.workspace = true
+zpass-platform = { path = "../zpass-platform" }
+
+[dev-dependencies]
+tempfile.workspace = true
