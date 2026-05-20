@@ -85,6 +85,9 @@ pub enum PasskeyError {
     KeyGenerationFailed,
     InvalidKey,
     InvalidCose,
+    /// 上层（如 native-host 解析 WebAuthn 请求或扩展协议 URI）传入的标识字段不合法。
+    /// spec/07 § 9 公开 API 要求；当前 crate 内未抛出此 variant（保留供桌面层使用）。
+    InvalidUri,
     InvalidLength,
     SigningFailed,
     Internal,
@@ -96,6 +99,7 @@ impl fmt::Display for PasskeyError {
             Self::KeyGenerationFailed => f.write_str("ES256 key generation failed"),
             Self::InvalidKey => f.write_str("invalid PKCS#8 or SPKI key"),
             Self::InvalidCose => f.write_str("invalid COSE_Key encoding"),
+            Self::InvalidUri => f.write_str("invalid WebAuthn URI or identifier"),
             Self::InvalidLength => f.write_str("invalid byte length"),
             Self::SigningFailed => f.write_str("ECDSA signing failed"),
             Self::Internal => f.write_str("internal error"),
@@ -607,21 +611,43 @@ mod tests {
         assert_eq!(out.authenticator_data.len(), expected);
     }
 
-    /// SPKI / COSE 的私钥不会被泄露到 SPKI / COSE 中（它们应只含公钥点）。
+    /// SPKI / COSE 不得包含 32-byte 私钥 scalar（公钥编码只含曲线点）。
+    ///
+    /// 用 seed=[7;32] 派生 keypair 后，私钥 scalar 在 PKCS#8 中作为 32-byte
+    /// OCTET STRING 出现（位置由 ASN.1 编码决定，但总是连续 32 字节）。
+    /// 断言这串字节**不**出现在 SPKI / COSE 的字节序列中。
     #[test]
     fn cose_does_not_contain_private_key() {
         let kp = fixed_seed_keypair();
-        // SPKI 与 PKCS8 不应共享 byte sequence
-        for win in kp.public_key_spki.windows(8) {
-            for win2 in kp.private_key_pkcs8.windows(8) {
-                if win == win2 {
-                    // 允许偶尔重叠（asn.1 头部、算法 oid 是共享的）；只要不是整段相同
-                    // 但 32 bytes 的私钥 d 一定不能出现在 SPKI / COSE
-                }
-            }
+
+        // p256::ecdsa::SigningKey::to_bytes() 返回 32-byte 原始 scalar。
+        // 这是 PKCS#8 中 OCTET STRING 字段封装的真实秘密。
+        let signing = SigningKey::from_pkcs8_der(&kp.private_key_pkcs8).unwrap();
+        let raw_scalar = signing.to_bytes();
+        let scalar_bytes: &[u8] = &raw_scalar;
+        assert_eq!(scalar_bytes.len(), 32);
+
+        // PKCS#8 应包含该 32-byte 序列（sanity check）。
+        assert!(
+            window_contains(&kp.private_key_pkcs8, scalar_bytes),
+            "PKCS#8 应包含 32-byte 私钥 scalar"
+        );
+
+        // SPKI / COSE 绝不能包含。
+        assert!(
+            !window_contains(&kp.public_key_spki, scalar_bytes),
+            "SPKI 中泄露了 32-byte 私钥 scalar"
+        );
+        assert!(
+            !window_contains(&kp.public_key_cose, scalar_bytes),
+            "COSE_Key 中泄露了 32-byte 私钥 scalar"
+        );
+    }
+
+    fn window_contains(haystack: &[u8], needle: &[u8]) -> bool {
+        if needle.is_empty() || needle.len() > haystack.len() {
+            return false;
         }
-        // 直接断言：COSE / SPKI 长度都远短于含私钥的 PKCS#8。
-        assert!(kp.public_key_cose.len() < kp.private_key_pkcs8.len());
-        assert!(kp.public_key_spki.len() < kp.private_key_pkcs8.len());
+        haystack.windows(needle.len()).any(|w| w == needle)
     }
 }

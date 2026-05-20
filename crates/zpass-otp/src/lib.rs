@@ -488,28 +488,32 @@ mod tests {
     }
 
     /// spec/06 § 7 test `steam_known_vector`：
-    /// 与 Steam Mobile Authenticator 比对的开源向量。
+    /// 与独立 Steam Guard 算法实现（Python 参考）跨实现一致。
     ///
-    /// 向量来源：steamguard-cli (https://github.com/dyc3/steamguard-cli)
-    /// 测试数据 `seed = "BASE32SECRETXXXXX"`, `t = 1634840400`（任一固定时间）。
-    /// 这里用一组易于重现的、与上游 steam 算法跨实现一致的向量。
+    /// 参考实现脚本：见 commit message。
+    /// seed = base32("12345678901234567890") (RFC 测试 key)，验证多个时间点。
     #[test]
     fn steam_known_vector() {
-        // 用 base32("12345678901234567890") 即 RFC 测试 key 作 seed。
-        // 算 t = 0 时的 Steam code，并对照 Python steamotp 参考实现的输出。
         let seed = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
-        let code = steam_guard(seed, 0).unwrap();
-        assert_eq!(code.digits, 5);
-        assert_eq!(code.code.len(), 5);
-        // 字符必须全在 STEAM_ALPHABET 内
-        for c in code.code.chars() {
-            assert!(
-                STEAM_ALPHABET.contains(&(c as u8)),
-                "char {c:?} 不在 Steam 字母表里"
-            );
+
+        // 用 Python 独立实现算出的参考向量（hmac-sha1 + Steam 26-字母表）：
+        //   t=0          → "GG5F5"
+        //   t=30         → "PV9M4"
+        //   t=59         → "PV9M4"（counter 同为 1）
+        //   t=1111111109 → "PY4YB"
+        let cases: &[(u64, &str)] = &[
+            (0, "GG5F5"),
+            (30, "PV9M4"),
+            (59, "PV9M4"),
+            (1111111109, "PY4YB"),
+        ];
+        for (t, expected) in cases {
+            let code = steam_guard(seed, *t).unwrap();
+            assert_eq!(code.code, *expected, "t = {t}");
+            assert_eq!(code.digits, 5);
+            assert_eq!(code.r#type, OtpType::Steam);
+            assert_eq!(code.period, 30);
         }
-        assert_eq!(code.r#type, OtpType::Steam);
-        assert_eq!(code.period, 30);
     }
 
     /// spec/06 § 7 test `base32_normalize_strips_whitespace`：

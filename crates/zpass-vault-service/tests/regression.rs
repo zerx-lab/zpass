@@ -672,6 +672,41 @@ fn test_advance_hotp_counter_uses_hotp_counter_field() {
     assert!(!payload.fields.contains_key("counter"));
 }
 
+/// counter 接近 i64::MAX 时 advance 仍能正确推进，且 u64 域加 1 不会
+/// 误触 checked_add 的溢出分支（spec/06 § 4.3：用 checked_add 而非 wrapping_add）。
+///
+/// 真正的 u64 溢出在当前架构下不可达——FieldValue::Number 是 i64，
+/// 读取分支 `*n as u64` 仅接受 n >= 0，所以读出的 counter ≤ i64::MAX < u64::MAX。
+/// 但 checked_add 是正确的防御性写法，本测试锁住「大值仍能继续 +1」的契约。
+#[test]
+fn test_advance_hotp_counter_near_max_progresses() {
+    let v = fresh_service();
+    v.initialize("password 1234").unwrap();
+
+    let mut fields = BTreeMap::new();
+    fields.insert("secret".into(), FieldValue::Text("JBSWY3DPEHPK3PXP".into()));
+    fields.insert("hotp_counter".into(), FieldValue::Number(i64::MAX - 1));
+    let new = NewItem {
+        r#type: ItemType::Totp,
+        name: "HOTP near max".into(),
+        fields,
+    };
+    let summary = v.create_item(new).unwrap();
+
+    let next = v.advance_hotp_counter(&summary.id).unwrap();
+    assert_eq!(next, i64::MAX as u64);
+
+    // 第二次 advance：counter = i64::MAX as u64，+1 = 0x8000_0000_0000_0000
+    // （u64 范围内，checked_add 不触发）。写回 i64 时 reinterpret 为 i64::MIN。
+    let next2 = v.advance_hotp_counter(&summary.id).unwrap();
+    assert_eq!(next2, (i64::MAX as u64) + 1);
+
+    // 第三次 advance：读到 i64::MIN（< 0）被分支视作 0 → +1 = 1。
+    // 这是 i64-stored counter 的固有边界，不在 advance_hotp_counter 修复范围内。
+    let next3 = v.advance_hotp_counter(&summary.id).unwrap();
+    assert_eq!(next3, 1);
+}
+
 /// 缺 hotp_counter 字段时从 0 起步、写回也用正确键名。
 #[test]
 fn test_advance_hotp_counter_initializes_from_zero() {

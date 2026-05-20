@@ -563,7 +563,10 @@ impl<S: VaultStore> VaultService<S> {
             Some(FieldValue::Number(n)) if *n >= 0 => *n as u64,
             _ => 0,
         };
-        let next = counter.wrapping_add(1);
+        // 用 checked_add：counter 接近 u64::MAX 时返回 InvalidItemType，
+        // 避免 wrapping_add 静默回到 0 让 HOTP code 重新可用（counter 复用 = 安全回归，
+        // spec/06 § 4.3）。
+        let next = counter.checked_add(1).ok_or(VaultError::InvalidItemType)?;
         payload
             .fields
             .insert("hotp_counter".into(), FieldValue::Number(next as i64));

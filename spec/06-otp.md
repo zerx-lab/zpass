@@ -59,6 +59,7 @@ pub enum OtpError {
     InvalidDigits,          // 不在 6..=10
     InvalidPeriod,          // 0
     InvalidUri,             // otpauth:// 解析失败
+    MissingCounter,         // HOTP URI 缺 counter 参数（spec § 7 mandatory test）
     UnsupportedAlgorithm,
 }
 ```
@@ -133,7 +134,7 @@ pub fn advance_hotp_counter(&self, item_id: &str) -> Result<u64, VaultError> {
 
 ## 5. Steam Guard
 
-字母表：`23456789BCDFGHJKMNPQRTVWXY`（25 字符，去除易混淆字符）。
+字母表：`23456789BCDFGHJKMNPQRTVWXY`（**26 字符**，去除易混淆字符 `0/1/A/E/I/L/O/S/U/Z`）。
 
 ```rust
 fn steam_guard_truncate(hmac_bytes: &[u8]) -> String {
