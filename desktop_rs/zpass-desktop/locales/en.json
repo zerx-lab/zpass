@@ -86,5 +86,16 @@
   "generator.strength.veryStrong": "Very strong",
 
   "importExport.title": "Import & Export",
-  "importExport.subtitle": "Import plaintext JSON or export a snapshot."
+  "importExport.subtitle": "Import plaintext JSON or export a snapshot.",
+  "importExport.export.title": "Export",
+  "importExport.export.subtitle": "Save vault as plaintext JSON. Treat the file as sensitive.",
+  "importExport.export.action": "Export to file…",
+  "importExport.import.title": "Import",
+  "importExport.import.subtitle": "Read a ZPass export JSON. Items are added, not replaced.",
+  "importExport.import.action": "Import from file…",
+  "importExport.last.exportedOk": "Exported",
+  "importExport.last.exportErr": "Export failed",
+  "importExport.last.importedOk": "Imported",
+  "importExport.last.importErr": "Import failed",
+  "importExport.error.version": "Unsupported schemaVersion (expected zpass-export-v1)"
 }

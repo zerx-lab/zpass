@@ -86,5 +86,16 @@
   "generator.strength.veryStrong": "极强",
 
   "importExport.title": "导入与导出",
-  "importExport.subtitle": "导入明文 JSON 或导出快照。"
+  "importExport.subtitle": "导入明文 JSON 或导出快照。",
+  "importExport.export.title": "导出",
+  "importExport.export.subtitle": "保存为明文 JSON 文件。请将该文件视为敏感数据。",
+  "importExport.export.action": "导出到文件…",
+  "importExport.import.title": "导入",
+  "importExport.import.subtitle": "读取 ZPass 导出 JSON。条目会被追加，不会替换。",
+  "importExport.import.action": "从文件导入…",
+  "importExport.last.exportedOk": "已导出",
+  "importExport.last.exportErr": "导出失败",
+  "importExport.last.importedOk": "已导入",
+  "importExport.last.importErr": "导入失败",
+  "importExport.error.version": "不支持的 schemaVersion（应为 zpass-export-v1）"
 }
