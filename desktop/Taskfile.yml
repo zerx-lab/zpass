@@ -31,8 +31,37 @@ tasks:
 
   dev:
     summary: Runs the application in development mode
+    deps:
+      # Linux 上必须先走 setup:wails 才能拿到 KDE 补丁后的 Wails；
+      # 非 Linux 平台 setup:wails 会被 platforms 拦下成空操作。
+      - setup:wails
     cmds:
       - wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}
+
+  setup:wails:
+    summary: 给 Wails 3 打 KDE 标题栏补丁（幂等，仅 Linux 有效）
+    desc: |
+      调 scripts/setup-wails/ 里的 Go 工具：把打过 KDE Plasma
+      标题栏补丁的 Wails 3 源码副本物化到 third_party/wails-v3/，并
+      生成 go.work 把主模块重定向到该副本。详见 third_party/README.md。
+
+      幂等：已生成 .zpass-patched 标记文件 + go.work 同时存在时会
+      在毫秒级返回。需要重做时：
+          task setup:wails -- -force
+      或者手动清掉：
+          rm -rf third_party/wails-v3 go.work && task setup:wails
+    platforms: [linux]
+    env:
+      # 必须在调 `go` 之前关闭 workspace 模式：goroutine 在发现上层
+      # 的 desktop/go.work 后会启用 workspace，而一个旧版本的 go.work
+      # 可能以 "go 版本低于模块要求" 为由拒绝启动 setup本身。
+      # 闭掉之后 setup 能在任何状态下 bootstrap 、重生 go.work。
+      GOWORK: "off"
+    cmds:
+      # go -C 把子进程的 CWD 切到 scripts/setup-wails/，让 Go 走那
+      # 份独立的小模块。CLI_ARGS 走透传参路径，支持调用时加
+      # -force：task setup:wails -- -force
+      - go -C ./scripts/setup-wails run . {{.CLI_ARGS}}
 
   setup:docker:
     summary: Builds Docker image for cross-compilation (~800MB download)

@@ -115,6 +115,85 @@ body {
 	overflow: hidden;
 }
 
+/* ─── Linux WebKitGTK 字体渲染适配 ───────────────────────────────
+ * 现象：Linux 下所有文字（尤其是按钮内文字）相对几何中心有 0.5~1.5px 的
+ * 轻微纵向 / 横向偏移，看起来"不居中"。
+ *
+ * 根因：Wails v3 Linux 版用 WebKitGTK 6.0（Cairo / FreeType 后端），与
+ * Chromium (Skia) / WKWebView 在字体渲染管线上有两点关键差异：
+ *
+ *   1. `text-rendering: geometricPrecision` 在 Cairo 后端映射到
+ *      CAIRO_HINT_STYLE_NONE —— 关闭 TTF hinting。Geist 字形的
+ *      ascent/descent/sideBearing 改用真实 metrics 而非 hinted metrics
+ *      计算，叠加按钮里 `inline-flex items-center` + `leading-none`
+ *      的几何居中，纵向 half-leading 圆整方向与 Chromium 相反，于是
+ *      文字相对按钮中线漂半到一个像素。`ss01`/`cv11` glyph 替换后
+ *      新字形的侧 bearing 在 unhinted 路径下也会半像素错位。
+ *
+ *   2. `-webkit-font-smoothing: antialiased` 在 Cairo 后端强制 grayscale
+ *      抗锯齿，覆盖用户在 fontconfig 里设的子像素抗锯齿（rgba/bgra），
+ *      让文字额外"细且发虚"，放大了上述漂移的视觉感受。
+ *
+ * 修复：仅在 <html data-platform="linux"> 下：
+ *   - text-rendering 改 optimizeLegibility（GNOME/GTK 应用事实默认），
+ *     保留 hinting，OpenType 特性 (calt/ss01/cv11) 仍然生效；
+ *   - font-smoothing 还给系统（auto），让 fontconfig 的用户设置决定；
+ *   - font-synthesis 放开 weight/style 合成。@fontsource 的 Geist 在
+ *     Linux 偶有某个字重 woff2 加载失败（精简镜像 / 代理环境），缺重
+ *     时回落 fallback 会让按钮里 mixed-weight 内容出现基线跳变；与
+ *     html[data-custom-sans] body 的策略保持一致，做双保险。
+ *
+ * 范围：仅作用于 `<body>` 一层，不污染 globals 的 OpenType 特性主线，
+ * macOS / Windows 完全不受影响。
+ * ────────────────────────────────────────────────────────────── */
+html[data-platform="linux"] body {
+	text-rendering: optimizeLegibility;
+	-webkit-font-smoothing: auto;
+	-moz-osx-font-smoothing: auto;
+	font-synthesis: weight style;
+}
+
+/* ─── Linux WebKitGTK 下 `.truncate` 的 inline span 高度坍缩修复 ───────────
+ * 现象：侧边栏 / WorkspaceSwitcher / CmdK 里的 `<span class="truncate">`
+ * 文字在 Linux 上位置明显偏上，且下半到下 1/3 被容器裁切看不清。
+ *
+ * 根因：Tailwind 的 `truncate` 展开为三件套：
+ *   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+ *
+ * 在 Chromium (Skia) / WKWebView 下，一个 inline `<span>` 被赋予
+ * `overflow: hidden` 后仍以 line-height 计算高度（text-[13px]
+ * × 1.5 ≈ 19.5px），完全包住 Geist 的 ascender + descender。
+ *
+ * 但 WebKitGTK 6.0 会让这个 span 进入 *block formatting context*，同时
+ * 采用**很老的 inline-block 高度计算策略**：高度坍缩到 font-size
+ * 的 em-box（即 13px）而不是 line-height 的 19.5px。Geist 的总字形高度
+ * 约 1.2em ≈ 15.6px > 13px，于是：
+ *   - 文字从 em-box 顶部开始绘制，看起来「偏上」
+ *   - descender 段（「登」字下方、「录」字下钩、拉丁类的 g/p/y/j）
+ *     被 span 的 overflow:hidden 裁掉，看起来「被遮挡 1/3」
+ *
+ * 修复：
+ *   在 Linux 下强制 `.truncate` 走 inline-block + 明确的 vertical-align
+ *   与 line-height。选 inline-block 而非 block 是为了：
+ *     - 与 Chromium 侧的默认 inline 行为最接近，避免在 *非* flex 父
+ *       容器下（如项目里部分 <p class="truncate"> 以外的临时使用）出现额外换行。
+ *     - 使高度明确由 line-height 决定，不再被 WebKitGTK 坍缩到 em-box。
+ *   vertical-align: middle 让 inline-block 与同行其它 inline 内容（如
+ *   右侧的计数 span）的几何中线对齐，避免默认 baseline 对齐下文字偏高。
+ *   line-height: 1.5 与 <body> 默认一致，不动 token 或组件。
+ *
+ * 作用面：项目里所有 `.truncate`（span / div / p）都会被命中；div/p
+ * 本来就是 block，改成 inline-block 在 flex 子项上无观感差别（flex 子项
+ * 不区分 inline/block），在独立上下文下会失去「独占一行」语义—— 但项目中
+ * 这些 div/p 都在 flex 容器里（Sidebar 账户区 / WorkspaceSwitcher / Import/
+ * Export Dialog），不存在表现退化。
+ * ────────────────────────────────────────────────────────────── */
+html[data-platform="linux"] .truncate {
+	display: inline-block;
+	vertical-align: middle;
+	line-height: 1.5;
+}
+
 /* 用户启用自定义正文字体时（ThemeSync 在 <html> 上写 data-custom-sans）重置
  * Geist 专属的 OpenType 特性开关。`ss01` / `cv11` 是 Geist 自己的
  * stylistic set / character variant tag，其他字体（中文 / Maple Mono /

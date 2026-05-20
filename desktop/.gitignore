@@ -4,7 +4,14 @@ frontend/dist
 frontend/node_modules
 frontend/bindings
 build/linux/appimage/build
+build/linux/*.desktop
 build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
+
+# KDE 标题栏补丁的本地化产物（由 scripts/setup-wails/ 生成，详见 third_party/README.md）
+# go.work 把主模块的 wails/v3 重定向到补丁副本；两者都不进 git，跨平台开发者无感。
+/go.work
+/go.work.sum
+/third_party/wails-v3/
 
 # 编译产物（开发期 go build 在仓库根产生的二进制）
 zpass-desktop

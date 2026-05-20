@@ -221,8 +221,30 @@ task package
 - `frontend/dist/` 必须先存在 Go 才能 `embed`。`wails3 build` 会自动按顺序处理；如果你只想跑 `go build`，先 `cd frontend && npm run build`。
 - `Call.ByName("main.ConfigService.Method", ...)` 的方法名是按 Go 反射解析的，**首字母必须大写**。重命名 Go 方法时记得同步 `frontend/src/lib/config-storage.ts` 顶部的 `SVC_*` 常量。
 - 拖拽用 `--wails-draggable: drag`（CSS 自定义属性，inherit），**不是** `data-tauri-drag-region`。子按钮要显式 `no-drag` 开洞。
-- Wails 3 仍处于 alpha，API 偶有破坏性变更。升级 `github.com/wailsapp/wails/v3` 与 `@wailsio/runtime` 时务必一同升级并跑通 `wails3 dev`。
+- Wails 3 仍处于 alpha，API 偶有破坏性变更。升级 `github.com/wailsapp/wails/v3` 与 `@wailsio/runtime` 时务必一同升级并跑通 `wails3 dev`；**同时记得同步 [`scripts/setup-wails/main.go`](./scripts/setup-wails/main.go) 的 `wailsVersion` 常量并 `task setup:wails -- -force`**，否则本地的 KDE 补丁副本会停在旧版本。
 - `<html data-platform>` 在首帧由 `lib/platform.ts` 同步写入；如果你新增了平台分支组件，请通过 `getPlatform()` / `isMacOS()` 同步读取，不要 await 异步 API。
+
+### Linux / KDE 下的 Wails 本地补丁
+
+Wails 3 alpha 78 在 `Frameless: true` 时只调 `gtk_window_set_decorated(FALSE)`，**这在 KDE Plasma（尤其是 Wayland）下会产生双标题栏**：自定义 `<Titlebar />` 与 KWin 的 SSD 同时画出。
+
+项目采用本地补丁的方式修复：
+
+1. [`scripts/setup-wails/`](./scripts/setup-wails/) 是一个独立 Go 小模块，负责把 `go mod download` 拉到 module cache 的 Wails 源码拷贝到 [`third_party/wails-v3/`](./third_party/)，并在 `pkg/application/linux_cgo.go` 的 `setFrameless` 里补上 `gtk_window_set_titlebar(empty)` 让 GTK 主动走 CSD。
+2. 同一个工具会生成 `desktop/go.work`，把主模块的 `wails/v3` 导入重定向到本地副本。
+3. **`go.work` 和 `third_party/wails-v3/` 都不进 git**，于是 macOS / Windows 开发者什么都不用做，拿到的还是干净的官方 Wails。
+
+常用命令：
+
+```sh
+# 首次 clone / 升级 Wails 后运行一次
+Linux $ task setup:wails
+# 强制重做（比如调试补丁本身）
+Linux $ task setup:wails -- -force
+# 后续 `task dev` / `task build` 会自动幂等地跳过此步
+```
+
+完整原理、升级步骤与设计取舍见 [`third_party/README.md`](./third_party/README.md)。
 
 ---
 
