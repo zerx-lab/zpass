@@ -42,7 +42,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/zerx-lab/zpass/zpass-desktop/internal/sshagentproto"
+	"github.com/zerx-lab/zpass/internal/sshagentproto"
 )
 
 // ---------------------------------------------------------------------------

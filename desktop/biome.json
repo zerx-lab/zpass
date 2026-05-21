@@ -1,51 +1,16 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.4.12/schema.json",
-  "vcs": {
-    "enabled": true,
-    "clientKind": "git",
-    "useIgnoreFile": true
-  },
+  "$schema": "https://biomejs.dev/schemas/2.4.15/schema.json",
   "files": {
     "ignoreUnknown": true,
     "includes": [
-      "**",
-      "!**/dist",
-      "!**/node_modules",
-      "!**/src-tauri/target",
-      "!**/src-tauri/gen"
+      "electron/src/**/*.{ts,tsx,js,jsx,d.ts,css}",
+      "*.ts",
+      "*.mjs",
+      "!electron/src/api/schema.ts",
+      "!**/.vite",
+      "!**/out",
+      "!**/node_modules"
     ]
-  },
-  "formatter": {
-    "enabled": true,
-    "indentStyle": "tab",
-    "indentWidth": 1,
-    "lineWidth": 100,
-    "lineEnding": "lf"
-  },
-  "javascript": {
-    "formatter": {
-      "quoteStyle": "double",
-      "jsxQuoteStyle": "double",
-      "semicolons": "always",
-      "trailingCommas": "all",
-      "arrowParentheses": "always",
-      "bracketSpacing": true
-    }
-  },
-  "css": {
-    "parser": {
-      "cssModules": false,
-      "tailwindDirectives": true
-    },
-    "formatter": {
-      "enabled": true,
-      "indentStyle": "tab",
-      "indentWidth": 1,
-      "quoteStyle": "double"
-    },
-    "linter": {
-      "enabled": false
-    }
   },
   "linter": {
     "enabled": true,
@@ -53,49 +18,45 @@
       "recommended": true,
       "style": {
         "noNonNullAssertion": "off",
-        "useImportType": "error",
+        "useImportType": "warn",
         "useTemplate": "off"
       },
       "suspicious": {
-        "noExplicitAny": "warn"
-      },
-      "nursery": {
-        "useSortedClasses": "off"
+        "noExplicitAny": "warn",
+        "noArrayIndexKey": "warn"
       },
       "a11y": {
         "useKeyWithClickEvents": "off",
         "noAutofocus": "off",
-        "useValidAnchor": "off"
+        "useValidAnchor": "off",
+        "noSvgWithoutTitle": "off",
+        "noStaticElementInteractions": "off",
+        "useAriaPropsSupportedByRole": "off",
+        "noLabelWithoutControl": "off",
+        "useSemanticElements": "off"
       },
       "correctness": {
         "noUnusedVariables": "warn",
-        "noUnusedImports": "warn"
+        "noUnusedImports": "warn",
+        "useExhaustiveDependencies": "warn"
+      },
+      "complexity": {
+        "noUselessEmptyExport": "off",
+        "useOptionalChain": "warn",
+        "noUselessUndefinedInitialization": "warn"
       }
     }
   },
-  "assist": {
-    "enabled": true,
-    "actions": {
-      "source": {
-        "organizeImports": "on"
-      }
-    }
+  "formatter": {
+    "enabled": false
   },
-  "overrides": [
-    {
-      "includes": ["**/*.css"],
-      "linter": {
-        "enabled": false
-      }
+  "css": {
+    "parser": {
+      "cssModules": false,
+      "tailwindDirectives": true
     },
-    {
-      "includes": ["**/tsconfig*.json"],
-      "json": {
-        "parser": {
-          "allowComments": true,
-          "allowTrailingCommas": true
-        }
-      }
+    "linter": {
+      "enabled": false
     }
-  ]
+  }
 }

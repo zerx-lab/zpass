@@ -1,122 +1,218 @@
 version: "3"
 
-includes:
-  common: ./build/Taskfile.yml
-  windows: ./build/windows/Taskfile.yml
-  darwin: ./build/darwin/Taskfile.yml
-  linux: ./build/linux/Taskfile.yml
-  ios: ./build/ios/Taskfile.yml
-  android: ./build/android/Taskfile.yml
+# Single source of orchestration for the scaffold. The non-obvious order:
+#   change Go API -> task openapi -> task codegen -> TS recompiles.
+# `task dev` and `task build` chain those for you.
 
 vars:
-  APP_NAME: "ZPassDesktop"
-  BIN_DIR: "bin"
-  VITE_PORT: "{{.WAILS_VITE_PORT | default 9245}}"
+  GO_BIN: desktop-backend
+  # Directory uses Node's arch naming (x64/arm64/ia32) because it's consumed by
+  # Electron at runtime via `process.arch`. Go's GOARCH (amd64/386) is mapped here.
+  NODE_ARCH: '{{if eq ARCH "amd64"}}x64{{else if eq ARCH "386"}}ia32{{else}}{{ARCH}}{{end}}'
+  PLATFORM_DIR: "{{OS}}-{{.NODE_ARCH}}"
+  BIN_OUT: 'bin/{{.PLATFORM_DIR}}/{{.GO_BIN}}{{if eq OS "windows"}}.exe{{end}}'
+  AGENT_BIN_OUT: 'bin/{{.PLATFORM_DIR}}/zpass-agent{{if eq OS "windows"}}.exe{{end}}'
+  NATIVE_HOST_BIN_OUT: 'bin/{{.PLATFORM_DIR}}/zpass-native-host{{if eq OS "windows"}}.exe{{end}}'
 
 tasks:
-  build:
-    summary: Builds the application
+  default:
+    desc: List available tasks
     cmds:
-      - task: "{{OS}}:build"
+      - task --list
 
-  package:
-    summary: Packages a production build of the application
-    cmds:
-      - task: "{{OS}}:package"
+  # ---- Go ----
 
-  run:
-    summary: Runs the application
+  openapi:
+    desc: Dump the OpenAPI schema from Go to openapi.yaml
     cmds:
-      - task: "{{OS}}:run"
+      - go run . openapi openapi.yaml
+    sources:
+      - "**/*.go"
+    generates:
+      - openapi.yaml
+
+  build:go:
+    desc: Build the Go sidecar binary into bin/<os>-<arch>/
+    cmds:
+      - mkdir -p "bin/{{.PLATFORM_DIR}}"
+      - go build -trimpath -ldflags="-s -w" -o "{{.BIN_OUT}}" .
+    sources:
+      - "**/*.go"
+      - go.mod
+      - go.sum
+    generates:
+      - "{{.BIN_OUT}}"
+
+  build:agent:
+    desc: Build the SSH-agent daemon (cmd/zpass-agent) into bin/<os>-<arch>/
+    # Mirrors what the Wails project shipped: a separate binary the GUI
+    # supervises so SSH keys can outlive the GUI process. The GUI's
+    # SshAgentService.LocateAgentBinary looks for this file next to itself.
+    cmds:
+      - mkdir -p "bin/{{.PLATFORM_DIR}}"
+      - cmd: go build -trimpath -ldflags="-s -w" -o "{{.AGENT_BIN_OUT}}" ./cmd/zpass-agent
+        platforms: [linux, darwin]
+      - cmd: go build -trimpath -ldflags="-s -w -H windowsgui" -o "{{.AGENT_BIN_OUT}}" ./cmd/zpass-agent
+        platforms: [windows]
+    sources:
+      - "cmd/zpass-agent/**/*.go"
+      - "internal/sshagentproto/**/*.go"
+    generates:
+      - "{{.AGENT_BIN_OUT}}"
+
+  build:nativehost:
+    desc: Build the browser native-messaging host into bin/<os>-<arch>/
+    cmds:
+      - mkdir -p "bin/{{.PLATFORM_DIR}}"
+      - go build -trimpath -ldflags="-s -w" -o "{{.NATIVE_HOST_BIN_OUT}}" ./cmd/zpass-native-host
+    sources:
+      - "cmd/zpass-native-host/**/*.go"
+      - "internal/nativebridge/**/*.go"
+    generates:
+      - "{{.NATIVE_HOST_BIN_OUT}}"
+
+  test:go:
+    desc: Run Go tests
+    cmds:
+      - go test ./...
+
+  lint:go:
+    desc: Run golangci-lint (govet/nilness, staticcheck, errcheck, ineffassign, unused, gofmt)
+    cmds:
+      - golangci-lint run ./...
+
+  install:cli:
+    desc: Install the `zerx` scaffold CLI into $GOBIN (or $GOPATH/bin)
+    cmds:
+      - go install ./cmd/zerx
+
+  # ---- TS / Electron ----
+
+  install:
+    desc: Install pnpm dependencies
+    cmds:
+      - pnpm install
+    sources:
+      - package.json
+      - pnpm-lock.yaml
+
+  codegen:
+    desc: Regenerate electron/src/api/schema.ts from openapi.yaml
+    deps: [openapi]
+    cmds:
+      - pnpm run codegen
+    sources:
+      - openapi.yaml
+    generates:
+      - electron/src/api/schema.ts
+
+  typecheck:
+    desc: TS typecheck (no emit)
+    deps: [codegen]
+    cmds:
+      - pnpm run typecheck
+
+  lint:ts:
+    desc: Biome lint over electron/src (schema.ts excluded)
+    cmds:
+      - pnpm exec biome lint
+
+  lint:
+    desc: Run all linters (Go + TS)
+    deps: [lint:go, lint:ts]
+
+  verify:
+    desc: Acceptance gate before commit (typecheck + tests + lint)
+    deps: [typecheck, test:go, lint]
+
+  # ---- Composite ----
 
   dev:
-    summary: Runs the application in development mode
+    desc: Build Go sidecar, regenerate types, then launch Electron + Go watcher
+    # On *.go change the watcher rebuilds the sidecar and touches .dev-reload;
+    # Electron's main process fs.watches that file and respawns the sidecar.
+    # See scripts/dev-watcher.mjs and installDevReloader in
+    # electron/src/main/main.ts.
+    deps: [build:go, codegen]
     cmds:
-      - wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}
+      - pnpm exec concurrently -k -n electron,watcher -c blue,magenta "pnpm run start" "node scripts/dev-watcher.mjs"
 
-  setup:docker:
-    summary: Builds Docker image for cross-compilation (~800MB download)
+  clean:dev:
+    desc: Remove dev-only artifacts (.dev-reload)
     cmds:
-      - task: common:setup:docker
+      - rm -f .dev-reload
 
-  build:server:
-    summary: Builds the application in server mode (no GUI, HTTP server only)
+  build:
+    desc: Produce an unpacked Electron app (out/<app>-<platform>-<arch>/) with the Go sidecar bundled
+    deps: [build:go, build:agent, build:nativehost, codegen, typecheck, icons]
     cmds:
-      - task: common:build:server
+      - pnpm run package
 
-  run:server:
-    summary: Runs the application in server mode
+  make:
+    desc: Produce distributable installers/archives via Electron Forge makers
+    deps: [build:go, build:agent, build:nativehost, codegen, typecheck, icons]
     cmds:
-      - task: common:run:server
+      - pnpm run make
 
-  build:docker:
-    summary: Builds a Docker image for server mode deployment
+  build:arch:
+    desc: Produce an Arch Linux pacman package (.pkg.tar.zst) under out/make/arch/
+    # No Electron Forge maker for pacman exists today (到2026, the @reforged
+    # suite covers AppImage/Flatpak/Snap but not pacman). We generate a
+    # PKGBUILD on the fly that wraps the unpacked app from `task build` and
+    # hand it to makepkg. See scripts/make-arch.sh for the why.
+    platforms: [linux]
+    deps: [build]
     cmds:
-      - task: common:build:docker
+      - bash scripts/make-arch.sh
 
-  run:docker:
-    summary: Builds and runs the Docker image
+  # ---- Icons / desktop integration ----
+  #
+  # Wayland compositors don't accept window-pixmap icons the way X11 does. The
+  # taskbar/launcher icon is looked up by xdg_toplevel.app_id -> .desktop file
+  # -> Icon name -> hicolor theme PNG. So for `task dev` to show the ZPass
+  # logo instead of Electron's default, we install a user-level .desktop +
+  # hicolor icons matching the app_id "zpass" (see app.setName in main.ts).
+
+  icons:
+    desc: Render assets/logo/zpass.svg into multi-size PNGs under assets/logo/png/
     cmds:
-      - task: common:run:docker
+      - mkdir -p assets/logo/png
+      - for: [16, 32, 48, 64, 128, 256, 512]
+        cmd: magick ../assets/logo.png -resize {{.ITEM}}x{{.ITEM}} -strip assets/logo/png/zpass-{{.ITEM}}.png
+    sources:
+      - ../assets/logo.png
+    generates:
+      - assets/logo/png/zpass-16.png
+      - assets/logo/png/zpass-32.png
+      - assets/logo/png/zpass-48.png
+      - assets/logo/png/zpass-64.png
+      - assets/logo/png/zpass-128.png
+      - assets/logo/png/zpass-256.png
+      - assets/logo/png/zpass-512.png
 
-  # ---------------------------------------------------------------------------
-  # SSH agent 守护进程的辅助任务
-  # ---------------------------------------------------------------------------
-
-  agent:build:
-    summary: Build the zpass-agent SSH daemon binary into bin/
-    desc: |
-      Compiles cmd/zpass-agent into bin/zpass-agent (.exe on Windows).
-      Set ZPASS_AGENT_BIN to this path or place beside the GUI binary
-      so SshAgentService can auto-launch it as a child process.
-      Windows builds use the GUI subsystem so Scheduled Task can run it without
-      showing a console window. Use `go run ./cmd/zpass-agent --debug` when you
-      need foreground logs during development.
+  install:desktop:
+    desc: Install hicolor icons + zpass.desktop into ~/.local/share (Linux dev only)
+    platforms: [linux]
+    deps: [icons]
     cmds:
-      - cmd: go build -trimpath -ldflags="-s -w" -o bin/zpass-agent ./cmd/zpass-agent/
-        platforms: [linux, darwin]
-      - cmd: go build -trimpath -ldflags="-s -w -H windowsgui" -o bin/zpass-agent.exe ./cmd/zpass-agent/
-        platforms: [windows]
+      - for: [16, 32, 48, 64, 128, 256, 512]
+        cmd: install -Dm644 assets/logo/png/zpass-{{.ITEM}}.png "$HOME/.local/share/icons/hicolor/{{.ITEM}}x{{.ITEM}}/apps/zpass.png"
+      - install -Dm644 assets/logo/zpass.desktop "$HOME/.local/share/applications/zpass.desktop"
+      - gtk-update-icon-cache -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+      - update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
 
-  agent:run:
-    summary: Run the zpass-agent daemon in foreground (debug)
-    desc: |
-      Launches the agent with --debug so all slog output goes to stderr.
-      Useful for end-to-end testing without the GUI auto-supervisor:
-          # terminal 1: run GUI (will fail to locate agent if not built)
-          task dev
-          # terminal 2: run agent manually
-          task agent:run
-          # terminal 3: test SSH client
-          export SSH_AUTH_SOCK=$(go run ./cmd/zpass-agent --version >/dev/null; echo $XDG_RUNTIME_DIR/zpass/agent.sock)
-          ssh-add -L
-    deps: [agent:build]
+  uninstall:desktop:
+    desc: Remove the dev-installed hicolor icons + zpass.desktop
+    platforms: [linux]
     cmds:
-      - cmd: ./bin/zpass-agent --debug
-        platforms: [linux, darwin]
-      - cmd: go run ./cmd/zpass-agent --debug
-        platforms: [windows]
+      - for: [16, 32, 48, 64, 128, 256, 512]
+        cmd: rm -f "$HOME/.local/share/icons/hicolor/{{.ITEM}}x{{.ITEM}}/apps/zpass.png"
+      - rm -f "$HOME/.local/share/applications/zpass.desktop"
+      - gtk-update-icon-cache -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+      - update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
 
-  agent:test:
-    summary: Run unit tests for SSH agent code (proto + GUI + daemon)
+  clean:
+    desc: Remove all build artifacts
     cmds:
-      - go test ./internal/sshagentproto/... ./cmd/zpass-agent/... .
-
-  nativehost:build:
-    summary: Build the browser native messaging host into bin/
-    desc: |
-      Compiles the stdio native messaging bridge used by the extension.
-      The binary is a thin forwarder: it never opens the vault DB directly.
-      All requests are proxied to the running Desktop GUI over a localhost HTTP
-      bridge (token-authenticated). If the GUI is not running the host will
-      spawn it and wait for the bridge to come online before retrying.
-    cmds:
-      - cmd: go build -tags nativehost -trimpath -ldflags="-s -w" -o bin/zpass-native-host .
-        platforms: [linux, darwin]
-      - cmd: go build -tags nativehost -trimpath -ldflags="-s -w" -o bin/zpass-native-host.exe .
-        platforms: [windows]
-
-  nativehost:test:
-    summary: Run native messaging host tests
-    cmds:
-      - go test -tags nativehost .
+      - rm -rf bin .vite out node_modules/.cache
+      - rm -f openapi.yaml electron/src/api/schema.ts .dev-reload

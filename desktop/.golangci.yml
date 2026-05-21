@@ -1,0 +1,64 @@
+version: "2"
+
+# Minimal config: enable the linters that catch real bugs (nil deref, errcheck,
+# misuse) without the bikeshed-y style ones. Expand only with cause.
+#
+# Lint scope:
+#   - New code under internal/api, internal/server, internal/wailscompat,
+#     internal/nativebridge, and the root main.go MUST stay clean.
+#   - Code ported verbatim from the Wails-era project (internal/services,
+#     cmd/zpass-agent, cmd/zpass-native-host, internal/sshagentproto) keeps
+#     its original style: those modules predate this linter config and were
+#     never blocked on it. They're path-excluded here so the verify gate
+#     does not force a wholesale rewrite of working tested code.
+#   - When you touch a ported file for real reasons, fix the local issues
+#     you can see. We do not opportunistically clean adjacent code (see
+#     the project's "surgical changes" rule in AGENTS.md).
+linters:
+  default: none
+  enable:
+    - errcheck # unchecked errors
+    - govet # includes nilness analyzer
+    - ineffassign # ineffective assignments
+    - staticcheck # broad correctness checks (SA*, includes nil-related)
+    - unused # dead code
+
+  settings:
+    govet:
+      enable:
+        - nilness # nil pointer / interface checks
+    errcheck:
+      # `defer X.Close()` is idiomatic Go and the original codebase uses it
+      # everywhere; treating it as an error would force a `_ =` prefix on
+      # hundreds of lines that worked correctly for years.
+      exclude-functions:
+        - (io.Closer).Close
+        - (net.Conn).Close
+        - (net.Conn).SetDeadline
+        - (net.Listener).Close
+        - (*database/sql.Rows).Close
+        - (*net/http.Response).Body.Close
+        - (*os.File).Close
+
+  exclusions:
+    rules:
+      # Ported services and command code keeps its original lint posture.
+      - path: ^internal/services/
+        linters: [errcheck, staticcheck, unused, govet, ineffassign]
+      - path: ^cmd/zpass-agent/
+        linters: [errcheck, staticcheck, unused, govet, ineffassign]
+      - path: ^cmd/zpass-native-host/
+        linters: [errcheck, staticcheck, unused, govet, ineffassign]
+      - path: ^internal/sshagentproto/
+        linters: [errcheck, staticcheck, unused, govet, ineffassign]
+
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    paths:
+      # Same rationale as above — keep the ported tree formatted as-is.
+      - ^internal/services/
+      - ^cmd/zpass-agent/
+      - ^cmd/zpass-native-host/
+      - ^internal/sshagentproto/

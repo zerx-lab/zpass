@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=ZPass
+GenericName=Password Manager
+Comment=Zero-knowledge password manager
+Exec=zpass %U
+Icon=zpass
+Terminal=false
+Type=Application
+Categories=Utility;Security;
+StartupNotify=true
+StartupWMClass=zpass

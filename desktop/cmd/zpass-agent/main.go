@@ -60,7 +60,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/zerx-lab/zpass/zpass-desktop/internal/sshagentproto"
+	"github.com/zerx-lab/zpass/internal/sshagentproto"
 )
 
 // version 在 ldflags 注入时被赋值，否则保留 "dev"
