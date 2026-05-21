@@ -95,9 +95,7 @@ impl UnlockView {
         cx.spawn(async move |this, async_cx| {
             // 在后台线程跑同步 KDF。`async move { ... }` 把同步代码包成立即 ready 的
             // future；executor 会把它分到一个线程池 worker 上执行。
-            let result = bg
-                .spawn(async move { svc.unlock(password.as_str()) })
-                .await;
+            let result = bg.spawn(async move { svc.unlock(password.as_str()) }).await;
 
             // 回主线程：window 可能在 KDF 期间关闭，update 会返 Err，此时直接 drop。
             let _ = this.update(async_cx, |this, cx| {

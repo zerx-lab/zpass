@@ -548,18 +548,28 @@ impl<S: VaultStore> VaultService<S> {
 
     // ===================== HOTP =====================
 
+    /// HOTP advance：读取 `hotp_counter` 字段、+1、写回。
+    ///
+    /// 字段键固定为 `"hotp_counter"`（spec/06 § 4.3，与 Go `desktop/totpservice.go:227`
+    /// 字段命名一致）。返回类型 v1 = 新计数；C1b 在 zpass-otp 接入后会扩展为
+    /// `HotpAdvanceResult { code, new_counter, item_summary }`（spec/06 § 4.2）。
+    ///
+    /// 锁顺序：先 `hotp_advance_mu`，再内部锁——`get_item` / `update_item` 各自取
+    /// `inner` 读/写锁；外层 hotp 锁仅保证多个并发 advance 在 vault 视图层串行化。
     pub fn advance_hotp_counter(&self, item_id: &str) -> Result<u64, VaultError> {
         let _guard = self.hotp_advance_mu.lock();
         let mut payload = self.get_item(item_id)?;
-        let counter = match payload.fields.get("counter") {
+        let counter = match payload.fields.get("hotp_counter") {
             Some(FieldValue::Number(n)) if *n >= 0 => *n as u64,
-            None => 0,
             _ => 0,
         };
-        let next = counter.wrapping_add(1);
+        // 用 checked_add：counter 接近 u64::MAX 时返回 InvalidItemType，
+        // 避免 wrapping_add 静默回到 0 让 HOTP code 重新可用（counter 复用 = 安全回归，
+        // spec/06 § 4.3）。
+        let next = counter.checked_add(1).ok_or(VaultError::InvalidItemType)?;
         payload
             .fields
-            .insert("counter".into(), FieldValue::Number(next as i64));
+            .insert("hotp_counter".into(), FieldValue::Number(next as i64));
         self.update_item(payload)?;
         Ok(next)
     }

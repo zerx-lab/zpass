@@ -170,7 +170,10 @@ fn unlock_wrong_password_shows_error(cx: &mut TestAppContext) {
 #[gpui::test]
 fn unlock_submit_shows_submitting_state(cx: &mut TestAppContext) {
     let vault = setup(cx);
-    vault.service().initialize("test-password-123").expect("init");
+    vault
+        .service()
+        .initialize("test-password-123")
+        .expect("init");
     vault.service().lock().expect("lock");
 
     let (root_window, view) = add_window_with_root::<UnlockView, _>(cx, |window, cx| {
@@ -210,7 +213,10 @@ fn unlock_submit_shows_submitting_state(cx: &mut TestAppContext) {
 #[gpui::test]
 fn unlock_submit_reentry_blocked(cx: &mut TestAppContext) {
     let vault = setup(cx);
-    vault.service().initialize("correct-pw-12345").expect("init");
+    vault
+        .service()
+        .initialize("correct-pw-12345")
+        .expect("init");
     vault.service().lock().expect("lock");
 
     let (root_window, view) = add_window_with_root::<UnlockView, _>(cx, |window, cx| {

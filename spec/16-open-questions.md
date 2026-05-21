@@ -121,7 +121,33 @@ Go 版的扩展 manifest 模板可能依赖运行时计算的 native-host 路径
 
 ---
 
-## OQ-7：截图回归对比工具
+## OQ-7（已决）：`zpass-passkey` 的 p256 feature 选择
+
+`spec/02 § 6` 原本要求 `p256 { default-features = false, features = ["ecdsa", "alloc"] }`
+并允许 `zpass-passkey` 保持 `no_std + alloc`。Phase C 实施时发现：
+
+- `EncodePrivateKey::to_pkcs8_der` 与 `EncodePublicKey::to_public_key_der` 在 p256 0.13.2
+  的 trait impl 上**只在 `pem` feature 下暴露**（间接拉 `pkcs8` + `std`）。
+- spec/07 § 3 公开 API 中 `private_key_pkcs8: Vec<u8>`、`public_key_spki: Vec<u8>` 是必须的
+  持久化格式。
+
+权衡选项：
+
+| 方案 | 评价 |
+|---|---|
+| 自手写最小 PKCS#8 / SPKI DER 编码 | 80+ 行 ASN.1 序列化代码；维护成本大；与 `der`/`pkcs8`/`spki` crate 重复造轮子 |
+| 把 SigningKey 转 SecretKey 再用 `sec1` PEM-only feature | 同样需要 pem |
+| **接受 `pem + pkcs8 + std`，放弃 `zpass-passkey` 的 no_std**（**已选**） | 简单可靠；代价是该 crate 必须依赖 std；移动端 v2+ 若需要 no_std，再手写 DER 编码 |
+
+**决定**（Phase C 实施时）：`p256` 启用 `ecdsa + alloc + pem + pkcs8 + std`，`zpass-passkey`
+不再保留 `#![no_std]`（虽然源码顶仍可挂 attribute，只要不引 std API；但 `std` feature 是
+传递依赖、不会让我们意外用上）。spec/02 § 6 同步更新。
+
+> 后续 OQ：v2 评估是否值得自实现一个 ~100 行的最小 PKCS#8/SPKI 编解码以恢复 no_std。
+
+---
+
+## OQ-8：截图回归对比工具
 
 Phase G 要做 「与 Go 版本三屏截图对比」。手段：
 

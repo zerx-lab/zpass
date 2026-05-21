@@ -28,6 +28,14 @@ zpass-vault-store = { path = "../../crates/zpass-vault-store" }
 zpass-vault-service = { path = "../../crates/zpass-vault-service" }
 zpass-platform = { path = "../../crates/zpass-platform" }
 zpass-config = { path = "../../crates/zpass-config" }
+zpass-otp = { path = "../../crates/zpass-otp" }
+zpass-passkey = { path = "../../crates/zpass-passkey" }
+# 桌面层 services（Phase C）
+rfd.workspace = true
+rxing.workspace = true
+image.workspace = true
+arboard.workspace = true
+getrandom.workspace = true
 
 [dev-dependencies]
 zpass-vault-service = { path = "../../crates/zpass-vault-service", features = ["test-helpers"] }
