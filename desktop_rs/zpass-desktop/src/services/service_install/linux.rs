@@ -19,11 +19,15 @@ fn unit_path() -> Result<PathBuf, InstallError> {
             "$HOME not set",
         ))
     })?;
-    let dir = PathBuf::from(home)
-        .join(".config")
+    Ok(unit_path_under(PathBuf::from(home)))
+}
+
+/// 与 `unit_path` 同逻辑，但接受显式 home 路径（用于测试，避免 mutate env）。
+fn unit_path_under(home: PathBuf) -> PathBuf {
+    home.join(".config")
         .join("systemd")
-        .join("user");
-    Ok(dir.join(UNIT_FILENAME))
+        .join("user")
+        .join(UNIT_FILENAME)
 }
 
 fn render_unit(exe_path: &str) -> String {
@@ -112,11 +116,10 @@ mod tests {
 
     #[test]
     fn unit_path_under_xdg() {
-        // 让测试在没设 HOME 的 CI 上也能跑：set 一下再测路径形态。
-        unsafe {
-            std::env::set_var("HOME", "/tmp/zpass-test-home");
-        }
-        let p = unit_path().unwrap();
+        // reviewer finding #8：原版用 unsafe { set_var } mutate process env，在
+        // 并发测试下不可靠。改用 unit_path_under 显式注入 home 避免 env mutation。
+        let p = unit_path_under(PathBuf::from("/tmp/zpass-test-home"));
         assert!(p.ends_with("systemd/user/zpass-agent.service"));
+        assert!(p.starts_with("/tmp/zpass-test-home"));
     }
 }

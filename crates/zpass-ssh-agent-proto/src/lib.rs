@@ -285,6 +285,42 @@ mod tests {
         } else {
             panic!();
         }
+
+        // HelloReply（reviewer finding #5：覆盖 HMAC-bearing 变体）
+        let msg = AgentMessage::HelloReply {
+            nonce: [1u8; 32],
+            hmac: [2u8; 32],
+        };
+        let decoded = decode_frame(&encode_frame(&msg).unwrap()).unwrap();
+        if let AgentMessage::HelloReply { nonce, hmac } = decoded {
+            assert_eq!(nonce, [1u8; 32]);
+            assert_eq!(hmac, [2u8; 32]);
+        } else {
+            panic!();
+        }
+
+        // PushKeys
+        let msg = AgentMessage::PushKeys {
+            keys: alloc::vec![PublicKeyEntry {
+                item_id: "abc".into(),
+                blob: alloc::vec![9, 8, 7],
+                comment: "alice@host".into(),
+            }],
+        };
+        let decoded = decode_frame(&encode_frame(&msg).unwrap()).unwrap();
+        if let AgentMessage::PushKeys { keys } = decoded {
+            assert_eq!(keys.len(), 1);
+            assert_eq!(keys[0].item_id, "abc");
+            assert_eq!(keys[0].blob, alloc::vec![9, 8, 7]);
+            assert_eq!(keys[0].comment, "alice@host");
+        } else {
+            panic!();
+        }
+
+        // Bye
+        let msg = AgentMessage::Bye;
+        let decoded = decode_frame(&encode_frame(&msg).unwrap()).unwrap();
+        assert!(matches!(decoded, AgentMessage::Bye));
     }
 
     /// spec/08 § 8 mandatory: `hmac_token_constant_time`。

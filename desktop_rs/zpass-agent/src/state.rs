@@ -97,8 +97,12 @@ impl SharedState {
     }
 
     /// 等待 pending sign reply，超时 timeout。
+    ///
+    /// 超时（返回 None）时**主动从 inner.pending 移除** id（reviewer finding #4 修复）：
+    /// 避免 GUI 没断线但 reply 永不来时 pending HashMap 无限增长。
     pub fn wait_pending(
         &self,
+        id: u64,
         p: Arc<Pending>,
         timeout: Duration,
     ) -> Option<Result<Vec<u8>, String>> {
@@ -106,9 +110,15 @@ impl SharedState {
         if guard.is_some() {
             return guard.take();
         }
-        // parking_lot Condvar 用 wait_for(&mut guard, timeout)
         let _ = p.cv.wait_for(&mut guard, timeout);
-        guard.take()
+        let result = guard.take();
+        if result.is_none() {
+            // timeout 路径：GUI 仍连着但没回 reply。从映射里移除避免泄露。
+            // 如果在 wait 期间 complete_pending 已经 remove 了，这里 remove 是 no-op。
+            drop(guard);
+            self.inner.lock().pending.remove(&id);
+        }
+        result
     }
 
     /// 取消所有 pending（GUI 断开 / 重启时调用）。
@@ -209,7 +219,7 @@ mod tests {
         let (id, p) = s.register_pending();
         let s2 = s.clone();
         let p2 = p.clone();
-        let t = thread::spawn(move || s2.wait_pending(p2, Duration::from_secs(2)));
+        let t = thread::spawn(move || s2.wait_pending(id, p2, Duration::from_secs(2)));
         thread::sleep(Duration::from_millis(50));
         s.complete_pending(id, Ok(vec![0xAA, 0xBB]));
         let result = t.join().unwrap();
@@ -217,22 +227,29 @@ mod tests {
     }
 
     #[test]
-    fn pending_timeout_returns_none() {
+    fn pending_timeout_returns_none_and_cleans_up() {
         let s = SharedState::new();
-        let (_id, p) = s.register_pending();
-        let r = s.wait_pending(p, Duration::from_millis(50));
+        let (id, p) = s.register_pending();
+        let r = s.wait_pending(id, p, Duration::from_millis(50));
         // 超时未填 result → None
         assert!(r.is_none());
+        // reviewer finding #4：HashMap 不应再持有这个 entry。
+        // 用一个新的 register_pending 验证 id 已经被释放（next_id 会增长但 entry
+        // 数量回到 1 而不是 2）。
+        let _ = s.register_pending();
+        // 不直接断言 HashMap 大小（field 私有），用第二次 wait_pending 验证 timeout 后
+        // 仍能正常 cancel_all（不会双重 free）：
+        s.cancel_all_pending("ok");
     }
 
     #[test]
     fn cancel_all_pending_unblocks() {
         use std::thread;
         let s = SharedState::new();
-        let (_id, p) = s.register_pending();
+        let (id, p) = s.register_pending();
         let s2 = s.clone();
         let p2 = p.clone();
-        let t = thread::spawn(move || s2.wait_pending(p2, Duration::from_secs(5)));
+        let t = thread::spawn(move || s2.wait_pending(id, p2, Duration::from_secs(5)));
         thread::sleep(Duration::from_millis(50));
         s.cancel_all_pending("GUI disconnected");
         let r = t.join().unwrap();

@@ -110,7 +110,7 @@ fn handle_connection(
                     continue;
                 }
                 // 等 GUI 回 SignReply（最多 30s）
-                let result = state.wait_pending(pending, Duration::from_secs(30));
+                let result = state.wait_pending(request_id, pending, Duration::from_secs(30));
                 match result {
                     Some(Ok(sig)) => {
                         let resp = build_sign_response(&sig);

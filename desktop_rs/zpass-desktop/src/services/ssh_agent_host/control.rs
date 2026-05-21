@@ -7,12 +7,11 @@
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, anyhow};
-use parking_lot::Mutex;
 use zpass_ssh_agent_proto::{
     AgentMessage, AuditDecisionWire, AuditEntryWire, CapabilityToken, PublicKeyEntry, decode_frame,
     encode_frame,
@@ -27,17 +26,23 @@ use super::token::{control_sock_path, load_or_create_token, token_path};
 
 /// 启动 host 监听线程；调用者通常在 settings 屏 toggle ON 时调一次。
 ///
-/// 返回 `Ok(())` 表示线程已 detach 启动；进程退出时由 OS 回收。重复调用是安全的
-/// （bind 会失败，第二次调用直接退出）。
+/// 真正的幂等保证（reviewer finding #3 修复）：用 `OnceLock` 锁住"已启动"flag，
+/// 第二次调用直接 short-circuit，不会再删 socket / 不会再 spawn 线程。
 pub fn start_host_thread(
     vault: Arc<VaultService<SqliteVaultStore>>,
     state: SshHostState,
 ) -> Result<()> {
+    static STARTED: OnceLock<()> = OnceLock::new();
+    if STARTED.get().is_some() {
+        // 已经启动过；直接成功返回（UI 会通过 SshHostState 看到正确的状态）。
+        return Ok(());
+    }
     let token_p = token_path()?;
     let sock_p = control_sock_path()?;
     let token = load_or_create_token(&token_p)?;
-    // 删 stale sock（与 zpass-agent 一致）
+    // 第一次：删 stale sock（前一次进程崩了留下的），然后 spawn 唯一一个线程。
     let _ = std::fs::remove_file(&sock_p);
+    let _ = STARTED.set(());
 
     thread::spawn(move || {
         if let Err(e) = run_accept_loop(sock_p, token, vault, state) {
@@ -125,11 +130,7 @@ fn handle_agent(
     let keys = collect_ssh_public_keys(&vault);
     write_msg(&mut stream, &AgentMessage::PushKeys { keys })?;
 
-    // 4) 主循环：阻塞读，每条消息分发
-    // 用一个 mutex 包 stream 是为了将来若想从其它线程主动推 OpState/PushKeys 时可写。
-    // 当前实现里只 handle_agent 线程写，所以直接 borrow stream。
-    let _writer_lock: Arc<Mutex<()>> = Arc::new(Mutex::new(()));
-
+    // 主循环：阻塞读，每条消息分发。
     stream
         .set_read_timeout(Some(Duration::from_secs(300))) // 5min idle 后断
         .ok();
@@ -215,27 +216,48 @@ fn sign_for_agent(
     }
 }
 
-/// 用 OpenSSH 公钥 blob 在 vault 中找对应 SSH item。
+/// 提取 vault SSH item 的 public_key wire bytes。
 ///
-/// D3 实现：扫 list_items()，对每条 ssh 类型 item 比较 public_key 字段（OpenSSH wire blob）。
-/// 性能可接受（SSH key 数量典型 < 20）。
+/// 支持两种存储形态（reviewer finding #2 修复）：
+/// - `FieldValue::Bytes(b)` —— 直接 OpenSSH wire blob（vault 内部创建路径）
+/// - `FieldValue::Text(s)` —— OpenSSH 文本公钥 `"ssh-ed25519 AAAA... [comment]"`
+///   （JSON 导入路径，spec/13 § 3 把字符串映射成 Text）；用 ssh-key crate 解析
+///   为 wire bytes
+///
+/// **不**支持裸 base64（无算法前缀）形态：JSON 导入路径写入完整 OpenSSH 文本即可
+/// 命中路径 A；如果用户存裸 base64 需要在 import.rs 侧规范化。
+fn extract_pubkey_bytes(payload: &zpass_vault_format::ItemPayloadV1) -> Option<Vec<u8>> {
+    use ssh_encoding::Encode as _;
+    use zpass_vault_format::FieldValue;
+    match payload.fields.get("public_key") {
+        Some(FieldValue::Bytes(b)) => Some(b.clone()),
+        Some(FieldValue::Text(s)) => {
+            let trimmed = s.trim();
+            let pk = trimmed.parse::<ssh_key::PublicKey>().ok()?;
+            let mut wire = Vec::new();
+            pk.key_data().encode(&mut wire).ok()?;
+            Some(wire)
+        }
+        _ => None,
+    }
+}
+
+/// 用 OpenSSH 公钥 blob 在 vault 中找对应 SSH item。
 fn find_item_id_for_key_blob(
     vault: &VaultService<SqliteVaultStore>,
     blob: &[u8],
 ) -> Option<String> {
-    use zpass_vault_format::{FieldValue, ItemType};
+    use zpass_vault_format::ItemType;
     let summaries = vault.list_items().ok()?;
     for s in summaries {
         if s.r#type != ItemType::Ssh {
             continue;
         }
-        if let Ok(payload) = vault.get_item(&s.id) {
-            // public_key 在 vault 中存 base64 或 wire bytes —— 这里假设 Bytes 存 wire；
-            // 如果是 base64 Text，未来 D5 settings UI 应规范化。
-            match payload.fields.get("public_key") {
-                Some(FieldValue::Bytes(b)) if b == blob => return Some(s.id),
-                _ => {}
-            }
+        if let Ok(payload) = vault.get_item(&s.id)
+            && let Some(pk) = extract_pubkey_bytes(&payload)
+            && pk == blob
+        {
+            return Some(s.id);
         }
     }
     None
@@ -255,9 +277,8 @@ fn collect_ssh_public_keys(vault: &VaultService<SqliteVaultStore>) -> Vec<Public
         let Ok(payload) = vault.get_item(&s.id) else {
             continue;
         };
-        let blob = match payload.fields.get("public_key") {
-            Some(FieldValue::Bytes(b)) => b.clone(),
-            _ => continue,
+        let Some(blob) = extract_pubkey_bytes(&payload) else {
+            continue;
         };
         let comment = match payload.fields.get("comment") {
             Some(FieldValue::Text(c)) => c.clone(),

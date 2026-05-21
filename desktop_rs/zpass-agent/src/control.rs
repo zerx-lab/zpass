@@ -153,25 +153,60 @@ fn read_msg<R: Read>(r: &mut R) -> Result<AgentMessage> {
     decode_frame(&full).map_err(|e| anyhow!("decode: {e}"))
 }
 
-/// 非阻塞读取一帧；timeout 时返回 Ok(None)。
+/// 非阻塞读取一帧。timeout 且**没读到任何字节**时返回 Ok(None)；
+/// 如果读到了部分字节（partial header），则切换到阻塞模式把剩余字节读完，
+/// 避免流被切断后下一次 poll 把残字节当成新帧的头（reviewer 主要 finding #1）。
+///
+/// 注意：本函数假设输入流当前是「读超时短（200ms）」的非阻塞-like 设置。
+/// 我们用 `read()` 不是 `read_exact()`，以便区分"完全没读到"和"读了几个字节就超时"。
 fn try_read_msg<R: Read>(r: &mut R) -> Result<Option<AgentMessage>> {
     let mut len_buf = [0u8; 4];
-    match r.read_exact(&mut len_buf) {
-        Ok(()) => {}
-        Err(e)
-            if e.kind() == std::io::ErrorKind::WouldBlock
-                || e.kind() == std::io::ErrorKind::TimedOut =>
-        {
-            return Ok(None);
+    let mut got = 0usize;
+    // 第一次 read：可能 0 字节 = timeout（无消息），或部分字节 = 有 in-flight frame。
+    while got < 4 {
+        match r.read(&mut len_buf[got..]) {
+            Ok(0) => {
+                if got == 0 {
+                    return Err(anyhow!("EOF on length header"));
+                }
+                return Err(anyhow!("stream closed mid-header (read {got} of 4 bytes)"));
+            }
+            Ok(n) => got += n,
+            Err(e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                if got == 0 {
+                    // 真 idle：本轮无消息，让调用方下一轮再来。
+                    return Ok(None);
+                }
+                // partial：继续阻塞重试，**不**返回 Ok(None)（否则下次会把剩余字节
+                // 当作新 header 起点）。
+                continue;
+            }
+            Err(e) => return Err(anyhow!("read len: {e}")),
         }
-        Err(e) => return Err(anyhow!("read len: {e}")),
     }
     let len = u32::from_be_bytes(len_buf);
     if len > 16 * 1024 * 1024 {
         return Err(anyhow!("frame too large: {len}"));
     }
+    // body 读取：同样必须完整读完，timeout 算 partial 继续重试。
     let mut body = vec![0u8; len as usize];
-    r.read_exact(&mut body).context("read frame body")?;
+    let mut got = 0usize;
+    while got < body.len() {
+        match r.read(&mut body[got..]) {
+            Ok(0) => return Err(anyhow!("EOF on body (got {got} of {})", body.len())),
+            Ok(n) => got += n,
+            Err(e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                continue;
+            }
+            Err(e) => return Err(anyhow!("read body: {e}")),
+        }
+    }
     let mut full = Vec::with_capacity(4 + body.len());
     full.extend_from_slice(&len_buf);
     full.extend_from_slice(&body);
