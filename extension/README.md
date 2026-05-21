@@ -8,6 +8,8 @@ WXT-based browser extension for ZPass Desktop autofill.
 - Detects TOTP / one-time-code inputs and fills the current OTP from the
   matching ZPass login (see [TOTP autofill](#totp-autofill)).
 - Shows an inline ZPass fill button beside password / username / TOTP fields.
+- **Prompts to save / update credentials after a successful sign-in**
+  (see [Save-login prompt](#save-login-prompt)).
 - Queries ZPass Desktop through the browser native messaging protocol.
 - Lists only credentials whose saved URL host matches the current page host.
 - Reveals the password only after the user selects a matching login.
@@ -46,6 +48,38 @@ Manual test matrix:
 | Generic login form                                | Existing behaviour: username + password autofill, unchanged.     |
 | Sign-up form with `confirm password` field        | Not detected as TOTP, no spurious dropdown.                      |
 | Input named `recovery_code`                       | Not detected as TOTP (backup-code rule wins).                    |
+
+### Save-login prompt
+
+After the user submits a login form, the extension shows a bottom-right
+toast asking whether to save the new credentials to ZPass (or update the
+password on an existing match), mirroring the Bitwarden
+`notification.background` flow:
+
+| Page state                                                    | Toast shown                                                                                                                |
+|---------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------|
+| Submit form, vault has no matching username for the origin    | 「保存登录到 ZPass？」 with `[保存] [永不] [×]`                                                                                    |
+| Submit form, same username exists with a different password   | 「更新 ZPass 中的密码？」 with `[更新密码] [永不] [×]`                                                                             |
+| Account + password match an existing entry                    | (silent)                                                                                                                   |
+| Desktop offline                                               | (silent — the extension is inert without a connected desktop)                                                               |
+| Desktop online but vault locked                               | 「ZPass 已锁定」 with `[打开 ZPass] [稍后] [×]`; capture is queued in background and replayed after unlock                          |
+| Origin previously dismissed with 「永不」                            | (silent)                                                                                                                   |
+
+Detection signals (any of):
+
+- `form.submit`
+- Click on a submit button or any button whose text matches one of
+  `login` / `sign in` / `登录` / `登入` / ... (multi-language keyword list)
+- `Enter` pressed inside a password input
+- URL change (history navigation, SPA route change, `beforeunload` / `pagehide`)
+
+Forms with two or more `password` inputs are treated as sign-up / confirm-
+password pages and skipped (Bitwarden heuristic).
+
+New entries are stored as `Login` items with `name = page title`, `url = origin`,
+`username`, `password`. Updates preserve every other field and only replace
+`password`. The 「永不」 ignore list is persisted at
+`~/.config/zpass/zpass.browser-save-ignored.json`.
 
 ## Native Messaging Host
 

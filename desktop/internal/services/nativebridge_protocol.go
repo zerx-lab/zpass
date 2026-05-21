@@ -149,6 +149,55 @@ type passkeyDeleteResult struct {
 	ItemID  string `json:"itemId"`
 }
 
+// saveLoginRequest —— 浏览器扩展捕获到的新 / 更新登录凭据。
+//
+// 行为对齐 Bitwarden NotificationBackground：
+//   - origin / url 已通过 background 注入，content-script 不能伪造；
+//   - username + password 在 background 已校验非空、且不在 ignore 清单；
+//   - itemId 可选：传了 = 更新现有条目密码；未传 = 创建新 login 条目。
+type saveLoginRequest struct {
+	pageContext
+	ItemID   string `json:"itemId"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+	// Name 由扩展侧生成（页面 title 或域名），可空 → 后端用 host 兜底。
+	Name string `json:"name"`
+}
+
+// saveLoginDecision —— captureLogin 评估结果。
+//
+// content-script 拿这个结果决定弹哪种 toast：
+//   - status="locked" → 弹 "解锁" toast，并把 capture 留在 background 等解锁后回放；
+//   - status="new"    → 弹 "保存" toast；
+//   - status="update" → 弹 "更新密码" toast，带匹配的 itemId/itemName；
+//   - status="none"   → 安静，不弹（已匹配 / 在 ignore 清单 / 已 disabled 等）。
+type saveLoginDecision struct {
+	Status   string `json:"status"`
+	Origin   string `json:"origin"`
+	ItemID   string `json:"itemId,omitempty"`
+	ItemName string `json:"itemName,omitempty"`
+	Reason   string `json:"reason,omitempty"`
+}
+
+// captureLoginRequest —— 浏览器扩展把捕获到的凭据先发给 background
+// 评估（不入库），background 再返决策给 content-script 决定弹哪种提示。
+type captureLoginRequest struct {
+	pageContext
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+// ignoreSaveOriginRequest —— 用户点击保存 toast 的 "Never" 时上报。
+type ignoreSaveOriginRequest struct {
+	pageContext
+}
+
+// saveLoginResult —— saveLogin 成功后返给扩展的简要回执。
+type saveLoginResult struct {
+	ItemID  string `json:"itemId"`
+	Created bool   `json:"created"`
+}
+
 func handleNativeVault(vault *VaultService, msg nativeEnvelope) nativeResponse {
 	resp := nativeResponse{ID: msg.ID}
 	result, err := dispatchNativeVault(vault, msg)
@@ -211,6 +260,24 @@ func dispatchNativeVault(vault *VaultService, msg nativeEnvelope) (any, error) {
 			return nil, errors.New("Invalid totp request.")
 		}
 		return generateLoginTotp(vault, req)
+	case "captureLogin":
+		var req captureLoginRequest
+		if err := json.Unmarshal(nonNullPayload(msg.Payload), &req); err != nil {
+			return nil, errors.New("Invalid capture request.")
+		}
+		return evaluateCaptureLogin(vault, req)
+	case "saveLogin":
+		var req saveLoginRequest
+		if err := json.Unmarshal(nonNullPayload(msg.Payload), &req); err != nil {
+			return nil, errors.New("Invalid save request.")
+		}
+		return saveLogin(vault, req)
+	case "ignoreSaveOrigin":
+		var req ignoreSaveOriginRequest
+		if err := json.Unmarshal(nonNullPayload(msg.Payload), &req); err != nil {
+			return nil, errors.New("Invalid ignore-origin request.")
+		}
+		return ignoreSaveOrigin(req)
 	default:
 		return nil, fmt.Errorf("Unknown native request: %s", msg.Type)
 	}
@@ -365,6 +432,160 @@ func generateLoginTotp(vault *VaultService, req generateLoginTotpRequest) (*logi
 		Algorithm: code.Algorithm,
 		Digits:    code.Digits,
 	}, nil
+}
+
+// evaluateCaptureLogin 评估浏览器捕获的一次登录应弹哪种 toast。
+//
+// 返回 saveLoginDecision 中的 status：
+//   - "none"   —— 跳过（origin 非法 / username 或 password 为空 / 在 ignore 清单 / 已存在且密码一致）
+//   - "locked" —— vault 锁定，让 background 告知用户并在解锁后重试
+//   - "new"    —— 可以弹「保存」
+//   - "update" —— 同用名但密码不同，matched itemId
+//
+// 该函数不写 vault：只读 queryLogins + revealLogin 做判重。实际保存/
+// 更新走后续 saveLogin RPC。
+func evaluateCaptureLogin(vault *VaultService, req captureLoginRequest) (*saveLoginDecision, error) {
+	origin, err := parseSafeOrigin(req.pageContext)
+	if err != nil {
+		return &saveLoginDecision{Status: "none", Reason: err.Error()}, nil
+	}
+	originStr := origin.String()
+
+	username := strings.TrimSpace(req.Username)
+	password := req.Password
+	if username == "" || password == "" {
+		return &saveLoginDecision{Status: "none", Origin: originStr, Reason: "empty credentials"}, nil
+	}
+
+	if IsBrowserSaveIgnored(originStr) {
+		return &saveLoginDecision{Status: "none", Origin: originStr, Reason: "origin ignored"}, nil
+	}
+
+	if !vault.IsUnlocked() {
+		// vault 锁定 —— 告诉 background 弹锁定 toast。background 会把
+		// capture 留在内存中等解锁后重评 (lockedWaiterRegistry)。
+		return &saveLoginDecision{Status: "locked", Origin: originStr}, nil
+	}
+
+	// 走一遍同 origin 的现有条目，看是否同用名 → 需要 update
+	summaries, err := vault.ListItems()
+	if err != nil {
+		if errors.Is(err, ErrVaultLocked) {
+			return &saveLoginDecision{Status: "locked", Origin: originStr}, nil
+		}
+		return nil, errors.New("Unable to read ZPass vault.")
+	}
+	for _, summary := range summaries {
+		if summary.Type != ItemTypeLogin {
+			continue
+		}
+		item, err := vault.GetItem(summary.ID)
+		if err != nil || item == nil || !itemMatchesOrigin(item, origin) {
+			continue
+		}
+		existingUsername := nativeFieldString(item.Fields, "username", "email", "login", "account")
+		if !strings.EqualFold(existingUsername, username) {
+			continue
+		}
+		existingPassword := nativeFieldString(item.Fields, "password")
+		if existingPassword == password {
+			// 账密都一致 → 不需任何 prompt
+			return &saveLoginDecision{Status: "none", Origin: originStr, Reason: "already saved"}, nil
+		}
+		// 同用名但密码变了 → update prompt
+		return &saveLoginDecision{
+			Status:   "update",
+			Origin:   originStr,
+			ItemID:   item.ID,
+			ItemName: item.Name,
+		}, nil
+	}
+
+	// 同 origin 下没有该 username，提示新建
+	return &saveLoginDecision{Status: "new", Origin: originStr}, nil
+}
+
+// saveLogin 创建或更新一个 login 条目。
+//
+//   - req.ItemID == ""：以 host 为 name 创建新条目、写入 url=origin。
+//   - req.ItemID != ""：读出现有条目，只更新 password 字段（保留
+//     name / url / notes / totp 等其他字段不动）。
+//
+// origin 必须合法。vault 必须解锁——锁定时 returns "Unlock ZPass
+// Desktop to save this login." 让 background 走锁定分支。
+func saveLogin(vault *VaultService, req saveLoginRequest) (*saveLoginResult, error) {
+	origin, err := parseSafeOrigin(req.pageContext)
+	if err != nil {
+		return nil, err
+	}
+	username := strings.TrimSpace(req.Username)
+	password := req.Password
+	if username == "" || password == "" {
+		return nil, errors.New("Username and password are required.")
+	}
+	if !vault.IsUnlocked() {
+		return nil, errors.New("Unlock ZPass Desktop to save this login.")
+	}
+
+	if req.ItemID != "" {
+		// 更新分支：读出原条目→合并 fields→UpdateItem
+		existing, err := vault.GetItem(req.ItemID)
+		if err != nil {
+			if errors.Is(err, ErrVaultLocked) {
+				return nil, errors.New("Unlock ZPass Desktop to save this login.")
+			}
+			return nil, errors.New("Unable to read this ZPass login.")
+		}
+		if existing == nil || existing.Type != ItemTypeLogin {
+			return nil, errors.New("This ZPass item cannot be updated.")
+		}
+		if !itemMatchesOrigin(existing, origin) {
+			// 防越权：不能拿 content-script 传的任意 itemId 去改别的站点凭据。
+			return nil, errors.New("This ZPass item does not match the current site.")
+		}
+		existing.Fields["password"] = password
+		// username 不动 —— evaluateCaptureLogin 已验证 username 完全匹配，仅是密码变了。
+		if _, err := vault.UpdateItem(*existing); err != nil {
+			return nil, errors.New("Unable to update this ZPass login.")
+		}
+		return &saveLoginResult{ItemID: existing.ID, Created: false}, nil
+	}
+
+	// 创建分支
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = origin.Hostname()
+	}
+	payload := ItemPayload{
+		Type: ItemTypeLogin,
+		Name: name,
+		Fields: map[string]any{
+			"username": username,
+			"password": password,
+			"url":      origin.String(),
+		},
+	}
+	summary, err := vault.CreateItem(payload)
+	if err != nil {
+		if errors.Is(err, ErrVaultLocked) {
+			return nil, errors.New("Unlock ZPass Desktop to save this login.")
+		}
+		return nil, errors.New("Unable to save this ZPass login.")
+	}
+	return &saveLoginResult{ItemID: summary.ID, Created: true}, nil
+}
+
+// ignoreSaveOrigin 把当前 origin 加入 "永不提示保存" 清单。不要求 vault 解锁——
+// 清单是明文配置文件，不在 vault 内。
+func ignoreSaveOrigin(req ignoreSaveOriginRequest) (map[string]any, error) {
+	origin, err := parseSafeOrigin(req.pageContext)
+	if err != nil {
+		return nil, err
+	}
+	if err := AddBrowserSaveIgnoreOrigin(origin.String()); err != nil {
+		return nil, errors.New("Unable to save the ignore list.")
+	}
+	return map[string]any{"ignored": true, "origin": origin.String()}, nil
 }
 
 func nativeListPasskeys(vault *VaultService, req passkeyListRequest) (*passkeyListResult, error) {

@@ -17,7 +17,10 @@ export interface ExtensionRequest {
     | "zpass.passkeyCreate"
     | "zpass.passkeySign"
     | "zpass.passkeyDelete"
-    | "zpass.generateLoginTotp";
+    | "zpass.generateLoginTotp"
+    | "zpass.captureLogin"
+    | "zpass.saveLogin"
+    | "zpass.ignoreSaveOrigin";
   itemId?: string;
   payload?: unknown;
 }
@@ -40,7 +43,10 @@ export interface NativeRequest<TPayload = unknown> {
     | "passkeyCreate"
     | "passkeySign"
     | "passkeyDelete"
-    | "generateLoginTotp";
+    | "generateLoginTotp"
+    | "captureLogin"
+    | "saveLogin"
+    | "ignoreSaveOrigin";
   payload?: TPayload;
 }
 
@@ -252,6 +258,54 @@ export interface PasskeyAssertion {
   signature: string;
   signCount: number;
 }
+
+/* ============================================================================
+ * 以下是「登录后提示保存/更新」功能的 wire types。
+ * ========================================================================== */
+
+/**
+ * captureLogin 请求负载——扩展捕获到提交后发给 background 评估。
+ *
+ * background 负责注入 origin / url，content-script 不能伪造。
+ */
+export interface CaptureLoginRequest extends PageContext {
+  username: string;
+  password: string;
+}
+
+/**
+ * captureLogin 评估结果。与 desktop saveLoginDecision 严格对齐。
+ *
+ *  - "none"   —— 不弹任何提示（已存在 / origin 被 ignore / 账密为空 / 越权 等）
+ *  - "locked" —— vault 锁定。提示用户解锁，并在 background 里留住 capture。
+ *  - "new"    —— 可弹「保存」 toast。
+ *  - "update" —— 同 origin + 同 username，密码变了；itemId/itemName 带回。
+ */
+export interface SaveLoginDecision {
+  status: "none" | "locked" | "new" | "update";
+  origin: string;
+  itemId?: string;
+  itemName?: string;
+  reason?: string;
+}
+
+/** saveLogin 请求负载。itemId 可选：留空 = 创建新条目；带值 = 更新密码。 */
+export interface SaveLoginRequest extends PageContext {
+  itemId?: string;
+  username: string;
+  password: string;
+  /** 页面 title 或 hostname，作为新建条目的名称；后端用 host 兜底。 */
+  name?: string;
+}
+
+/** saveLogin 成功后的回执。 */
+export interface SaveLoginResult {
+  itemId: string;
+  created: boolean;
+}
+
+/** ignoreSaveOrigin 请求负载——限在 PageContext，不需额外字段。 */
+export type IgnoreSaveOriginRequest = PageContext;
 
 export function getHttpOrigin(url: string): string | null {
   try {

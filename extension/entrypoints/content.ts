@@ -24,6 +24,7 @@ import {
   type LoginForm,
 } from "../src/content/forms";
 import { isTotpCandidate } from "../src/content/totp-fields";
+import { installLoginCapture } from "../src/content/capture-login";
 
 export default defineContentScript({
   matches: ["http://*/*", "https://*/*"],
@@ -31,6 +32,10 @@ export default defineContentScript({
   runAt: "document_idle",
   main() {
     const controller = new AutofillController();
+
+    // 安装「提交后提示保存」捕获器。该模块自己负责 input/click/keydown/submit
+    // 等事件委托，与 AutofillController 的各个监听独立不冲突。
+    installLoginCapture();
 
     // 窗口 scroll / resize 时同步按钮位置（仅在按钮可见时重定位）
     window.addEventListener("scroll", () => controller.repositionIfVisible(), {

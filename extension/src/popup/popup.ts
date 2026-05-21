@@ -8,6 +8,7 @@ import type {
 } from "../shared/messages";
 import {
   alertIcon,
+  asterisksIcon,
   checkIcon,
   copyIcon,
   keyIcon,
@@ -16,6 +17,7 @@ import {
   refreshIcon,
   searchIcon,
   shieldIcon,
+  userIcon,
   zMatrixIcon,
 } from "../shared/icons";
 import { el } from "../shared/dom";
@@ -674,7 +676,12 @@ function renderLoginRow(item: LoginSummary): HTMLElement {
         class: "zp-row-actions",
         children: [
           item.username
-            ? miniCopyButton("复制用户名", item.username, "已复制用户名")
+            ? miniCopyButton(
+                "复制用户名",
+                item.username,
+                "已复制用户名",
+                userIcon(13),
+              )
             : null,
           item.hasPassword ? miniRevealPasswordButton(item) : null,
           item.hasTotp ? miniRevealTotpButton(item) : null,
@@ -764,25 +771,27 @@ function miniCopyButton(
   label: string,
   value: string,
   toast: string,
+  iconHtml: string = copyIcon(13),
 ): HTMLElement {
   const button = el("button", {
     class: "zp-mini-btn",
     attrs: { type: "button", "aria-label": label, title: label },
-    html: copyIcon(13),
+    html: iconHtml,
   });
   button.addEventListener("click", async (event) => {
     event.stopPropagation();
     await copyToClipboard(value, toast);
-    flashCopied(button);
+    flashCopied(button, iconHtml);
   });
   return button;
 }
 
 function miniRevealPasswordButton(item: LoginSummary): HTMLElement {
+  const iconHtml = asterisksIcon(13);
   const button = el("button", {
     class: "zp-mini-btn",
     attrs: { type: "button", "aria-label": "复制密码", title: "复制密码" },
-    html: copyIcon(13),
+    html: iconHtml,
   });
   button.addEventListener("click", async (event) => {
     event.stopPropagation();
@@ -797,7 +806,7 @@ function miniRevealPasswordButton(item: LoginSummary): HTMLElement {
       return;
     }
     await copyToClipboard(response.result.password, "已复制密码");
-    flashCopied(button);
+    flashCopied(button, iconHtml);
   });
   return button;
 }
@@ -807,10 +816,11 @@ function miniRevealPasswordButton(item: LoginSummary): HTMLElement {
  * 获取现场潮。点击不关闭 popup（跟「复制密码」一致）。
  */
 function miniRevealTotpButton(item: LoginSummary): HTMLElement {
+  const iconHtml = clockIcon(13);
   const button = el("button", {
     class: "zp-mini-btn",
     attrs: { type: "button", "aria-label": "复制验证码", title: "复制验证码" },
-    html: clockIcon(13),
+    html: iconHtml,
   });
   button.addEventListener("click", async (event) => {
     event.stopPropagation();
@@ -827,7 +837,7 @@ function miniRevealTotpButton(item: LoginSummary): HTMLElement {
       return;
     }
     await copyToClipboard(response.result.code, "已复制验证码");
-    flashCopied(button);
+    flashCopied(button, iconHtml);
   });
   return button;
 }
@@ -840,11 +850,11 @@ function clockIcon(size = 13): string {
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`;
 }
 
-function flashCopied(button: HTMLElement): void {
+function flashCopied(button: HTMLElement, originalIconHtml: string): void {
   button.innerHTML = checkIcon(13);
   button.setAttribute("data-copied", "true");
   window.setTimeout(() => {
-    button.innerHTML = copyIcon(13);
+    button.innerHTML = originalIconHtml;
     button.removeAttribute("data-copied");
   }, 1400);
 }

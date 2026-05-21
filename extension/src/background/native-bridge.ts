@@ -1,6 +1,8 @@
 import {
   NATIVE_HOST_NAME,
+  type CaptureLoginRequest,
   type GenerateLoginTotpRequest,
+  type IgnoreSaveOriginRequest,
   type LaunchDesktopResult,
   type LoginSecret,
   type LoginTotpCode,
@@ -18,6 +20,9 @@ import {
   type PingResult,
   type QueryLoginsResult,
   type RevealLoginRequest,
+  type SaveLoginDecision,
+  type SaveLoginRequest,
+  type SaveLoginResult,
   type VaultStatus,
 } from "../shared/messages";
 
@@ -81,6 +86,20 @@ export class NativeBridge {
     payload: GenerateLoginTotpRequest,
   ): Promise<LoginTotpCode> {
     return this.send("generateLoginTotp", payload);
+  }
+
+  async captureLogin(payload: CaptureLoginRequest): Promise<SaveLoginDecision> {
+    return this.send("captureLogin", payload);
+  }
+
+  async saveLogin(payload: SaveLoginRequest): Promise<SaveLoginResult> {
+    return this.send("saveLogin", payload);
+  }
+
+  async ignoreSaveOrigin(
+    payload: IgnoreSaveOriginRequest,
+  ): Promise<{ ignored: boolean; origin: string }> {
+    return this.send("ignoreSaveOrigin", payload);
   }
 
   private send<TResult, TPayload = unknown>(
