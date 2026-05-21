@@ -21,7 +21,5 @@ mod signer;
 mod state;
 mod token;
 
-#[allow(unused_imports)]
 pub use control::start_host_thread;
-#[allow(unused_imports)]
 pub use state::SshHostState;

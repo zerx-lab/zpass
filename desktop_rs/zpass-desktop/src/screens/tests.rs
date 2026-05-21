@@ -69,6 +69,7 @@ fn setup(cx: &mut TestAppContext) -> Arc<VaultHandle> {
             vault: vault.clone(),
             locale: i18n::Locale::En,
             theme: Theme::dark(),
+            ssh_host: crate::services::ssh_agent_host::SshHostState::new(),
         });
         gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
         vault

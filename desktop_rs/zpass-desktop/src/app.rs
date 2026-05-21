@@ -14,13 +14,15 @@ use gpui_component::{ActiveTheme as _, Root, ThemeMode};
 
 use crate::i18n;
 use crate::screens::{
-    GeneratorView, ImportExportView, OnboardingView, TotpView, UnlockView, VaultView, WelcomeView,
+    GeneratorView, ImportExportView, OnboardingView, SshAgentView, TotpView, UnlockView, VaultView,
+    WelcomeView,
 };
+use crate::services::ssh_agent_host::SshHostState;
 use crate::services::vault::{VaultHandle, open_default_vault};
 use crate::theme::Theme;
 use crate::widgets::sidebar::{NavTarget, sidebar};
 
-/// 高层屏幕枚举。Phase C 终态 7 个屏（其中 3 个由 sidebar 触达）。
+/// 高层屏幕枚举。Phase D 终态 8 个屏（其中 5 个由 sidebar 触达）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
     Welcome,
@@ -30,6 +32,7 @@ pub enum Screen {
     Totp,
     Generator,
     ImportExport,
+    SshAgent,
 }
 
 impl Screen {
@@ -37,7 +40,11 @@ impl Screen {
     pub fn is_top_level(&self) -> bool {
         matches!(
             self,
-            Screen::Vault | Screen::Totp | Screen::Generator | Screen::ImportExport
+            Screen::Vault
+                | Screen::Totp
+                | Screen::Generator
+                | Screen::ImportExport
+                | Screen::SshAgent
         )
     }
 }
@@ -52,6 +59,7 @@ pub enum RouteIntent {
     GoTotp,
     GoGenerator,
     GoImportExport,
+    GoSshAgent,
     /// 锁定 vault（vault 屏「锁定」按钮）。
     LockVault,
 }
@@ -65,6 +73,7 @@ pub struct AppState {
     pub vault: Arc<VaultHandle>,
     pub locale: i18n::Locale,
     pub theme: Theme,
+    pub ssh_host: SshHostState,
 }
 
 impl gpui::Global for AppState {}
@@ -126,11 +135,13 @@ pub struct WorkspaceView {
     totp: Entity<TotpView>,
     generator: Entity<GeneratorView>,
     import_export: Entity<ImportExportView>,
+    ssh_agent: Entity<SshAgentView>,
 }
 
 impl WorkspaceView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>, vault: Arc<VaultHandle>) -> Self {
         let initial = initial_screen(&vault);
+        let ssh_host = cx.global::<AppState>().ssh_host.clone();
         let welcome = cx.new(|cx| WelcomeView::new(cx, vault.clone()));
         let onboarding = cx.new(|cx| OnboardingView::new(window, cx, vault.clone()));
         let unlock = cx.new(|cx| UnlockView::new(window, cx, vault.clone()));
@@ -138,6 +149,7 @@ impl WorkspaceView {
         let totp = cx.new(|cx| TotpView::new(cx, vault.clone()));
         let generator = cx.new(|cx| GeneratorView::new(window, cx));
         let import_export = cx.new(|cx| ImportExportView::new(cx, vault.clone()));
+        let ssh_agent = cx.new(|cx| SshAgentView::new(cx, vault.clone(), ssh_host));
         Self {
             screen: initial,
             welcome,
@@ -147,6 +159,7 @@ impl WorkspaceView {
             totp,
             generator,
             import_export,
+            ssh_agent,
         }
     }
 
@@ -159,6 +172,7 @@ impl WorkspaceView {
             RouteIntent::GoTotp => self.screen = Screen::Totp,
             RouteIntent::GoGenerator => self.screen = Screen::Generator,
             RouteIntent::GoImportExport => self.screen = Screen::ImportExport,
+            RouteIntent::GoSshAgent => self.screen = Screen::SshAgent,
             RouteIntent::LockVault => {
                 let vault = cx.global::<AppState>().vault.clone();
                 let _ = vault.service().lock();
@@ -185,6 +199,7 @@ impl Render for WorkspaceView {
             Screen::Totp => self.totp.clone().into(),
             Screen::Generator => self.generator.clone().into(),
             Screen::ImportExport => self.import_export.clone().into(),
+            Screen::SshAgent => self.ssh_agent.clone().into(),
         };
 
         // notification layer 由 Root 渲染；本视图只负责 titlebar + 当前屏。
@@ -197,6 +212,7 @@ impl Render for WorkspaceView {
             Screen::Totp => Some(NavTarget::Totp),
             Screen::Generator => Some(NavTarget::Generator),
             Screen::ImportExport => Some(NavTarget::ImportExport),
+            Screen::SshAgent => Some(NavTarget::SshAgent),
             _ => None,
         };
 
@@ -258,6 +274,7 @@ pub fn launch(cx: &mut App) {
         vault: vault.clone(),
         locale,
         theme: Theme::dark(),
+        ssh_host: SshHostState::new(),
     });
     gpui_component::Theme::change(ThemeMode::Dark, None, cx);
 
