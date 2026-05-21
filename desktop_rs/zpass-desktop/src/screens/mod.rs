@@ -3,6 +3,7 @@
 mod generator;
 mod import_export;
 mod onboarding;
+mod ssh_agent;
 mod totp;
 mod unlock;
 mod vault;
@@ -11,6 +12,7 @@ mod welcome;
 pub use generator::GeneratorView;
 pub use import_export::ImportExportView;
 pub use onboarding::OnboardingView;
+pub use ssh_agent::SshAgentView;
 pub use totp::TotpView;
 pub use unlock::UnlockView;
 pub use vault::VaultView;

@@ -18,4 +18,10 @@ pub mod otp;
 pub mod passkey;
 #[allow(dead_code)]
 pub mod qr;
+// Phase D：SSH agent 控制通道 server。D5 screens/ssh_agent.rs 消费。
+pub mod ssh_agent_host;
+// Phase D：系统服务安装（Linux user systemd / Windows ScheduledTask stub / macOS stub）。
+// 当前 D6 部分接入；UI 调用点在 D7 的设置 UI 续作。
+#[allow(dead_code)]
+pub mod service_install;
 pub mod vault;

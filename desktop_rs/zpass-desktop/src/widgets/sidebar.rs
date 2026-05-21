@@ -21,6 +21,7 @@ pub enum NavTarget {
     Totp,
     Generator,
     ImportExport,
+    SshAgent,
 }
 
 impl NavTarget {
@@ -30,6 +31,7 @@ impl NavTarget {
             NavTarget::Totp => "nav.totp",
             NavTarget::Generator => "nav.generator",
             NavTarget::ImportExport => "nav.importExport",
+            NavTarget::SshAgent => "nav.sshAgent",
         }
     }
     /// 单字符 icon 占位（design/src 用 Lucide；此处暂用 Unicode 字符直到接入 svg）。
@@ -39,6 +41,7 @@ impl NavTarget {
             NavTarget::Totp => "⏱",
             NavTarget::Generator => "⚡",
             NavTarget::ImportExport => "↔",
+            NavTarget::SshAgent => "🔑",
         }
     }
     pub fn intent(self) -> RouteIntent {
@@ -47,6 +50,7 @@ impl NavTarget {
             NavTarget::Totp => RouteIntent::GoTotp,
             NavTarget::Generator => RouteIntent::GoGenerator,
             NavTarget::ImportExport => RouteIntent::GoImportExport,
+            NavTarget::SshAgent => RouteIntent::GoSshAgent,
         }
     }
 }
@@ -56,6 +60,7 @@ const TARGETS: &[NavTarget] = &[
     NavTarget::Totp,
     NavTarget::Generator,
     NavTarget::ImportExport,
+    NavTarget::SshAgent,
 ];
 
 /// 渲染左侧 sidebar；`active` 是当前活动 target（用来高亮）。

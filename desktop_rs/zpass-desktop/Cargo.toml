@@ -30,12 +30,17 @@ zpass-platform = { path = "../../crates/zpass-platform" }
 zpass-config = { path = "../../crates/zpass-config" }
 zpass-otp = { path = "../../crates/zpass-otp" }
 zpass-passkey = { path = "../../crates/zpass-passkey" }
+zpass-ssh-agent-proto = { path = "../../crates/zpass-ssh-agent-proto" }
 # 桌面层 services（Phase C）
 rfd.workspace = true
 rxing.workspace = true
 image.workspace = true
 arboard.workspace = true
 getrandom.workspace = true
+ssh-key.workspace = true
+ssh-encoding.workspace = true
+# ssh-key 的 Signer<Signature> impl 来自 signature crate；ssh-key 没 re-export 它。
+signature = "2"
 
 [dev-dependencies]
 zpass-vault-service = { path = "../../crates/zpass-vault-service", features = ["test-helpers"] }
