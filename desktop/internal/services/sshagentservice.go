@@ -100,6 +100,13 @@ type SshAgentStatus struct {
 	// false = 用户需要或 systemd / launchd 管理 agent
 	AgentSupervised bool `json:"agentSupervised"`
 
+	// AgentManagedBySystem agent 是否由系统服务管理器接管
+	//
+	// true 表示：Linux 上 systemd user unit 装了、启用了、健康中；Windows 上
+	// Scheduled Task 装了、启用中。这时 GUI 不拉 supervisor，为 true 同时
+	// AgentSupervised 为 false。前端可以据此展示「后台常驻，GUI 退也不影响 ssh」。
+	AgentManagedBySystem bool `json:"agentManagedBySystem"`
+
 	// SocketPath SSH 客户端要 connect 的 agent socket 路径
 	//
 	// 用户需要把它设到 SSH_AUTH_SOCK 环境变量。前端提供「一键复制」按钮。
@@ -248,16 +255,20 @@ func (s *SshAgentService) Status() (SshAgentStatus, error) {
 		return SshAgentStatus{}, fmt.Errorf("resolve control socket: %w", err)
 	}
 
+	// systemctl 查询会 fork 进程，不能拿主锁时等——在上锁前算完。
+	managedBySystem := s.systemServiceHealthyForActivation()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	st := SshAgentStatus{
-		Enabled:         s.listener != nil,
-		AgentConnected:  s.activeConn != nil,
-		AgentSupervised: s.supervisor != nil && s.supervisor.IsRunning(),
-		SocketPath:      socketPath,
-		ControlPath:     controlPath,
-		AgentBinaryPath: s.agentBinaryPath,
+		Enabled:              s.listener != nil,
+		AgentConnected:       s.activeConn != nil,
+		AgentSupervised:      s.supervisor != nil && s.supervisor.IsRunning(),
+		AgentManagedBySystem: managedBySystem,
+		SocketPath:           socketPath,
+		ControlPath:          controlPath,
+		AgentBinaryPath:      s.agentBinaryPath,
 	}
 	if s.activeConn != nil {
 		st.KeyCount = s.activeConn.lastPushedKeyCount()
@@ -286,6 +297,9 @@ func (s *SshAgentService) Enable() error {
 		if err := writeSshAgentDesiredEnabled(true); err != nil {
 			return fmt.Errorf("persist SSH agent preference: %w", err)
 		}
+		// 幂等路径上也要检一下系统服务状态：可能上次 GUI 启动后 systemd unit
+		// 被外部改坏了（手动编辑、升级后 binary 路径变了等）。goroutine 里跳到
+		// autoInstallSystemServiceOnEnable，它会接着检查 "装了但不健康" 并 log。
 		go s.autoInstallSystemServiceOnEnable()
 		return nil
 	}
@@ -341,20 +355,25 @@ func (s *SshAgentService) Enable() error {
 		return fmt.Errorf("persist SSH agent preference: %w", err)
 	}
 
-	// ----- 启动 agent 子进程（如果能定位到 binary 且 agent 尚未在跑）-----
+	// ----- 启动 agent 子进程（根据 systemd 接管状态决定是否由我们拉起）-----
 	//
-	// supervisor 是「代理」agent 进程的可选能力：
-	//   - 能定位 binary → 拉起子进程，用户「开即用」
-	//   - 定位不到 → log warn 但 listener 仍正常运行，用户可以手动跑
-	//     zpass-agent（或未来通过 systemd / launchd 启动）
+	// 三条互斥路径：
 	//
-	// 不让「定位不到」阻止 Enable 成功：那会让用户看到「启用失败」报错
-	// 但其实 listener 是可以跑的，反而让他们迷惑。
+	//   A. systemd 服务已被接管且健康
+	//      → 跳过 supervisor，让 systemd 按需拉起 agent。
+	//      避免「systemd socket + supervisor 同时 listen 同一路径」的 fd 抢占。
 	//
-	// 「跨 GUI 重启」路径：当上一个 GUI 退出时 Shutdown 是 Detach 了 supervisor
-	// （不杀 agent 子进程），本次 Enable 时检测 agent socket 还活 → 跳过
-	// supervisor.Start()，让旧 agent 的 controlClient 重连机制接管。详见
-	// sshagentprobe.go 文件头注释。
+	//   B. 旧 agent 进程还活在（跨 GUI 重启路径）
+	//      → 跳过 supervisor，让旧 agent 的 controlClient 重连机制接管。
+	//
+	//   C. systemd 不接管 / 不健康，且没旧 agent
+	//      → supervisor 拉起 zpass-agent 子进程。
+	//
+	// 「不健康」场景重点防范：systemd socket unit 抢了 socket fd 但 service
+	// unit 起不来（错误配置 / binary 缺失 / sandbox 拒绝）。这时如果照原
+	// 逻辑「只要系统服务装了就 supervisor 跳过」，ssh 客户端会 connect 到
+	// systemd 那个 fd 但永远启动不了 service，挂住。为避免这个死锁，本处
+	// 检测不健康时主动 uninstall systemd 单元让位给 supervisor。
 	binPath, locErr := locateAgentBinary()
 	if locErr != nil {
 		s.logger.Warn("agent binary not located; supervisor not started",
@@ -369,13 +388,26 @@ func (s *SshAgentService) Enable() error {
 				s.logger.Warn("install/start Windows scheduled task failed", "err", err)
 			}
 		}
-		if isAgentAlreadyRunning() {
-			// 旧 agent 进程在跑 —— 不拉新进程，避免 named pipe / socket
-			// 冲突。旧 agent 会通过 controlClient 重连机制主动连到
-			// 本进程刚启动的 control listener（反重连退避 1->2->5->10s）。
+
+		switch {
+		case isAgentAlreadyRunning():
+			// 路径 B：旧 agent 进程在跑 —— 不拉新进程，避免 named pipe / socket
+			// 冲突。旧 agent 会通过 controlClient 重连机制主动连到本进程刚启动的
+			// control listener（反重连退避 1->2->5->10s）。
 			s.logger.Info("existing agent detected; skipping supervisor start",
 				"socket", controlPath)
-		} else {
+
+		case s.systemServiceHealthyForActivation():
+			// 路径 A：systemd 接管中且健康，仅走 socket activation。
+			// supervisor 不拉 agent —— 避免两个 listener 争抢同一 socket fd。
+			s.logger.Info("system service is healthy; deferring to systemd socket activation",
+				"socket", controlPath)
+
+		default:
+			// 路径 C：systemd 不健康或未装 —— supervisor 拉起。
+			// 如果 systemd 装了但不健康（fd 抢占场景），先 uninstall 让位。
+			s.maybeUninstallUnhealthySystemService()
+
 			s.supervisor = newAgentSupervisor(binPath, s.logger)
 			if err := s.supervisor.Start(); err != nil {
 				s.logger.Warn("start agent supervisor failed", "err", err)

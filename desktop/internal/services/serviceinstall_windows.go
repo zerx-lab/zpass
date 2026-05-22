@@ -84,9 +84,14 @@ func (i *scheduledTaskInstaller) Status() (SystemServiceStatus, error) {
 	}
 
 	return SystemServiceStatus{
-		Supported:     true,
-		Installed:     installed,
-		Enabled:       enabled,
+		Supported: true,
+		Installed: installed,
+		Enabled:   enabled,
+		// Windows Scheduled Task 没有「启动后反复失败」这种状态（systemd 独有），
+		// 任务纯是「启用 / 禁用」二元。任务启用以后 Task Scheduler 会在登入
+		// 时拉起进程，拉不起来也不会「抢住」 socket fd（named pipe 是谁先 listen
+		// 谁拿到），不存在 Linux 那种 fd 抢占死锁。所以这里直接把启用等同于健康。
+		Healthy:       enabled,
 		PlatformLabel: i.PlatformLabel(),
 	}, nil
 }
@@ -102,7 +107,7 @@ func (i *scheduledTaskInstaller) Status() (SystemServiceStatus, error) {
 // 失败：
 //   - 权限不足（用户控制面板里禁用了 Task Scheduler）→ schtasks 报错
 //   - binary 路径含空格 → XML Command 字段天然支持，不需要手动引号
-func (i *scheduledTaskInstaller) Install(agentBinary string) error {
+func (i *scheduledTaskInstaller) Install(agentBinary string, _ bool) error {
 	if agentBinary == "" {
 		return errors.New("empty agent binary path")
 	}

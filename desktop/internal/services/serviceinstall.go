@@ -64,6 +64,20 @@ type SystemServiceStatus struct {
 	// 对 Windows：Scheduled Task 已 enable
 	Enabled bool `json:"enabled"`
 
+	// Healthy 服务实际是否处于可用状态
+	//
+	// Enabled 仅说明「配置上声明了自启」，Healthy 还要求实际服务能拉起来：
+	//   - systemd：socket unit active 且 service unit 没在反复重启失败
+	//   - Windows Scheduled Task：任务存在且未被 disabled
+	//
+	// GUI 在 Enabled=true 但 Healthy=false 时应当回落到 supervisor 模式
+	// 并把 LastError 显示给用户，避免「systemd 抢着 socket 但起不来」的
+	// 死锁场景（fd 被占着 + service 反复 NAMESPACE 失败）。
+	Healthy bool `json:"healthy"`
+
+	// LastError 最近一次健康检查或安装失败的描述（人类可读，调试用）
+	LastError string `json:"lastError,omitempty"`
+
 	// PlatformLabel 给前端展示的平台描述
 	//
 	// 例："systemd user service (socket activation)" / "Scheduled Task at login"
@@ -91,8 +105,13 @@ type systemServiceInstaller interface {
 	// agentBinary 是当前 zpass-agent 可执行文件的绝对路径。实现会把它写
 	// 进 unit 文件 / 任务命令行。
 	//
+	// startNow 控制是否立即 start 服务。
+	//   - true: 立即拉起（首次启用、systemd 接管路径上用）
+	//   - false: 仅写文件 + enable，下次登入 / 重启后才生效（supervisor 路径上
+	//     避免与子进程争抢 socket fd）
+	//
 	// 幂等：已安装 + 配置一致时是 noop。
-	Install(agentBinary string) error
+	Install(agentBinary string, startNow bool) error
 
 	// Uninstall 卸载系统服务
 	//
@@ -157,7 +176,8 @@ func (s *SshAgentService) installSystemServiceWithBinary(binPath string) error {
 	if systemServiceInstallerImpl == nil || !systemServiceInstallerImpl.Supported() {
 		return ErrSystemServiceUnsupported
 	}
-	if err := systemServiceInstallerImpl.Install(binPath); err != nil {
+	// 手动安装路径（用户从 UI 点「安装」或 Windows 启用时）期望立即生效。
+	if err := systemServiceInstallerImpl.Install(binPath, true); err != nil {
 		return fmt.Errorf("install system service: %w", err)
 	}
 	return nil
@@ -187,8 +207,9 @@ func (s *SshAgentService) UninstallSystemService() error {
 //
 // 策略：
 //   - 平台不支持 → 跳过（不报错）
-//   - 已安装 → 跳过
-//   - 未安装 → 尝试安装；失败仅 log warn 不阻塞 Enable
+//   - 已安装且启用且健康 → 跳过
+//   - 已安装但不健康 → 跳过 install 但 log warn（需要用户手动介入）
+//   - 未安装 → 尝试安装 → 装完启动后健康检查；不健康则回滚 uninstall 避免 socket fd 抢占
 //
 // 这是「让用户首次启用即获得最佳体验」的关键 UX 流程：用户启用 SSH
 // agent 后立即获得 systemd socket activation（0 内存空闲）+ 登录自启。
@@ -196,6 +217,7 @@ func (s *SshAgentService) UninstallSystemService() error {
 // 失败容忍：
 //   - 找不到 agent binary：MVP-2 的 supervisor fallback 仍然能拉起 agent
 //   - systemctl 不可用（极简发行版）：用户仍可用 GUI 子进程模式
+//   - 装后不健康 ：自动回滚，让 supervisor 接手避免 socket fd 抢占导致 ssh 挂住
 //
 // 调用方：SshAgentService.Enable 在 listener 启动成功后调一次。
 func (s *SshAgentService) autoInstallSystemServiceOnEnable() {
@@ -210,8 +232,19 @@ func (s *SshAgentService) autoInstallSystemServiceOnEnable() {
 		return
 	}
 	if status.Installed && status.Enabled {
-		s.logger.Debug("auto-install: skipped (already installed and enabled)")
-		return
+		if status.Healthy {
+			s.logger.Debug("auto-install: skipped (already installed, enabled and healthy)")
+			return
+		}
+		// 装了但不健康 —— 可能是旧版本留下的坐 unit，或升级后 binary
+		// 路径变了。先卸载再走重装路径 —— 这样能覆盖旧 unit 文件。
+		s.logger.Warn("auto-install: existing system service is unhealthy; reinstalling",
+			"lastError", status.LastError)
+		if err := systemServiceInstallerImpl.Uninstall(); err != nil {
+			s.logger.Warn("auto-install: pre-reinstall uninstall failed", "err", err)
+			return
+		}
+		// 落到下面重新走 Install + 健康检查。
 	}
 
 	binPath, err := locateAgentBinary()
@@ -220,11 +253,94 @@ func (s *SshAgentService) autoInstallSystemServiceOnEnable() {
 		return
 	}
 
-	if err := systemServiceInstallerImpl.Install(binPath); err != nil {
+	// 同步读一下当前 supervisor 状态：如果 supervisor 在跑（fallback 路径），
+	// 不要 --now 启用 socket，避免与 supervisor 拉起的 zpass-agent 争抢 socket fd。
+	// 仅写文件 + enable，下次登入 / GUI 重启后 systemd 接管。
+	s.mu.Lock()
+	supervisorRunning := s.supervisor != nil && s.supervisor.IsRunning()
+	s.mu.Unlock()
+	startNow := !supervisorRunning
+
+	if err := systemServiceInstallerImpl.Install(binPath, startNow); err != nil {
 		s.logger.Warn("auto-install: failed", "err", err)
 		return
 	}
 
+	// 装完后重查一次健康状态 —— systemd 可能因为 unit 错误 / sandbox 拒绝让 service
+	// 陷入「activating(auto-restart)」循环。这时如果不回滚，socket fd 会被 systemd
+	// 抢占却永远启动不了 service，ssh 客户端 connect 后挂住。
+	//
+	// 仅在 startNow 路径上检查：startNow=false 时 socket unit 还未 active（等下次登入），
+	// healthCheck 会误报 “socket unit not active” —— 这个场景下跳过健康检查。
+	if startNow {
+		postStatus, err := systemServiceInstallerImpl.Status()
+		if err != nil {
+			s.logger.Warn("auto-install: post-install status check failed", "err", err)
+			return
+		}
+		if !postStatus.Healthy {
+			s.logger.Warn("auto-install: service unhealthy after install; rolling back to avoid socket fd contention",
+				"lastError", postStatus.LastError)
+			if uErr := systemServiceInstallerImpl.Uninstall(); uErr != nil {
+				s.logger.Warn("auto-install: rollback uninstall failed", "err", uErr)
+			}
+			return
+		}
+	}
+
 	s.logger.Info("auto-installed system service on first enable",
-		"platform", systemServiceInstallerImpl.PlatformLabel())
+		"platform", systemServiceInstallerImpl.PlatformLabel(),
+		"startNow", startNow)
+}
+
+// systemServiceHealthyForActivation 返回是否可以依赖 systemd / Scheduled Task 拉起 agent
+//
+// true 表示：服务已装 + 启用 + 健康。Enable 遇到这个场景应当跳过 supervisor，
+// 让系统服务管理器按需拉起 agent。
+//
+// 平台不支持 / Status 查询失败 → false（保守地交给 supervisor）。
+func (s *SshAgentService) systemServiceHealthyForActivation() bool {
+	if systemServiceInstallerImpl == nil || !systemServiceInstallerImpl.Supported() {
+		return false
+	}
+	status, err := systemServiceInstallerImpl.Status()
+	if err != nil {
+		s.logger.Debug("system service health check errored; treating as not healthy", "err", err)
+		return false
+	}
+	return status.Installed && status.Enabled && status.Healthy
+}
+
+// maybeUninstallUnhealthySystemService 检测到 systemd / Scheduled Task 已装但不健康时卸载
+//
+// 场景：systemd socket unit 状态 active 住了 socket fd，但 service unit 反复
+// 启动失败（例：错误 sandbox 配置、binary 路径变了、依赖目录缺失）。这时
+// 如果我们不回收 socket，ssh 客户端 connect 会拿到 systemd 那个 fd 却永远等不到
+// service 启动，在用户看来是「ssh 挂住」。
+//
+// 决策：
+//   - 未装 / 已装且健康 → no-op（这个 helper 只管「不健康」场景）
+//   - 装了且不健康 → 主动 Uninstall，log warn。之后 supervisor 接手。
+//
+// 错误不向上抛 —— 这是「防御性清理」，uninstall 失败也不应当阔 Enable 。
+func (s *SshAgentService) maybeUninstallUnhealthySystemService() {
+	if systemServiceInstallerImpl == nil || !systemServiceInstallerImpl.Supported() {
+		return
+	}
+	status, err := systemServiceInstallerImpl.Status()
+	if err != nil {
+		return
+	}
+	if !status.Installed {
+		return
+	}
+	if status.Healthy {
+		return
+	}
+	s.logger.Warn("system service installed but unhealthy; uninstalling to free socket fd for supervisor",
+		"platform", systemServiceInstallerImpl.PlatformLabel(),
+		"lastError", status.LastError)
+	if err := systemServiceInstallerImpl.Uninstall(); err != nil {
+		s.logger.Warn("unhealthy system service uninstall failed", "err", err)
+	}
 }

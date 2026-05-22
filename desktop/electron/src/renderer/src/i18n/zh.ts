@@ -566,13 +566,26 @@ export const zh: Strings = {
 	settings_lock_never_confirm: "我了解风险，禁用自动锁定",
 	settings_lock_never_cancel: "保持自动锁定",
 
+	// 设置 — 关闭按钮行为（退出 / 收到托盘）
+	settings_section_window: "窗口",
+	settings_section_window_desc: "控制应用窗口的行为以及与系统托盘的集成。",
+	settings_close_behavior: "关闭窗口时",
+	settings_close_behavior_desc:
+		"选择“收进托盘”后应用仍在后台运行，密码随时可用。托盘图标一直显示。",
+	settings_close_behavior_quit: "退出 ZPass",
+	settings_close_behavior_tray: "收到系统托盘",
+	settings_tray_hint: "左键点击托盘图标可重新打开窗口；右键查看更多选项。",
+	tray_menu_show: "显示 ZPass",
+	tray_menu_quit: "退出 ZPass",
+	tray_tooltip: "ZPass",
+
 	// 设置 — 信任设备（重启免主密码）
 	settings_section_trusted_device: "信任此设备",
 	settings_section_trusted_device_desc:
-		"在此设备上跳过主密码。加密密钥将由 Windows 凭据保护机制（DPAPI）封装，并绑定到当前 Windows 用户。",
+		"在此设备上跳过主密码。加密密钥将由操作系统的凭据保护机制封装，并绑定到当前用户。",
 	settings_trusted_device_toggle: "在此设备上自动解锁",
 	settings_trusted_device_toggle_desc: "重启 ZPass 后无需输入主密码。",
-	settings_trusted_device_unsupported: "此平台暂不支持，目前仅 Windows 可用。",
+	settings_trusted_device_unsupported: "此设备暂不支持自动解锁。",
 	settings_trusted_device_enabled_hint:
 		"已信任此设备，重启 ZPass 后无需主密码。",
 	settings_trusted_device_enable_title: "信任此设备？",
@@ -580,7 +593,7 @@ export const zh: Strings = {
 		"开启后，ZPass 将在此设备重启时自动解锁，不再要求输入主密码。",
 	settings_trusted_device_enable_when_safe: "建议在以下情况启用：",
 	settings_trusted_device_enable_safe_1: "仅你一人使用此设备",
-	settings_trusted_device_enable_safe_2: "Windows 账户已设置强密码",
+	settings_trusted_device_enable_safe_2: "操作系统账户已设置强密码",
 	settings_trusted_device_enable_safe_3: "此设备未被多人共享",
 	settings_trusted_device_enable_when_unsafe: "请勿在以下情况启用：",
 	settings_trusted_device_enable_unsafe_1: "公共电脑或共享办公电脑",

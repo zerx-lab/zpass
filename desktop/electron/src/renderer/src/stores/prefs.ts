@@ -32,6 +32,18 @@ export type UiScale = "80" | "90" | "100" | "110" | "125" | "150";
 export type Body = "sans" | "mono";
 export type Lang = "en" | "zh";
 export type LockTimeout = "1m" | "5m" | "15m" | "30m" | "1h" | "4h" | "never";
+/**
+ * 关闭窗口按钮的行为
+ *
+ * - `quit` → 真的退出应用（默认；与 Electron `app.quit()` 等价）
+ *           Linux/Windows 用户的传统预期。
+ * - `tray` → 最小化到系统托盘（隐藏主窗口，不退出进程）
+ *           托盘图标本身永远在；该选项只控制"关闭窗口"按钮的语义。
+ *
+ * 注意：该偏好不影响 macOS Cmd+Q（永远走真退出），
+ * 也不影响 `before-quit` 阶段后端 sidecar 的清理逻辑。
+ */
+export type CloseBehavior = "quit" | "tray";
 
 export interface PrefsState {
 	/** 主题：暗色 / 亮色 */
@@ -77,6 +89,14 @@ export interface PrefsState {
 	lockOnSwitch: boolean;
 	/** 关闭窗口时锁定 */
 	lockOnClose: boolean;
+	/**
+	 * 关闭按钮行为：退出应用 / 收进托盘
+	 *
+	 * 该值由 ThemeSync 在 hydrate 与变化时通过 `window.desktop.window.setCloseBehavior(v)`
+	 * 推送给 Electron 主进程；主进程在 BrowserWindow 'close' 事件里据此决定
+	 * `event.preventDefault() + win.hide()` 还是放行让窗口关闭。
+	 */
+	closeBehavior: CloseBehavior;
 	/** 自定义正文字体（空串 = 使用内置 Geist） */
 	fontSans: string;
 	/** 自定义等宽字体（空串 = 使用内置 Geist Mono） */
@@ -107,6 +127,7 @@ export interface PrefsState {
 	setLockOnSleep: (v: boolean) => void;
 	setLockOnSwitch: (v: boolean) => void;
 	setLockOnClose: (v: boolean) => void;
+	setCloseBehavior: (v: CloseBehavior) => void;
 	setFontSans: (font: string) => void;
 	setFontMono: (font: string) => void;
 }
@@ -174,6 +195,10 @@ export function getPrefsDefaults() {
 		lockOnSleep: true,
 		lockOnSwitch: false,
 		lockOnClose: true,
+		// 默认沿用 Linux/Windows 传统：点关闭=真退出。
+		// 想后台常驻的用户可在 Settings 里改为 "tray"。
+		// macOS 的 Cmd+Q 由系统语义保证总能真退出，与此偏好无关。
+		closeBehavior: "quit" as CloseBehavior,
 		fontSans: "",
 		fontMono: "",
 	};
@@ -207,6 +232,7 @@ export const usePrefsStore = create<PrefsState>()(
 			setLockOnSleep: (lockOnSleep) => set({ lockOnSleep }),
 			setLockOnSwitch: (lockOnSwitch) => set({ lockOnSwitch }),
 			setLockOnClose: (lockOnClose) => set({ lockOnClose }),
+			setCloseBehavior: (closeBehavior) => set({ closeBehavior }),
 			setFontSans: (fontSans) => set({ fontSans }),
 			setFontMono: (fontMono) => set({ fontMono }),
 		}),
@@ -219,7 +245,7 @@ export const usePrefsStore = create<PrefsState>()(
 			// 等浏览器沙盒存储（产品硬性约束，详见 src/lib/config-storage.ts
 			// 头部注释）
 			storage: createTauriConfigStorage<Partial<PrefsState>>(),
-			version: 6,
+			version: 7,
 			// 仅持久化纯数据字段，action 方法不入库
 			partialize: (state) => ({
 				theme: state.theme,
@@ -232,6 +258,7 @@ export const usePrefsStore = create<PrefsState>()(
 				lockOnSleep: state.lockOnSleep,
 				lockOnSwitch: state.lockOnSwitch,
 				lockOnClose: state.lockOnClose,
+				closeBehavior: state.closeBehavior,
 				fontSans: state.fontSans,
 				fontMono: state.fontMono,
 			}),
@@ -258,6 +285,9 @@ export const usePrefsStore = create<PrefsState>()(
 			 *
 			 * v3 → v4：移除 `travel` 字段（旅行模式功能已从 UI 中去除）。
 			 *   旧存储中若有 travel 字段，直接丢弃即可，不影响其他偏好。
+			 *
+			 * v6 → v7：新增 `closeBehavior`（quit / tray）。老用户保留传统
+			 *   语义：关闭窗口=退出应用，避免升级后行为静默变化让人困惑。
 			 */
 			migrate: (persisted, version) => {
 				const state = (persisted ?? {}) as Partial<PrefsState> & {
@@ -293,6 +323,10 @@ export const usePrefsStore = create<PrefsState>()(
 				}
 				if (version < 6) {
 					next = { ...next, fontSans: "", fontMono: "" };
+				}
+				if (version < 7) {
+					// 新增关闭按钮行为偏好。老用户保留"传统"语义：关闭=退出。
+					next = { ...next, closeBehavior: "quit" as CloseBehavior };
 				}
 
 				return next as PrefsState;

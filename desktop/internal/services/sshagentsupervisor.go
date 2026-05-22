@@ -53,6 +53,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -192,8 +193,14 @@ func (s *agentSupervisor) Detach() {
 
 // stopInternal Stop / Detach 的实现
 //
-// killChild=true：发 Kill / SIGTERM 并等进程结束。
-// killChild=false：仅停重启监控，子进程独立存活。
+// killChild=true：发 SIGTERM 让 agent 优雅退出，超时后 force kill。不自己 Wait
+//
+//	—— startOnce 里的 cmd.Wait() 是唯一 Wait 调用点（cmd.Wait 不可重入）。
+//	进程被杀后 startOnce 返回，supervise 看到 stopRequested 退出。
+//
+// killChild=false：仅帮 supervise 跳出重启循环，不动子进程。子进程独立
+//
+//	存活，下次 GUI 启动重用。
 func (s *agentSupervisor) stopInternal(killChild bool) {
 	s.mu.Lock()
 	if !s.running {
@@ -205,33 +212,38 @@ func (s *agentSupervisor) stopInternal(killChild bool) {
 	cmd := s.cmd
 	s.mu.Unlock()
 
+	// cancel ctx 让 supervise goroutine 退出。
+	// startOnce 中的 select 会看到 ctx.Done()：
+	//   - killChild=true 路径：下面即将发 SIGTERM，会让 cmd.Wait 返回在前
+	//     （select 会随机选一个，但最终两个都会触发）。以谁先 为准。
+	//   - killChild=false 路径：startOnce 会看 ctx.Done 提前返回，子进程
+	//     留下被 init 领养。
 	if cancel != nil {
 		cancel()
 	}
 
 	if killChild && cmd != nil && cmd.Process != nil {
-		// 优先 SIGTERM 让 agent 走优雅退出（清理 socket 文件）
-		// signal 失败也无所谓 —— 进程可能已经退出
+		// 发 SIGTERM 让 agent 走优雅退出（清理 socket 文件）。失败也无所谓
+		// —— 进程可能已经退出。
 		s.signalGracefulShutdown(cmd)
 
-		// 3 秒兑底强 Kill（「兑底」是「兑现护底」，避免 agent 卡住不退）
-		done := make(chan struct{})
-		go func() {
-			_ = cmd.Wait()
-			close(done)
-		}()
-		select {
-		case <-done:
-			// 正常退出
-		case <-time.After(3 * time.Second):
+		// 给 3 秒优雅退出机会，不行则强 Kill。
+		// 不能调 cmd.Wait —— startOnce 里的 goroutine 已经占住唯一的 Wait。
+		// 改用 polling 检查进程是否还在。
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			if !processAlive(cmd.Process) {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		if processAlive(cmd.Process) {
 			s.logger.Warn("agent did not exit in 3s, force killing")
 			_ = cmd.Process.Kill()
-			<-done
 		}
 	}
-	// killChild=false 时：不动 cmd 进程，也不 Wait（Wait 会阻塞到子进程
-	// 退出）。cmd.Process 保留上下文但我们不再关心；os.exec 在父退出后
-	// zombie 状态由 init/Windows 接管。
+	// killChild=false 时：不动 cmd 进程。cmd.Process 保留上下文但我们不再关心；
+	// os.exec 在父退出后 zombie 状态由 init/Windows 接管。
 
 	s.mu.Lock()
 	s.running = false
@@ -243,6 +255,19 @@ func (s *agentSupervisor) stopInternal(killChild bool) {
 	} else {
 		s.logger.Info("agent supervisor detached (child kept running)")
 	}
+}
+
+// processAlive 检查进程是否还在。
+//
+// os.Process.Signal(syscall.Signal(0)) 是跨平台「探测进程存活」的常用手法：
+//   - 成功 → 进程还在且有权限发信号
+//   - err == os.ErrProcessDone → 已退出
+//   - 其它错误 (ESRCH 等) → 进程不在
+func processAlive(p *os.Process) bool {
+	if p == nil {
+		return false
+	}
+	return p.Signal(syscall.Signal(0)) == nil
 }
 
 // IsRunning 报告当前 supervisor 是否处于「我们认为 agent 在跑」状态
@@ -300,8 +325,16 @@ func (s *agentSupervisor) supervise(ctx context.Context) {
 //
 // 把 stdout/stderr 通过 io.Copy 重定向到 GUI 的 stderr —— agent 的 log
 // 出现在和 GUI 同一个 console 里，便于诊断。
+//
+// 为什么不用 exec.CommandContext：
+//
+//	CommandContext 会在 ctx 取消时自动 SIGKILL 子进程。这破坏 Detach 的
+//	「保留子进程」契约：GUI 退出时 cancel ctx 会让 agent 被连带 SIGKILL，
+//	下次 GUI 启动时又要重拉一个新的 —— 丢失「跨 GUI 重启即可用」优势。
+//	改用 exec.Command + 手工检查 ctx：Detach 路径上子进程完全不受影响；
+//	Stop 路径上由 stopInternal 明确发 signal 负责杀进程。
 func (s *agentSupervisor) startOnce(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, s.binaryPath)
+	cmd := exec.Command(s.binaryPath)
 
 	// 默认就是 ZPASS_AGENT 子进程，可能受 GUI 进程的环境影响 —— Wails 应用
 	// 通常没有特别的环境需求，直接继承环境变量即可
@@ -338,8 +371,25 @@ func (s *agentSupervisor) startOnce(ctx context.Context) error {
 	go drainOutput(stderrPipe, "agent stderr", s.logger)
 	go drainOutput(stdoutPipe, "agent stdout", s.logger)
 
-	// 等进程退出
-	err = cmd.Wait()
+	// 等进程退出。
+	//
+	// ctx 取消以后不由本函数主动杀进程 —— Detach 路径需要子进程继续存活。
+	// supervise goroutine 会在 ctx 取消后看到 startOnce 返回并跳出循环，
+	// 但这里只有在 cmd.Wait() 返回（进程真的死了）才能跳出。为了让 Detach
+	// 快速返回而不需要等进程退出，用 select 同时监听 ctx 和 Wait。
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- cmd.Wait() }()
+	select {
+	case err = <-waitDone:
+		// 进程退出
+	case <-ctx.Done():
+		// Detach 路径：GUI 要退了，我们不管 agent 了，直接返回。子进程继续
+		// 跑，会被 init 重新领养。waitDone goroutine 会 leak （进程最终退出
+		// 时 close）—— 但 GUI 马上退出，无紧。
+		s.logger.Info("supervise context cancelled; releasing wait without killing child",
+			"pid", pid)
+		return nil
+	}
 
 	s.mu.Lock()
 	s.cmd = nil

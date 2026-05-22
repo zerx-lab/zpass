@@ -33,7 +33,7 @@ func (i *unsupportedInstaller) PlatformLabel() string {
 }
 
 // Install 返回不支持错误
-func (i *unsupportedInstaller) Install(_ string) error {
+func (i *unsupportedInstaller) Install(_ string, _ bool) error {
 	return ErrSystemServiceUnsupported
 }
 

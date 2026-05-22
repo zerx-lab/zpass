@@ -1,4 +1,12 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  nativeImage,
+  Tray,
+} from "electron";
 import { type FSWatcher, watch as fsWatch } from "node:fs";
 import { stat as fsStat } from "node:fs/promises";
 import { join } from "node:path";
@@ -45,27 +53,25 @@ app.commandLine.appendSwitch("disable-renderer-backgrounding");
 app.commandLine.appendSwitch("no-default-browser-check");
 
 if (process.platform === "linux") {
-  // Force the X11 Ozone backend even on Wayland sessions.
+  // Let Chromium pick the Ozone backend based on the active session:
+  // native Wayland when WAYLAND_DISPLAY is set, X11 otherwise.
   //
-  // Background: the previous `ozone-platform-hint=auto` lets Chromium pick
-  // Wayland natively when WAYLAND_DISPLAY is set. That triggers two log spam
-  // ERRORs that cannot be fully silenced on Electron 42:
-  //   1. wayland_surface_factory.cc: "'--ozone-platform=wayland' is not
-  //      compatible with Vulkan" — emitted unconditionally during GPU
-  //      capability probing, even with `disable-features=Vulkan`.
-  //   2. viz/.../display.cc: "Frame latency is negative" — Wayland
-  //      presentation_feedback timestamps occasionally precede frame
-  //      submission timestamps by a few microseconds.
-  //
-  // Pinning X11 (XWayland on Wayland sessions) eliminates both. Trade-offs
-  // we accept here: slightly higher IME latency and HiDPI scaling that goes
-  // through XWayland's integer scaling instead of Wayland fractional scaling.
-  // For a password manager UI those are not perceptible.
-  app.commandLine.appendSwitch("ozone-platform", "x11");
-  // Set the X11 WM_CLASS so the window manager can match the window to
+  // History: we briefly pinned `ozone-platform=x11` to silence two harmless
+  // log ERRORs (`wayland_surface_factory.cc: '--ozone-platform=wayland' is
+  // not compatible with Vulkan` and `viz/.../display.cc: Frame latency is
+  // negative`). That trade-off backfires on NVIDIA + Wayland: the XWayland
+  // GPU process crashes (`exit_code=139`, `XGetWindowAttributes failed`)
+  // immediately on first command-buffer creation and the window never
+  // appears. Going back to `ozone-platform-hint=auto` restores those two
+  // ERROR lines but keeps the app actually launchable on common Linux
+  // setups. The Vulkan crash itself is still suppressed by the
+  // `disable-features=Vulkan` switch above.
+  app.commandLine.appendSwitch("ozone-platform-hint", "auto");
+  // Set WM_CLASS so the window manager can match the window to
   // /usr/share/applications/zpass.desktop and use the hicolor `zpass` icon.
   // The value must match the .desktop file's basename (`zpass.desktop`)
-  // and its `StartupWMClass=zpass` field.
+  // and its `StartupWMClass=zpass` field. Applies to both X11 (WM_CLASS)
+  // and Wayland (xdg_toplevel.app_id) backends.
   app.commandLine.appendSwitch("class", "zpass");
 }
 
@@ -76,6 +82,30 @@ let backendPromise: Promise<Backend> | null = null;
 let reloading = false;
 
 const RELOAD_FILE = join(app.getAppPath(), ".dev-reload");
+
+// -------- Tray & close-behavior state --------------------------------------
+//
+// `closeBehavior` is mirrored from the renderer's `prefs.closeBehavior`
+// preference via the `desktop:window:set-close-behavior` IPC. The renderer
+// pushes the current value at startup (after prefs hydrate) and again on
+// every change. We default to "quit" so before the first push lands the
+// app behaves like a vanilla Electron desktop app.
+//
+// `quittingForReal` flips to true when the user explicitly chooses Quit
+// (tray menu, Cmd+Q via macOS, `before-quit` from another path). The
+// BrowserWindow 'close' handler uses it to bypass the hide-to-tray override
+// — without this flag, calling `app.quit()` while in tray mode would just
+// hide the window again and the process would never exit.
+//
+// `tray` is null until `app.whenReady()` resolves; the tray icon must be
+// constructed on the UI thread, after Electron's GPU/IPC is up.
+let closeBehavior: "quit" | "tray" = "quit";
+let quittingForReal = false;
+let tray: Tray | null = null;
+// We track the primary window globally so the tray (which is created in
+// `app.whenReady`, not inside `createWindow`) can show/focus it without
+// re-querying BrowserWindow.getAllWindows() every click.
+let mainWindow: BrowserWindow | null = null;
 
 // Spawn the Go sidecar as early as possible — at module load, BEFORE
 // app.whenReady() resolves. The Go binary is independent of Electron init, so
@@ -141,8 +171,20 @@ ipcMain.handle("desktop:window:unfullscreen", () => {
   focusedWin()?.setFullScreen(false);
 });
 ipcMain.handle("desktop:window:close", () => {
+  // Always go through `win.close()` so the BrowserWindow 'close' handler
+  // installed in createWindow() can intercept it when closeBehavior=="tray".
+  // (Calling `win.hide()` directly here would also work, but routing through
+  // 'close' keeps a single code path and lets the OS-level Cmd+W / Alt+F4
+  // keep the same behavior as our custom titlebar X.)
   focusedWin()?.close();
 });
+ipcMain.handle(
+  "desktop:window:set-close-behavior",
+  (_ev, mode: "quit" | "tray") => {
+    if (mode !== "quit" && mode !== "tray") return;
+    closeBehavior = mode;
+  },
+);
 
 // Save-file dialog — replaces the Wails 3 ExportService dialog. The Go side
 // now takes a path argument (or empty for cancel); we pick the path here.
@@ -265,22 +307,133 @@ function installDevReloader() {
   );
 }
 
-// Resolve the window icon. In dev the working dir is the repo root, in a
-// packaged app the PNGs live next to the asar under `resources/assets/`.
-// We bundle a 256×256 ZPass dotted-Z mark; the OS picks the best size at
-// render time, but Electron only loads one image so 256px is the sweet
-// spot (large enough for HiDPI titlebars, small enough to avoid bloat).
-function resolveIcon() {
+/**
+ * Resolve the window/tray icon. In dev the working dir is the repo root, in
+ * a packaged app the PNGs live next to the asar under `resources/assets/`.
+ *
+ * `preferredSize` lets the tray pick the right pixel density (Linux/Windows
+ * tray icons want 16-32px; macOS template icons want 22pt @1x/@2x). When
+ * omitted we return the 256px master which is what BrowserWindow's
+ * titlebar/taskbar wants.
+ */
+function resolveIcon(preferredSize?: 16 | 32 | 48 | 64 | 128 | 256) {
+  const size = preferredSize ?? 256;
   const candidates = [
-    join(__dirname, "../../assets/logo/png/zpass-256.png"),
-    join(process.resourcesPath ?? "", "assets/logo/png/zpass-256.png"),
-    join(process.cwd(), "assets/logo/png/zpass-256.png"),
+    join(__dirname, `../../assets/logo/png/zpass-${size}.png`),
+    join(process.resourcesPath ?? "", `assets/logo/png/zpass-${size}.png`),
+    join(process.cwd(), `assets/logo/png/zpass-${size}.png`),
   ];
   for (const p of candidates) {
     const img = nativeImage.createFromPath(p);
     if (!img.isEmpty()) return img;
   }
   return undefined;
+}
+
+/**
+ * Show / focus the main window. Used by the tray's left-click handler and
+ * Show menu item. On Linux a hidden BrowserWindow needs `show()` to map
+ * back onto the compositor before `focus()` can take effect; on Windows the
+ * same window also needs `restore()` if it was minimised to taskbar.
+ */
+function showMainWindow() {
+  const win = mainWindow ?? BrowserWindow.getAllWindows()[0] ?? null;
+  if (!win) {
+    // Edge case: tray clicked after window-all-closed but before activate.
+    // Just rebuild the window.
+    void createWindow();
+    return;
+  }
+  if (win.isMinimized()) win.restore();
+  if (!win.isVisible()) win.show();
+  win.focus();
+}
+
+/**
+ * Tray menu — rebuilt on every right-click so labels can be re-localized
+ * later (Electron has no built-in "rerender on locale change" hook, but
+ * since the menu is rebuilt every time, swapping the strings just requires
+ * piping the current i18n bundle into here — TODO for when we wire that).
+ *
+ * Current labels are English fallbacks; the renderer can override them via
+ * a future `desktop:tray:set-labels` IPC if we want full i18n parity.
+ */
+function buildTrayMenu() {
+  return Menu.buildFromTemplate([
+    {
+      label: "Show ZPass",
+      click: () => showMainWindow(),
+    },
+    { type: "separator" },
+    {
+      label: "Quit ZPass",
+      click: () => {
+        // Mark intent so the BrowserWindow 'close' handler stops intercepting,
+        // then ask Electron to perform a clean shutdown (fires before-quit,
+        // will-quit, etc. — sidecar cleanup runs in our before-quit listener).
+        quittingForReal = true;
+        app.quit();
+      },
+    },
+  ]);
+}
+
+/**
+ * Install the system tray icon. Called once after `app.whenReady()`.
+ *
+ * Design choices:
+ *   - The tray icon is ALWAYS visible while the app runs, regardless of
+ *     `closeBehavior`. Hiding/showing the tray based on preference would
+ *     surprise users mid-session (their reference point disappears).
+ *   - Left-click on Linux/Windows toggles show/focus; macOS doesn't fire
+ *     a "click" event for trays — there only the menu is exposed (system
+ *     UX convention).
+ *   - We attach the context menu via `setContextMenu` rather than
+ *     `popUpContextMenu` so platforms that have native right-click
+ *     handling (GNOME via AppIndicator, KDE Plasma) drive it for us.
+ */
+function installTray() {
+  // 16px master is the right size for Windows/Linux trays; macOS template
+  // icons are usually 22pt at 1x — close enough for our non-template icon.
+  const img =
+    resolveIcon(32) ?? resolveIcon(16) ?? resolveIcon(64) ?? resolveIcon(256);
+  if (!img) {
+    process.stderr.write(
+      "[tray] could not locate tray icon, skipping tray install\n",
+    );
+    return;
+  }
+  try {
+    tray = new Tray(img);
+  } catch (err) {
+    // On Linux, Tray() throws when no StatusNotifier (AppIndicator) host is
+    // running. We don't want this to bring down the whole app — the user
+    // can still close-to-quit normally.
+    process.stderr.write(
+      `[tray] failed to create system tray (no indicator host?): ${String(
+        err,
+      )}\n`,
+    );
+    return;
+  }
+  tray.setToolTip("ZPass");
+  tray.setContextMenu(buildTrayMenu());
+
+  // Left-click on the tray icon → show/focus window. This is the Linux
+  // expectation (especially when minimised-to-tray is enabled) and matches
+  // most Windows users' muscle memory. macOS doesn't fire this event for
+  // tray icons — there the menu is the only interaction surface, by OS
+  // convention.
+  tray.on("click", () => {
+    showMainWindow();
+  });
+  // Some Linux DEs (KDE) and Windows fire 'right-click' for the context
+  // menu; we let setContextMenu handle that on macOS/Win, but explicitly
+  // popping ensures it always works on Linux AppIndicator hosts that don't
+  // route right-clicks to the menu automatically.
+  tray.on("right-click", () => {
+    tray?.popUpContextMenu();
+  });
 }
 
 async function createWindow() {
@@ -308,6 +461,107 @@ async function createWindow() {
     },
   });
 
+  mainWindow = win;
+  win.on("closed", () => {
+    if (mainWindow === win) mainWindow = null;
+  });
+
+  // Dev-only: forward renderer console.warn / console.error to the main
+  // process stderr so users can see them in the same terminal as the Go
+  // sidecar logs without opening DevTools. Filtering to warn+ keeps the
+  // signal/noise ratio sane (React HMR fires console.info constantly).
+  //
+  // Uses the WebContentsConsoleMessageEventParams object (Electron 31+);
+  // the old positional-args overload is deprecated.
+  if (!app.isPackaged) {
+    win.webContents.on("console-message", (ev) => {
+      // levels in the new API are strings: 'debug' | 'info' | 'warning' | 'error'
+      if (ev.level !== "warning" && ev.level !== "error") return;
+      const tag = ev.level === "error" ? "error" : "warn";
+      process.stderr.write(
+        `[renderer:${tag}] ${ev.message}  (${ev.sourceId}:${ev.lineNumber})\n`,
+      );
+    });
+  }
+
+  // Intercept the window's close request when the user has chosen
+  // "minimise to tray" behaviour. We preventDefault + hide so the
+  // BrowserWindow stays alive (and the Go sidecar with it); the tray
+  // icon's Show menu item brings it back. macOS Cmd+Q sets
+  // `quittingForReal` indirectly via app.on('before-quit') so we always
+  // honour the system "quit the app" intent.
+  //
+  // Why we plant a global timestamp BEFORE hide() instead of just
+  // sending an IPC message:
+  //   `win.hide()` synchronously toggles document.visibilityState to
+  //   `hidden`, and Chromium synchronously dispatches the
+  //   `visibilitychange` event to the renderer's main thread. An IPC
+  //   message sent via `webContents.send` is queued on the IPC pipe and
+  //   only delivered on the next renderer task tick — *after* the
+  //   synchronous visibilitychange handler has already run. AutoLock
+  //   would see visibilitychange first, lock the vault, and the
+  //   suppression flag would arrive too late to matter.
+  //
+  //   `webContents.executeJavaScript` is the only main→renderer channel
+  //   that runs to completion before we return, because it bounces
+  //   through the renderer's JS context synchronously from V8's POV
+  //   (the Promise resolves on the next microtask in the main process,
+  //   but the actual JS string has executed in the renderer by then).
+  //   We use it to set a `__zpassTrayHideAt` timestamp on the
+  //   renderer's `window` object; AutoLock checks this timestamp at the
+  //   top of every triggerLock() call.
+  //
+  //   Notifying via `desktop:hiding-to-tray` IPC is still emitted as a
+  //   secondary signal so AutoLock can also extend the suppression
+  //   window via its event handler (defense in depth, and so any
+  //   future renderer-side hook has a real event to subscribe to).
+  win.on("close", async (event) => {
+    process.stderr.write(
+      `[tray-close] close event fired (quitting=${quittingForReal}, behavior=${closeBehavior})\n`,
+    );
+    if (quittingForReal) return; // real shutdown — let it close
+    if (closeBehavior !== "tray") return; // user wants to quit on close
+    event.preventDefault();
+
+    // Plant the suppression marker BEFORE hide() so the synchronous
+    // visibilitychange / blur handlers triggered by hide() see it.
+    // 800ms covers slow systems while staying short enough that a real
+    // app-switch a second later still locks as expected.
+    try {
+      await win.webContents.executeJavaScript(
+        `window.__zpassTrayHideAt = Date.now();`,
+        true /* userGesture: helps run even if page is suspended */,
+      );
+      process.stderr.write(
+        "[tray-close] planted __zpassTrayHideAt in renderer\n",
+      );
+    } catch (err) {
+      // If executeJavaScript fails (page nav in progress, devtools
+      // attached weirdly) we still proceed with hide — worst case the
+      // user gets locked, which is the pre-fix behaviour.
+      process.stderr.write(
+        `[tray-close] failed to plant suppression marker: ${String(err)}\n`,
+      );
+    }
+
+    // Secondary IPC notification (best-effort, eventually delivered).
+    // Lets renderer-side subscribers extend the suppression window if
+    // they want, and serves as a hookable event for future features.
+    try {
+      win.webContents.send("desktop:hiding-to-tray");
+    } catch {
+      /* webContents may be destroyed during shutdown races */
+    }
+    if (win.isFullScreen()) {
+      // Leaving fullscreen while hiding avoids the empty desktop space
+      // that some compositors (notably macOS Spaces) leave behind.
+      win.once("leave-full-screen", () => win.hide());
+      win.setFullScreen(false);
+    } else {
+      win.hide();
+    }
+  });
+
   // Note on perceived startup: we deliberately do NOT use the textbook
   // `show: false` + 'ready-to-show' pattern. On Wayland that event can fire
   // many hundreds of ms after loadFile/loadURL resolves (it waits for a
@@ -332,22 +586,40 @@ app.whenReady().then(async () => {
   bootTrace("app-ready");
   // Sidecar + IPC handler were registered at module load (above) so they
   // run in parallel with Electron's own init. Here we only need work that
-  // genuinely requires `ready`: creating windows, dev reload watcher.
+  // genuinely requires `ready`: creating windows, dev reload watcher,
+  // and the system tray (Tray requires the GPU/UI thread to be up).
   installDevReloader();
+  installTray();
 
   await createWindow();
   bootTrace("window-loaded");
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    // macOS dock click. If we have a hidden window (close-to-tray on mac),
+    // bring it back; otherwise rebuild.
+    if (BrowserWindow.getAllWindows().length === 0) {
+      void createWindow();
+    } else {
+      showMainWindow();
+    }
   });
 });
 
 app.on("window-all-closed", () => {
+  // When close-to-tray is active the BrowserWindow 'close' handler stops
+  // the window from actually closing, so this event won't fire anyway.
+  // It DOES fire when the user explicitly chose Quit (tray menu) on a
+  // platform where Quit closes the window first (Linux/Windows). On macOS
+  // we keep the historical behavior: window-all-closed alone does NOT quit
+  // the app (Cmd+Q does, and our tray Quit forces it).
   if (process.platform !== "darwin") app.quit();
 });
 
 app.on("before-quit", () => {
+  // Any "real" quit path — tray Quit, Cmd+Q on macOS, OS shutdown, etc.
+  // — flips the flag so windows can close instead of being intercepted by
+  // the close-to-tray handler.
+  quittingForReal = true;
   backend?.stop();
   backend = null;
 });

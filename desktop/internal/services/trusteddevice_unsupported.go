@@ -1,15 +1,16 @@
-//go:build !windows
+//go:build !windows && !linux
 
 package services
 
-// 非 Windows 平台的 trusted device stub
+// 非 Windows / 非 Linux 平台的 trusted device stub
 // ---------------------------------------------------------------------------
-// 当前仅 Windows 实现了「信任设备」自动解锁能力（DPAPI 方案）。macOS
-// TODO: 与 Linux 的实现规划如下，但尚未落地：
+// 当前已实现：
+//   - Windows：DPAPI（trusteddevice_windows.go）
+//   - Linux：Secret Service over D-Bus（trusteddevice_linux.go）
+//
+// 尚未实现（占位）：
 //   - macOS：Keychain Services + kSecAttrAccessibleAfterFirstUnlock
 //     （登录后即可访问，不弹 Touch ID；与 DPAPI 等价）
-//   - Linux：libsecret / Secret Service（org.freedesktop.Secret.Item）
-//     （取决于发行版自带的 keyring daemon，跨发行版兼容性略差）
 //
 // 本文件提供编译期占位，让非 Windows 构建不报「trustedDeviceProtector
 // 未初始化 / Protector 接口缺实现」之类的链接错误。运行时表现：
@@ -35,15 +36,15 @@ package services
 // 而不需要分平台 stub。
 //
 // ---------------------------------------------------------------------------
-// 等真正实现 macOS / Linux 时
+// 等真正实现 macOS 时
 //
-// 把对应平台从本文件的 build tag 排除即可。例如新增 macOS 实现时：
+// 把 darwin 从本文件的 build tag 排除即可：
 //   1. 新建 trusteddevice_darwin.go，build tag `//go:build darwin`，
 //      init() 里赋值 trustedDeviceProtector = &keychainProtector{}
-//   2. 把本文件 build tag 改成 `//go:build !windows && !darwin`
+//   2. 把本文件 build tag 改成 `//go:build !windows && !linux && !darwin`
 //
-// Linux 同理。这种约定让"已实现的平台"和"占位的平台"边界清晰，
-// 编译期靠 build tag 互斥保证不会同时注入两个实现。
+// 这种约定让"已实现的平台"和"占位的平台"边界清晰，编译期靠 build tag
+// 互斥保证不会同时注入两个实现。
 
 import (
 	"fmt"
@@ -68,7 +69,6 @@ func init() {
 // 前端拿到 false 后应当：
 //   - 把 Settings 的「在此设备上自动解锁」开关置灰 + 不可点击
 //   - 副标题展示 i18n key `settings_trusted_device_unsupported`
-//     （内容例如「此平台暂不支持，仅限 Windows」）
 func (p *unsupportedProtector) Available() bool {
 	return false
 }

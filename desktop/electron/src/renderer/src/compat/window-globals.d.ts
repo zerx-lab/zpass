@@ -37,6 +37,15 @@ export interface DesktopBridgeShape {
 		isFullscreen(): Promise<boolean>;
 		unfullscreen(): Promise<void>;
 		close(): Promise<void>;
+		setCloseBehavior(mode: "quit" | "tray"): Promise<void>;
+		/**
+		 * Subscribe to "about-to-hide-to-tray" notifications from the main
+		 * process. Returns an unsubscribe function.
+		 *
+		 * Consumed by AutoLock so the user's intentional minimise-to-tray
+		 * does not trigger lockOnSwitch / lockOnSleep.
+		 */
+		onHidingToTray(handler: () => void): () => void;
 	};
 	dialog: {
 		saveFile(opts: {

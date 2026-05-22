@@ -52,7 +52,7 @@ func (i *systemdUserInstaller) PlatformLabel() string {
 	return "systemd user service (socket activation)"
 }
 
-// Status 查询 .service 和 .socket 文件存在 + .socket 是否 enable
+// Status 查询 .service 和 .socket 文件存在 + .socket 是否 enable + service 是否健康
 func (i *systemdUserInstaller) Status() (SystemServiceStatus, error) {
 	dir, err := systemdUserDir()
 	if err != nil {
@@ -63,24 +63,75 @@ func (i *systemdUserInstaller) Status() (SystemServiceStatus, error) {
 
 	installed := fileExistsService(servicePath) && fileExistsService(socketPath)
 	enabled := false
+	healthy := false
+	var lastErr string
 	if installed {
 		// systemctl --user is-enabled zpass-agent.socket
 		// 返回 "enabled" 才视为启用；"static" / "disabled" / "linked" 都不算
 		cmd := exec.Command("systemctl", "--user", "is-enabled", "zpass-agent.socket")
 		out, _ := cmd.Output()
 		enabled = strings.TrimSpace(string(out)) == "enabled"
+
+		// 健康检查：enable 不等于「能拉起」。这里查两样东西：
+		//   1. socket unit 必须 active（开机/登入后 systemd 会自动启动 socket）
+		//   2. service unit 不能处于 failed / activating(auto-restart) 状态
+		//      —— 后者意味着进程反复 NAMESPACE / binary missing 等错误
+		if enabled {
+			healthy, lastErr = i.checkServiceHealth()
+		}
 	}
 
 	return SystemServiceStatus{
 		Supported:     true,
 		Installed:     installed,
 		Enabled:       enabled,
+		Healthy:       healthy,
+		LastError:     lastErr,
 		PlatformLabel: i.PlatformLabel(),
 	}, nil
 }
 
-// Install 写文件 + daemon-reload + enable --now
-func (i *systemdUserInstaller) Install(agentBinary string) error {
+// checkServiceHealth 查 socket unit 是否 active + service 是否在反复失败
+//
+// 返回 (healthy, lastError)：
+//   - healthy=true: socket active 且 service 没在失败循环
+//   - healthy=false: lastError 携带从 systemctl is-failed / show 读出的描述
+//
+// 调用 systemctl is-active / is-failed 而非解析 status 输出 —— 后者未是
+// 稳定接口，且装了 i18n 后会闹中文。
+func (i *systemdUserInstaller) checkServiceHealth() (bool, string) {
+	// 1. socket unit 必须 active
+	sockActive := strings.TrimSpace(runSystemctlOutput("is-active", "zpass-agent.socket"))
+	if sockActive != "active" {
+		return false, fmt.Sprintf("socket unit not active (state=%s)", sockActive)
+	}
+
+	// 2. service unit 不能 is-failed
+	//    is-failed 返回状态 "failed" 或 "activating" (auto-restart 循环中) 都是问题。
+	//    正常状态是 "inactive" (等待 socket activation) 或 "active" (刚被拉起中)。
+	svcState := strings.TrimSpace(runSystemctlOutput("is-active", "zpass-agent.service"))
+	switch svcState {
+	case "failed", "activating":
+		// 拉一下最近的错误信息，提供给 UI
+		result := strings.TrimSpace(runSystemctlOutput("show", "-p", "Result", "zpass-agent.service"))
+		return false, fmt.Sprintf("service unit in bad state (%s; %s)", svcState, result)
+	}
+
+	return true, ""
+}
+
+// runSystemctlOutput 同 runSystemctl 但返回 stdout（失败时返回空串）
+//
+// is-active / is-failed 这些命令「失败」本身就是信息一部分，不能当错误处理。
+func runSystemctlOutput(args ...string) string {
+	all := append([]string{"--user"}, args...)
+	cmd := exec.Command("systemctl", all...)
+	out, _ := cmd.Output()
+	return string(out)
+}
+
+// Install 写文件 + daemon-reload + enable（可选 --now）
+func (i *systemdUserInstaller) Install(agentBinary string, startNow bool) error {
 	if agentBinary == "" {
 		return errors.New("empty agent binary path")
 	}
@@ -109,7 +160,13 @@ func (i *systemdUserInstaller) Install(agentBinary string) error {
 	// 仍能通过 `systemctl --user daemon-reload && systemctl --user enable
 	// --now zpass-agent.socket` 手动启用。文件写好就是一半的胜利。
 	_ = runSystemctl("daemon-reload")
-	_ = runSystemctl("enable", "--now", "zpass-agent.socket")
+	if startNow {
+		_ = runSystemctl("enable", "--now", "zpass-agent.socket")
+	} else {
+		// 仅 enable：default.target 依赖生效后（下次登入）才启动 socket。
+		// 避免与 GUI supervisor 子进程争抢 socket fd。
+		_ = runSystemctl("enable", "zpass-agent.socket")
+	}
 
 	return nil
 }
@@ -214,6 +271,10 @@ Description=ZPass SSH agent (zero-knowledge SSH key broker)
 Documentation=https://github.com/zerx-lab/zpass
 After=graphical-session.target
 PartOf=graphical-session.target
+# 仅当 socket 被 ssh 客户端连接触发时才启动，不要在 GUI 启动后立即拉起：
+# 「GUI 在跑」意味着 GUI 的 controlListener 在 control.sock 上 listen，
+# agent 通过 socket activation 起来后会通过 control 通道连回 GUI。
+Requires=zpass-agent.socket
 
 [Service]
 Type=simple
@@ -221,19 +282,29 @@ ExecStart=%s --idle-timeout=5m
 KillMode=mixed
 KillSignal=SIGTERM
 TimeoutStopSec=10
-Restart=on-failure
-RestartSec=2s
+# 不要 Restart=on-failure：失败时进入退避循环会反复尝试，掩盖根因
+# （例如配置错误、binary 缺失）。失败一次让 systemd-journal 直接暴露问题，
+# 下次 socket 连接会再触发一次启动，自然的重试节奏。
+Restart=no
 
 # 资源限制 —— agent 是只读协议适配器，绝不该用很多内存
 MemoryMax=64M
 TasksMax=32
 
 # 安全 sandbox
+#
+# 这里的 ReadWritePaths 列出 agent 实际可能写的目录：
+#   - %%t/zpass            → XDG_RUNTIME_DIR/zpass (socket 文件)
+#   - %%h/.config/zpass    → capability token (agent.cap)
+#
+# 每条都用 "-" 前缀容忍缺失 —— 开发模式下某些目录可能还没创建，systemd
+# 默认会因为 "No such file or directory" 拒绝启动 (status=226/NAMESPACE)。
+# 加 "-" 后 systemd 把缺失视为 warning 而非 fatal。
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=%%t/zpass %%h/.zpass %%h/.config/zpass
+ReadWritePaths=-%%t/zpass -%%h/.config/zpass
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes

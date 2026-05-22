@@ -110,6 +110,7 @@ export function ThemeSync() {
 	const accent = usePrefsStore((s) => s.accent);
 	const fontSans = usePrefsStore((s) => s.fontSans);
 	const fontMono = usePrefsStore((s) => s.fontMono);
+	const closeBehavior = usePrefsStore((s) => s.closeBehavior);
 
 	// 主题 —— dark / light
 	useEffect(() => {
@@ -197,6 +198,23 @@ export function ThemeSync() {
 			root.style.removeProperty("--accent");
 		}
 	}, [accent]);
+
+	// 关闭按钮行为 —— 有效路径是推送给 Electron 主进程
+	//
+	// 主进程在 BrowserWindow 'close' 事件里据此决定 "隐藏到托盘" 还是
+	// "真关闭走 quit"。需要在 hydrate 与每次变动时都推一次——不能只
+	// 在初始化时推一次，否则用户中途在 Settings 修改后主进程依然在按旧
+	// 偏好处理 close。
+	//
+	// Preload 打包与渲染初始化之间可能有短暂窗口期由老代码调用，这里
+	// 加一道 typeof 保护以防在 SSR、测试环境报错。
+	useEffect(() => {
+		const bridge = window.desktop;
+		if (!bridge?.window?.setCloseBehavior) return;
+		bridge.window.setCloseBehavior(closeBehavior).catch((err) => {
+			console.warn("[ThemeSync] failed to push closeBehavior", err);
+		});
+	}, [closeBehavior]);
 
 	return null;
 }

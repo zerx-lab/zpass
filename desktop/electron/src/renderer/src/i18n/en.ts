@@ -570,15 +570,30 @@ export const en = {
 	settings_lock_never_confirm: "I understand, disable auto-lock",
 	settings_lock_never_cancel: "Keep auto-lock enabled",
 
+	// Settings — Close-button behaviour (Quit vs minimise to tray)
+	settings_section_window: "Window",
+	settings_section_window_desc:
+		"Control how the app window behaves and integrates with the system tray.",
+	settings_close_behavior: "When closing the window",
+	settings_close_behavior_desc:
+		"Tray mode keeps ZPass running so passwords stay one click away. The tray icon is always shown.",
+	settings_close_behavior_quit: "Quit ZPass",
+	settings_close_behavior_tray: "Minimise to system tray",
+	settings_tray_hint:
+		"Left-click the tray icon to show the window. Right-click for more options.",
+	tray_menu_show: "Show ZPass",
+	tray_menu_quit: "Quit ZPass",
+	tray_tooltip: "ZPass",
+
 	// Settings — Trusted device (auto-unlock on app restart)
 	settings_section_trusted_device: "Trusted device",
 	settings_section_trusted_device_desc:
-		"Skip the master password on this device. Your encryption key is wrapped by Windows credentials (DPAPI) and bound to your current OS account.",
+		"Skip the master password on this device. Your encryption key is wrapped by your operating system's credential protection and bound to your current OS account.",
 	settings_trusted_device_toggle: "Auto-unlock on this device",
 	settings_trusted_device_toggle_desc:
 		"Restart ZPass without entering your master password.",
 	settings_trusted_device_unsupported:
-		"This platform is not yet supported. Currently available on Windows only.",
+		"Auto-unlock is not available on this device.",
 	settings_trusted_device_enabled_hint:
 		"Trusted on this device. Master password is not required on app restart.",
 	settings_trusted_device_enable_title: "Trust this device?",
@@ -587,7 +602,7 @@ export const en = {
 	settings_trusted_device_enable_when_safe: "Enable only if:",
 	settings_trusted_device_enable_safe_1: "This device is used only by you",
 	settings_trusted_device_enable_safe_2:
-		"Your Windows account is protected by a strong password",
+		"Your OS account is protected by a strong password",
 	settings_trusted_device_enable_safe_3: "The device is not shared with others",
 	settings_trusted_device_enable_when_unsafe: "Do NOT enable on:",
 	settings_trusted_device_enable_unsafe_1: "Shared or public computers",

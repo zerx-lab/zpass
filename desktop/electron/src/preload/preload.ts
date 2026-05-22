@@ -62,6 +62,37 @@ const api = {
     unfullscreen: () =>
       ipcRenderer.invoke("desktop:window:unfullscreen") as Promise<void>,
     close: () => ipcRenderer.invoke("desktop:window:close") as Promise<void>,
+    /**
+     * Notify the main process whether closing the window should quit the
+     * app or hide it into the system tray. Called from ThemeSync whenever
+     * the user-facing preference (`prefs.closeBehavior`) changes.
+     */
+    setCloseBehavior: (mode: "quit" | "tray") =>
+      ipcRenderer.invoke(
+        "desktop:window:set-close-behavior",
+        mode,
+      ) as Promise<void>,
+    /**
+     * Subscribe to "about-to-hide-to-tray" notifications.
+     *
+     * Fired by the main process immediately BEFORE `win.hide()` runs in
+     * tray-close mode. Hiding the window unavoidably triggers
+     * `window blur` and `visibilitychange -> hidden`, which AutoLock
+     * normally treats as "user switched apps / display slept" and uses
+     * to lock the vault. Renderer code (AutoLock) listens for this
+     * event and opens a brief suppression window so the user's
+     * intentional minimise-to-tray doesn't immediately lock them out.
+     *
+     * Returns an unsubscribe function. Safe to call repeatedly; each
+     * call registers an independent listener.
+     */
+    onHidingToTray: (handler: () => void) => {
+      const wrapped = () => handler();
+      ipcRenderer.on("desktop:hiding-to-tray", wrapped);
+      return () => {
+        ipcRenderer.removeListener("desktop:hiding-to-tray", wrapped);
+      };
+    },
   },
 
   dialog: {

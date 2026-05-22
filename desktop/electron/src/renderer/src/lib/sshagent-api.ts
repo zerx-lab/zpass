@@ -36,6 +36,7 @@ export interface SshAgentStatus {
 	enabled: boolean;
 	agentConnected: boolean;
 	agentSupervised: boolean;
+	agentManagedBySystem: boolean;
 	socketPath: string;
 	controlPath: string;
 	keyCount: number;
@@ -85,6 +86,7 @@ const memoryStub = {
 		enabled: false,
 		agentConnected: false,
 		agentSupervised: false,
+		agentManagedBySystem: false,
 		socketPath: "/tmp/zpass/agent.sock (mock)",
 		controlPath: "/tmp/zpass/control.sock (mock)",
 		keyCount: 0,
