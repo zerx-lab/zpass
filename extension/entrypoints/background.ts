@@ -15,6 +15,7 @@ import {
   type PasskeySignPayload,
   type QueryLoginsResult,
   type SaveLoginDecision,
+  type ShowSaveToastMessage,
 } from "../src/shared/messages";
 
 const bridge = new NativeBridge();
@@ -26,13 +27,23 @@ const bridge = new NativeBridge();
 // 状态，我们不能直接弹「保存」（干方拿不到 vault 读写权限）。反之，我们要做三件事：
 //
 //   1. 让 content-script 弹个「解锁并保存」的提示 toast。
-//   2. 在本模块内存里以 tabId+origin 为键留住 capture 负载。
+//   2. 在本模块里以 tabId+origin 为键留住 capture 负载。
 //   3. 开启一个低频次 status 轮询，一旦发现 unlocked → 重评 captureLogin、
 //      如果评估不是 "none" 就把对应 toast 推回 content-script。
 //
-// 为什么设超时：service worker 梦想里可以跳完才恢复，但现实是
-// MV3 会主动 unload。我们接受「用户 5 分钟内不解锁 → 丢丢 capture」的
-// 技术代价，避免明文密码在内存里退到后台越久越危险。
+// **什么使用 chrome.storage.session：**
+// MV3 service worker 在 30 秒空闲后会被 terminate，模块级内存 Map 全部丢。
+// 跳转页面期间容易命中这个窗口，导致 capture 遗失。storage.session 是内存存
+// 储、不落盘、SW 重启不丢，浏览器关 / 扩展重载才清——Bitwarden / 1Password
+// 同样选择，是此场景的正确答案。明文密码仅驻内存、仍满足安全要求。
+//
+// 为避免每次调用都 async 走一趟 storage，另维护一份内存镜像；SW 启动时
+// 延迟从 storage 装载，装载完后后续所有读走内存、写同时写内存及 storage。
+// 任何外部 entry point（handleMessage / tabs.onUpdated / pruneExpired）调读前
+// 都需 await ensurePendingLoaded() 以保证镜像是新的。
+//
+// 为什么设超时：service worker 梦想里可以跳完才恢复，但现实是明文密码在
+// 内存里退到后台越久越危险。接受「用户 5 分钟内不解锁 → 丢丢 capture」。
 // ============================================================================
 
 interface PendingCapture {
@@ -42,10 +53,24 @@ interface PendingCapture {
   username: string;
   password: string;
   expiresAt: number;
+  /**
+   * captureLogin 评估结果。
+   *   - new/update：可直接弹保存 toast。
+   *   - locked：需等 vault 解锁后 drainPendingCapturesOnUnlock 重评。
+   * 仅保存 new/update/locked 三种，不存 none。
+   */
+  decision: SaveLoginDecision;
+  /** 页面推荐的条目名称（原页 document.title），可空。 */
+  suggestedName?: string;
 }
 
-const pendingCaptures = new Map<string, PendingCapture>();
 const PENDING_CAPTURE_TTL_MS = 5 * 60 * 1000; // 5 分钟
+const SESSION_KEY = "zpass.pendingCaptures.v1";
+
+// 内存镜像。所有读都从这里拿；所有写同时走内存 + storage.session。
+// 仅在模块首次访问时从 storage 预热（SW 启动后可能没镜像但 storage 里有数据）。
+const pendingCaptures = new Map<string, PendingCapture>();
+let pendingLoadPromise: Promise<void> | null = null;
 
 let unlockPollTimer: ReturnType<typeof globalThis.setInterval> | null = null;
 const UNLOCK_POLL_INTERVAL_MS = 1500;
@@ -54,14 +79,95 @@ function pendingKey(tabId: number, origin: string): string {
   return `${tabId}::${origin}`;
 }
 
+/**
+ * 确保内存镜像从 storage.session 装载过。多次调用只走一次 round-trip。
+ * 所有压需访问 pendingCaptures 的入口都要 await 这个。
+ */
+function ensurePendingLoaded(): Promise<void> {
+  if (pendingLoadPromise !== null) return pendingLoadPromise;
+  pendingLoadPromise = (async () => {
+    try {
+      const stored = await browser.storage.session.get(SESSION_KEY);
+      const raw = stored[SESSION_KEY] as
+        | Record<string, PendingCapture>
+        | undefined;
+      if (raw && typeof raw === "object") {
+        const now = Date.now();
+        for (const [key, value] of Object.entries(raw)) {
+          if (value && value.expiresAt > now) {
+            pendingCaptures.set(key, value);
+          }
+        }
+      }
+    } catch {
+      // storage.session 在某些环境下不可用（如很老的 Chrome）——退化为纯内存。
+      // SW 重启后会丢 capture，但 UI 表现与原来一致，不障碍其他功能。
+    }
+    // 装载后启动 locked 轮询（如果有遗留的 locked capture）
+    if (hasLockedPending()) startUnlockPolling();
+  })();
+  return pendingLoadPromise;
+}
+
+/**
+ * 把当前镜像同步到 storage.session。写是全量写——队列小（边外套几条），
+ * 不会是热点。fire-and-forget，调用者不提供 await 路径。
+ */
+function persistPending(): void {
+  const snapshot: Record<string, PendingCapture> = {};
+  for (const [key, value] of pendingCaptures) {
+    snapshot[key] = value;
+  }
+  void browser.storage.session.set({ [SESSION_KEY]: snapshot }).catch(() => {
+    // storage 不可用：内存镜像仍准，仅多 SW 重启送丢。
+  });
+}
+
 function rememberPendingCapture(capture: PendingCapture): void {
   pendingCaptures.set(pendingKey(capture.tabId, capture.origin), capture);
-  startUnlockPolling();
+  persistPending();
+  // 诊断日志：不打密码、仅记关键路径用于排查
+  console.log(
+    "[ZPass] remember capture",
+    capture.decision.status,
+    capture.origin,
+    capture.username,
+  );
+  // 仅 locked 需要轮询解锁状态；new/update 是等 tabs.onUpdated 或 content-script pull，
+  // 不消耗轮询资源。
+  if (capture.decision.status === "locked") {
+    startUnlockPolling();
+  }
 }
 
 function forgetPendingCapture(tabId: number, origin: string): void {
-  pendingCaptures.delete(pendingKey(tabId, origin));
-  if (pendingCaptures.size === 0) stopUnlockPolling();
+  const had = pendingCaptures.delete(pendingKey(tabId, origin));
+  if (had) persistPending();
+  if (!hasLockedPending()) stopUnlockPolling();
+}
+
+/** 任一 pending capture 是 locked 状态吗？决定是否需保持轮询。 */
+function hasLockedPending(): boolean {
+  for (const capture of pendingCaptures.values()) {
+    if (capture.decision.status === "locked") return true;
+  }
+  return false;
+}
+
+/**
+ * 清掉指定 tab 的所有 pending capture（不限 origin）。
+ * 用于 tab 关闭 / 跳转到不匹配 origin 的场景。
+ */
+function forgetAllPendingForTab(tabId: number): void {
+  let dirty = false;
+  for (const [key, capture] of pendingCaptures) {
+    if (capture.tabId === tabId) {
+      pendingCaptures.delete(key);
+      dirty = true;
+    }
+  }
+  if (dirty) persistPending();
+  if (!hasLockedPending()) stopUnlockPolling();
 }
 
 function startUnlockPolling(): void {
@@ -79,6 +185,7 @@ function stopUnlockPolling(): void {
 }
 
 async function drainPendingCapturesOnUnlock(): Promise<void> {
+  await ensurePendingLoaded();
   if (pendingCaptures.size === 0) {
     stopUnlockPolling();
     return;
@@ -118,29 +225,42 @@ async function drainPendingCapturesOnUnlock(): Promise<void> {
         continue;
       }
       if (decision.status === "locked") {
-        // 生袣状态。同下轮再试。
+        // 还是 locked。下轮重试。
         continue;
       }
-      // new / update —— 推送「现在可以保存」toast给 content-script
-      const pushed = await pushSaveToast(capture.tabId, capture, decision);
+      // new / update —— 升级 decision 并尝试 push。push 失败（content-script
+      // 不在）不丢 capture：升级后的队列可被 tabs.onUpdated / checkSaveQueue 领走。
+      const upgraded: PendingCapture = { ...fresh, decision };
+      pendingCaptures.set(pendingKey(capture.tabId, capture.origin), upgraded);
+      persistPending();
+      const pushed = await pushSaveToast(capture.tabId, upgraded, decision);
       if (pushed) {
         forgetPendingCapture(capture.tabId, capture.origin);
       }
+      // 本轮完了。升级后不再 locked，后面 hasLockedPending() 如所有 capture 都
+      // 不是 locked了则轮询会被 stopUnlockPolling 停掉。
     } catch {
       // 零星错误不阻断其他 capture 重评。
     }
   }
   pruneExpiredCaptures();
+  // 轮询是为 locked 的——如果本轮之后所有 locked 都被升级为 new/update
+  // 或 forget 了，该停轮询。forget* 函数会自动 stopUnlockPolling，这里
+  // 仅为「只升级了、一个 forget 都没」的路径补一下。
+  if (!hasLockedPending()) stopUnlockPolling();
 }
 
 function pruneExpiredCaptures(): void {
   const now = Date.now();
+  let dirty = false;
   for (const [key, capture] of pendingCaptures) {
     if (capture.expiresAt <= now) {
       pendingCaptures.delete(key);
+      dirty = true;
     }
   }
-  if (pendingCaptures.size === 0) stopUnlockPolling();
+  if (dirty) persistPending();
+  if (!hasLockedPending()) stopUnlockPolling();
 }
 
 /**
@@ -153,7 +273,7 @@ async function pushSaveToast(
   decision: SaveLoginDecision,
 ): Promise<boolean> {
   try {
-    await browser.tabs.sendMessage(tabId, {
+    const message: ShowSaveToastMessage = {
       type: "zpass.showSaveToast",
       decision,
       capture: {
@@ -162,9 +282,25 @@ async function pushSaveToast(
         username: capture.username,
         password: capture.password,
       },
-    });
+    };
+    if (capture.suggestedName) {
+      message.capture.suggestedName = capture.suggestedName;
+    }
+    await browser.tabs.sendMessage(tabId, message);
+    console.log(
+      "[ZPass] push save toast OK",
+      tabId,
+      capture.origin,
+      decision.status,
+    );
     return true;
-  } catch {
+  } catch (error) {
+    console.log(
+      "[ZPass] push save toast failed",
+      tabId,
+      capture.origin,
+      error instanceof Error ? error.message : error,
+    );
     // tab 已关 / content-script 未加载——删除会调、不重试。
     return false;
   }
@@ -174,6 +310,49 @@ export default defineBackground(() => {
   initBadge(bridge);
   browser.runtime.onMessage.addListener((message: unknown, sender) => {
     return handleMessage(message, sender);
+  });
+
+  // ──── 跨页面跳转后推「保存 toast」的主动分支 ────
+  //
+  // 场景：用户在 A 页提交登录，成功后浏览器跳转到 B 页。原 content-script 被
+  // unload 了，另外 toast 也随旧 DOM 丢。这里监听 tabs.onUpdated，在新页面
+  // status==="complete" 后看看队列里该 tab 还有没有未消费的 new/update
+  // capture、有就 push 一次。这与 content-script 启动时主动 pull (见
+  // zpass.checkSaveQueue) 双保险——以 push 为主、pull 兑底，哪个先到包都能弹。
+  //
+  // 不接「domain」随意变化：只有新 URL 的 origin 与 capture origin 严格一致才 push。
+  // 跳到不同 origin 的页面 = 用户不再为当初 origin 口告责任，不弹，仅等过期
+  // 或 onRemoved 清掉。
+  browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (changeInfo.status !== "complete") return;
+    if (!tab.url) return;
+    const newOrigin = getHttpOrigin(tab.url);
+    if (!newOrigin) return;
+    void (async () => {
+      // 必须 await：SW 刚被页面导航拉起来、镜像还空。
+      await ensurePendingLoaded();
+      const capture = pendingCaptures.get(pendingKey(tabId, newOrigin));
+      if (!capture) return;
+      if (
+        capture.decision.status !== "new" &&
+        capture.decision.status !== "update"
+      )
+        return;
+      // 跨 origin 为了不误弹，这里 capture.origin === newOrigin 被 pendingKey 隐含保证。
+      await pushSaveToast(tabId, capture, capture.decision);
+      // 不在这里 forget：用户可能点了关闭、或 SPA 中多次 tabs.onUpdated 跳转仍同
+      // origin——保留队列让其能重推。forget 只在 saveLogin / ignoreSaveOrigin /
+      // 跨 origin 跳转 / tab 关闭 / TTL 过期 这几个明确信号上才发生。
+    })();
+  });
+
+  // tab 关闭 → 丢掉该 tab 的所有 pending capture。安全性：避免明文密码在
+  // 内存里驻留超过用户意预期的时间。
+  browser.tabs.onRemoved.addListener((tabId) => {
+    void (async () => {
+      await ensurePendingLoaded();
+      forgetAllPendingForTab(tabId);
+    })();
   });
 });
 
@@ -217,6 +396,11 @@ async function handleMessage(
     if (!origin) {
       return { ok: false, error: "ZPass 只支持 http 和 https 页面。" };
     }
+
+    // 以下所有分支可能访问 pendingCaptures——在其它代码跳进分支前确保
+    // 镜像从 storage.session 装载过。首次调用带一次 storage round-trip，后续
+    // 调用都是已 resolved promise、几乎零开销。
+    await ensurePendingLoaded();
 
     // 统一参数缺失提示文案——可能是扩展内部逻辑 bug，推给用户的入口都使用中文
     const missingItemId = { ok: false as const, error: "缺少条目 ID。" };
@@ -347,10 +531,12 @@ async function handleMessage(
       const payload = parsePasskeyPayload<{
         username?: unknown;
         password?: unknown;
+        suggestedName?: unknown;
       }>(req.payload);
       const username = stringField(payload, "username");
       const password =
         typeof payload.password === "string" ? payload.password : "";
+      const suggestedName = stringField(payload, "suggestedName");
       if (!username || !password) {
         // 空账密不报错，返 status=none 让 content-script 走「不弹」分支。
         return {
@@ -368,19 +554,36 @@ async function handleMessage(
         username,
         password,
       });
-      if (decision.status === "locked" && tab.id !== undefined) {
-        // 留着凭据等解锁后重试。不在这里主动推 toast，content-script 拿到
-        // decision.status=locked 后自己弹 「解锁并保存」 toast。
-        rememberPendingCapture({
+      console.log(
+        "[ZPass] captureLogin decision",
+        decision.status,
+        origin,
+        username,
+        decision.reason ?? "",
+      );
+      // 不同决策分别入/出队。**与上一版的最大区别：**这里对 new/update
+      // 也 rememberPendingCapture，为「提交后页面跳转」场景兼底——content-script
+      // 拿到 decision 后在旧页上“能弹就弹”，页面一跳丢了也不要紧，
+      // tabs.onUpdated / checkSaveQueue 会从队列重推。
+      if (
+        tab.id !== undefined &&
+        (decision.status === "new" ||
+          decision.status === "update" ||
+          decision.status === "locked")
+      ) {
+        const capture: PendingCapture = {
           tabId: tab.id,
           url: tab.url,
           origin,
           username,
           password,
           expiresAt: Date.now() + PENDING_CAPTURE_TTL_MS,
-        });
+          decision,
+        };
+        if (suggestedName) capture.suggestedName = suggestedName;
+        rememberPendingCapture(capture);
       } else if (decision.status === "none" && tab.id !== undefined) {
-        // 跳过 —— 能越跟越好，别让旧 capture 留着。
+        // 决策怎么动都不弹，该清就清。避免旧 capture 遗留在内存里。
         forgetPendingCapture(tab.id, origin);
       }
       return { ok: true, result: decision };
@@ -425,6 +628,33 @@ async function handleMessage(
         forgetPendingCapture(tab.id, origin);
       }
       return { ok: true, result };
+    }
+
+    // content-script 启动 / 页面 ready 后主动 pull。background 查队列里
+    // 该 tab+origin 还有没有未消费的 new/update capture，有就立即 push。
+    //
+    // 安全考量：
+    //   - origin / tab.id 都是 background 从 sender 重推出来的（见上面 resolveTab
+    //     + getHttpOrigin），content-script 端伪造不了。pendingKey 同时锁
+    //     tabId + origin，根本不可能跳 tab 拿别人的密码。
+    //   - locked 状态不走 push 路径；content-script 拿到 status=locked 后自己
+    //     弹「解锁并保存」 toast。
+    if (req.type === "zpass.checkSaveQueue") {
+      if (tab.id === undefined) return { ok: true };
+      const capture = pendingCaptures.get(pendingKey(tab.id, origin));
+      if (!capture) return { ok: true };
+      if (capture.expiresAt <= Date.now()) {
+        forgetPendingCapture(tab.id, origin);
+        return { ok: true };
+      }
+      if (
+        capture.decision.status === "new" ||
+        capture.decision.status === "update"
+      ) {
+        // 异步 push，不阻塞响应。content-script 会从同一 onMessage 通道拿到。
+        void pushSaveToast(tab.id, capture, capture.decision);
+      }
+      return { ok: true };
     }
 
     if (req.type === "zpass.fillActiveTab") {

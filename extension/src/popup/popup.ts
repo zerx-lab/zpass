@@ -159,9 +159,12 @@ async function refresh(ctx: RenderContext): Promise<void> {
       return;
     }
 
-    const queryResponse = await browser.runtime.sendMessage({
-      type: "zpass.queryLogins",
-    });
+    // status 确认 unlocked 后，queryLogins 与 queryPasskeysForActiveTab 互不依赖。
+    // 串行 → 并行省一个 sendMessage RTT（每个 RTT 含 SW 到2native一趟来回，冷启动 可能 100ms）。
+    const [queryResponse, passkeyResult] = await Promise.all([
+      browser.runtime.sendMessage({ type: "zpass.queryLogins" }),
+      queryPasskeysForActiveTab(),
+    ]);
     if (!queryResponse?.ok) {
       renderState({
         tone: "err",
@@ -181,7 +184,6 @@ async function refresh(ctx: RenderContext): Promise<void> {
       return;
     }
     const loginResult = queryResponse.result as QueryLoginsResult;
-    const passkeyResult = await queryPasskeysForActiveTab();
     renderMatches(ctx, loginResult, passkeyResult?.items ?? []);
   } finally {
     setMainBusy(false);

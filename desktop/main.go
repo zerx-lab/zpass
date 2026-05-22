@@ -23,12 +23,17 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/zerx-lab/zpass/internal/server"
 	"github.com/zerx-lab/zpass/internal/services"
@@ -83,11 +88,34 @@ func runServer() error {
 		return err
 	}
 
-	// http.Serve blocks; the deferred deps.shutdown() above runs once it
-	// returns (process tear-down or fatal listener error). We deliberately
-	// do not install signal handlers — Electron is the parent and kills us
-	// with SIGTERM/SIGKILL when the user closes the window.
-	return http.Serve(built.Listener, built.Handler)
+	// Graceful shutdown on Electron parent kill.
+	//
+	// Electron's `child.kill()` defaults to SIGTERM. Without a handler, Go's
+	// runtime exits immediately and `defer deps.shutdown()` never runs —
+	// which leaves `~/.config/zpass/browser-bridge.json` behind pointing at
+	// a dead port. The native-host then thinks the GUI is alive, tries to
+	// forward to a closed loopback socket, then enters the spawn+waitBridge
+	// path (~5s) on every browser popup. Catching SIGTERM/SIGINT here lets
+	// `BrowserBridgeServer.Shutdown` remove the file on the way out.
+	//
+	// SIGKILL cannot be caught — if Electron escalates we still leak the
+	// file, but the native-host has its own staleness check as a backstop.
+	srv := &http.Server{Handler: built.Handler}
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-sigCh
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+	}()
+
+	// http.Server.Serve returns http.ErrServerClosed on graceful shutdown;
+	// treat that as success so the deferred deps.shutdown() runs cleanly.
+	if err := srv.Serve(built.Listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
 }
 
 func dumpOpenAPI(path string) error {

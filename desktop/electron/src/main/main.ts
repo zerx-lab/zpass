@@ -45,15 +45,25 @@ app.commandLine.appendSwitch("disable-renderer-backgrounding");
 app.commandLine.appendSwitch("no-default-browser-check");
 
 if (process.platform === "linux") {
-  // Let Electron pick Wayland natively when the session is Wayland, instead
-  // of going through XWayland. Matters for HiDPI scaling and IME latency.
-  app.commandLine.appendSwitch("ozone-platform-hint", "auto");
-  // Set the Wayland xdg_toplevel.app_id (and X11 WM_CLASS) so the
-  // compositor can match the window to /usr/share/applications/zpass.desktop
-  // and use the hicolor `zpass` icon. Without this, Chromium leaves app_id
-  // unset on Wayland and the taskbar falls back to a generic "Wayland"
-  // placeholder icon. `app.setName()` does NOT affect this — only the
-  // Chromium `--class` switch is read by the Ozone Wayland backend.
+  // Force the X11 Ozone backend even on Wayland sessions.
+  //
+  // Background: the previous `ozone-platform-hint=auto` lets Chromium pick
+  // Wayland natively when WAYLAND_DISPLAY is set. That triggers two log spam
+  // ERRORs that cannot be fully silenced on Electron 42:
+  //   1. wayland_surface_factory.cc: "'--ozone-platform=wayland' is not
+  //      compatible with Vulkan" — emitted unconditionally during GPU
+  //      capability probing, even with `disable-features=Vulkan`.
+  //   2. viz/.../display.cc: "Frame latency is negative" — Wayland
+  //      presentation_feedback timestamps occasionally precede frame
+  //      submission timestamps by a few microseconds.
+  //
+  // Pinning X11 (XWayland on Wayland sessions) eliminates both. Trade-offs
+  // we accept here: slightly higher IME latency and HiDPI scaling that goes
+  // through XWayland's integer scaling instead of Wayland fractional scaling.
+  // For a password manager UI those are not perceptible.
+  app.commandLine.appendSwitch("ozone-platform", "x11");
+  // Set the X11 WM_CLASS so the window manager can match the window to
+  // /usr/share/applications/zpass.desktop and use the hicolor `zpass` icon.
   // The value must match the .desktop file's basename (`zpass.desktop`)
   // and its `StartupWMClass=zpass` field.
   app.commandLine.appendSwitch("class", "zpass");

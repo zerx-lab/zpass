@@ -33,6 +33,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/zerx-lab/zpass/internal/nativebridge"
@@ -59,6 +60,13 @@ const (
 	errCodeDesktopOffline = "ZPass Desktop is not running."
 )
 
+// stdoutMu 串行化 writeNative。
+//
+// Chrome native messaging 是「4 字节 little-endian 长度前缀 + JSON body」的帧
+// 协议，跨 goroutine 交错写会坏帧。dispatchMessage 现在并发跑（见 main 循环
+// 注释），必须在这里加锁。
+var stdoutMu sync.Mutex
+
 func main() {
 	for {
 		msg, err := readNative(os.Stdin)
@@ -69,7 +77,17 @@ func main() {
 			writeNative(nativeResponse{OK: false, Error: "Invalid native message."})
 			return
 		}
-		writeNative(dispatchMessage(msg))
+		// 每条请求一个 goroutine。动机：资源型调用（status/queryLogins）在
+		// desktop 离线时会阐 spawn + waitForBridge 走 5s。串行主循环会让
+		// 同一 port 上后续的 ping 排队等这 5s，直接拖慢 popup。
+		//
+		// 并发后：底下 dispatch 互不阻塞；background 端 NativeBridge.handleMessage
+		// 按 id 匹配 pending，乱序响应完全 OK。forwardToDesktopClient 里每次
+		// 都在 ReadStandardConfig + http.Client.Do 中独立走，无共享状态；
+		// ensureGUIRunning 自带 mutex + flight 原子 flag，多 goroutine 调安全。
+		go func(m nativeEnvelope) {
+			writeNative(dispatchMessage(m))
+		}(msg)
 	}
 }
 
@@ -135,6 +153,12 @@ func dispatchMessage(msg nativeEnvelope) nativeResponse {
 // `{ok:false, error:"Unknown native request: ping"}` (HTTP 200)。forward
 // 本身 err==nil，不能当成 alive 信号。需要检查 resp.OK 才能识别
 // “连上了但不能服务” 这种中间状态。这种场景下仅获取 GUI 连接性即
+//
+// 副作用：连不通时主动删 browser-bridge.json。 Desktop GUI 被强杀 /
+// 崩溃时来不及跑 Shutdown 清理这个文件，留着会让后续每个资源型调用
+// (status/queryLogins) 走 spawn + waitBridge 5s 慢路径。ping 是 popup
+// 启动时首调用，这里清理后下一次任何调用 ReadStandardConfig 会直接
+// 返 err、立即识别 desktop offline。
 func handlePing(msg nativeEnvelope) nativeResponse {
 	if resp, err := forwardToDesktopClient(msg); err == nil {
 		if resp.OK {
@@ -147,6 +171,11 @@ func handlePing(msg nativeEnvelope) nativeResponse {
 			OK:     true,
 			Result: map[string]bool{"alive": true},
 		}
+	}
+	// forward 失败：json 存在但端口拒绝连接 — 删僵尸 json。
+	// ReadStandardConfig 缺失时这里是 no-op。
+	if path, err := nativebridge.ConfigPath(); err == nil {
+		_ = os.Remove(path)
 	}
 	return nativeResponse{
 		ID:    msg.ID,
@@ -272,6 +301,8 @@ func writeNative(resp nativeResponse) {
 	if err != nil {
 		payload = []byte(`{"ok":false,"error":"Native response encoding failed."}`)
 	}
+	stdoutMu.Lock()
+	defer stdoutMu.Unlock()
 	_ = binary.Write(os.Stdout, binary.LittleEndian, uint32(len(payload)))
 	_, _ = os.Stdout.Write(payload)
 }

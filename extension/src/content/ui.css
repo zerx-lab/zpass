@@ -18,8 +18,6 @@
 .zpass-menu,
 .zpass-notice,
 .zpass-toast,
-.zpass-save-toast,
-.zpass-save-toast *,
 .zpass-dialog-backdrop,
 .zpass-dialog-backdrop * {
   /* 颗粒级 CSS 变量，与 website 设计系统对齐，加 --zp- 前缀防与宿主冲突 */
@@ -50,8 +48,6 @@
   .zpass-menu,
   .zpass-notice,
   .zpass-toast,
-  .zpass-save-toast,
-  .zpass-save-toast *,
   .zpass-dialog-backdrop,
   .zpass-dialog-backdrop * {
     --zp-bg: #fbfbf9;
@@ -553,7 +549,6 @@
   .zpass-menu,
   .zpass-notice,
   .zpass-toast,
-  .zpass-save-toast,
   .zpass-dialog-backdrop,
   .zpass-passkey-dialog {
     animation: none !important;
@@ -561,135 +556,3 @@
   }
 }
 
-/* ============ Save-login Toast ============
- * 右下角丰富 toast，带按钮、不自动消失。
- * 与 .zpass-toast 分开是因为后者是「短则」、这里需要用户决策。
- */
-.zpass-save-toast {
-  position: fixed;
-  z-index: 2147483647;
-  right: 18px;
-  bottom: 18px;
-  display: grid;
-  gap: 10px;
-  width: min(360px, calc(100vw - 36px));
-  padding: 14px;
-  border: 1px solid var(--zp-line);
-  border-radius: var(--zp-radius-lg);
-  background: var(--zp-bg);
-  color: var(--zp-text);
-  box-shadow: var(--zp-shadow);
-  font-family: var(--zp-font);
-  font-size: 13px;
-  line-height: 1.4;
-  animation: zp-toast-in 0.2s ease;
-}
-
-.zpass-save-toast-head {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 10px;
-  align-items: start;
-}
-
-.zpass-save-toast-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: 1px solid var(--zp-line);
-  border-radius: var(--zp-radius);
-  color: var(--zp-text-2);
-}
-
-.zpass-save-toast-text {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.zpass-save-toast-text strong {
-  font-weight: 600;
-  color: var(--zp-text);
-}
-
-.zpass-save-toast-text span {
-  color: var(--zp-text-2);
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  /* 子标题可能包含 email 或 URL，允许换行避免被切掉 */
-  white-space: normal;
-  word-break: break-all;
-}
-
-.zpass-save-toast-close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: var(--zp-radius-sm);
-  background: transparent;
-  color: var(--zp-text-3);
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.zpass-save-toast-close:hover {
-  background: var(--zp-bg-hover);
-  color: var(--zp-text);
-}
-
-.zpass-save-toast-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.zpass-save-toast-actions button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 70px;
-  padding: 6px 14px;
-  border-radius: var(--zp-radius);
-  font-family: var(--zp-font);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition:
-    background 0.12s,
-    border-color 0.12s;
-}
-
-.zpass-save-toast-actions button:disabled {
-  opacity: 0.5;
-  cursor: progress;
-}
-
-.zpass-save-toast-never {
-  border: 1px solid var(--zp-line);
-  background: transparent;
-  color: var(--zp-text-2);
-}
-
-.zpass-save-toast-never:hover {
-  background: var(--zp-bg-hover);
-  color: var(--zp-text);
-}
-
-.zpass-save-toast-primary {
-  border: 1px solid var(--zp-accent);
-  background: var(--zp-accent);
-  color: var(--zp-accent-ink);
-}
-
-.zpass-save-toast-primary:hover {
-  filter: brightness(1.05);
-}

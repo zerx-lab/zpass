@@ -102,6 +102,18 @@ export async function refreshTab(
         await clearBadge(tabId);
         return;
       }
+      // 先用 ping 探活，避免 desktop 离线时 queryLogins 走 nativehost 的
+      // spawn + waitBridge 路径。后者是为 popup 用户主动操作设计的重路径
+      // （5s 轮询 + 可能 spawn GUI），badge 刷新是隐式反应 tabs.onActivated
+      // / onUpdated 事件，不该代用户决定拉起 GUI。且该隐式调用会占据
+      // nativehost 串行 stdin 队列，拖慢 popup 后续的 ping。
+      try {
+        await bridge.ping();
+      } catch {
+        cache.delete(tabId);
+        await clearBadge(tabId);
+        return;
+      }
       try {
         const result = await bridge.queryLogins({ origin, url: url! });
         if (!result.unlocked) {

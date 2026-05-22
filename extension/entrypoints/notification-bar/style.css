@@ -1,0 +1,186 @@
+/* ============================================================================
+ * ZPass Notification Bar — iframe 内部样式
+ * ----------------------------------------------------------------------------
+ * 该样式表只在扩展 origin 的 iframe 文档内生效，不会污染宿主页面，
+ * 也不会被宿主页面 CSS 干扰。无需 !important 防御。
+ *
+ * 变量与 src/styles/tokens.css 对齐，但因 iframe 没有 Geist webfont
+ * 引入（避免每次弹保存条都打外网），fallback 到 system-ui。
+ * ========================================================================== */
+
+:root {
+  --bg: #0c0c0d;
+  --bg-elev: #16161a;
+  --bg-hover: #1d1d22;
+  --line: #232328;
+  --text: #ececec;
+  --text-2: #a8a8ac;
+  --accent: #d4ff3a;
+  --accent-ink: #0c0c0d;
+  --danger: #e55a4a;
+  --radius-sm: 5px;
+  --radius: 7px;
+  --radius-lg: 10px;
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #fbfbf9;
+    --bg-elev: #ffffff;
+    --bg-hover: #ededea;
+    --line: #d8d8d2;
+    --text: #141416;
+    --text-2: #4a4a4e;
+    --accent: #8ab10f;
+    --accent-ink: #ffffff;
+    --shadow: 0 16px 36px rgba(20, 20, 22, 0.12);
+    color-scheme: light;
+  }
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  font-family: var(--font);
+  color: var(--text);
+}
+
+/* iframe 内整体根容器：靠右下角对齐，给 outer iframe 留 padding 制造投影空间。 */
+#root {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 8px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+}
+
+.bar {
+  box-sizing: border-box;
+  width: 100%;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+}
+
+.bar-head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: start;
+}
+
+.bar-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--text-2);
+}
+
+.bar-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.bar-text strong {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.bar-text span {
+  color: var(--text-2);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+  word-break: break-all;
+}
+
+.bar-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.bar-close:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.bar-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.bar-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 70px;
+  padding: 6px 14px;
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.bar-actions button:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.btn-secondary {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-2);
+}
+
+.btn-secondary:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.btn-primary {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.btn-primary:hover {
+  filter: brightness(1.05);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar {
+    transition: none;
+  }
+}

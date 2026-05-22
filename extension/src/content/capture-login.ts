@@ -22,8 +22,11 @@
 //     页面全局），轮询频率低（200ms）足以捕获正常导航。
 
 import { isTotpField } from "./totp-fields";
-import { showLockedSaveToast, showSaveLoginToast } from "./ui";
-import type { SaveLoginDecision } from "../shared/messages";
+import { showSaveBar, showLockedBar } from "./notification-bar";
+import type {
+  SaveLoginDecision,
+  ShowSaveToastMessage,
+} from "../shared/messages";
 
 interface CredentialSnapshot {
   username: string;
@@ -57,6 +60,43 @@ export function installLoginCapture(): void {
   if (lastUrl === "" && typeof location !== "undefined") {
     lastUrl = location.href;
   }
+
+  // 必须在发 checkSaveQueue 之前先装 onMessage 监听器——background 可能立即
+  // pushSaveToast 推回来，晚一步就漏接。
+  browser.runtime.onMessage.addListener((message: unknown) => {
+    const msg = message as Partial<ShowSaveToastMessage>;
+    if (msg?.type !== "zpass.showSaveToast" || !msg.decision || !msg.capture) {
+      return undefined;
+    }
+    if (msg.decision.status === "new" || msg.decision.status === "update") {
+      // 优先用 capture 带的 suggestedName——提交那一刻原页面的 title，比
+      // 「跳转后页面」的 title 更准。
+      const payload: ShowSaveToastMessage = {
+        type: "zpass.showSaveToast",
+        decision: msg.decision,
+        capture: {
+          origin: msg.capture.origin,
+          url: msg.capture.url,
+          username: msg.capture.username,
+          password: msg.capture.password,
+          suggestedName: msg.capture.suggestedName || deriveSuggestedName(),
+        },
+      };
+      showSaveBar(payload);
+    }
+    return { ok: true };
+  });
+
+  // 启动时主动 pull 一次：处理「上一页提交后页面跳转到本页」场景。
+  // background 会查当前 tab+origin 队列，有 new/update capture 就回推。
+  // 避免轮询：只发一次，后续靠 background 的 tabs.onUpdated 主推补。
+  void browser.runtime
+    .sendMessage({ type: "zpass.checkSaveQueue" })
+    .catch(() => {
+      // service worker 刚启动 / desktop 离线都可能失败——静默。
+      // tabs.onUpdated push 是决定性路径、不依赖这里成功。
+    });
+
   // 在已有 password input 上 attach
   rescanDocument();
 
@@ -76,7 +116,7 @@ export function installLoginCapture(): void {
   });
   window.addEventListener("pagehide", handleBeforeUnload, { capture: true });
 
-  // URL 变化轮询（兜底 SPA pushState 不触发 popstate 的情况）。
+  // URL 变化轮询（兑底 SPA pushState 不触发 popstate 的情况）。
   if (urlPollTimer === null) {
     urlPollTimer = globalThis.setInterval(() => {
       if (location.href !== lastUrl) {
@@ -86,32 +126,6 @@ export function installLoginCapture(): void {
       }
     }, 250);
   }
-
-  // 接收 background 在解锁后回放的「保存」推送。
-  browser.runtime.onMessage.addListener((message: unknown) => {
-    const msg = message as {
-      type?: string;
-      decision?: SaveLoginDecision;
-      capture?: {
-        origin: string;
-        url: string;
-        username: string;
-        password: string;
-      };
-    };
-    if (msg?.type !== "zpass.showSaveToast" || !msg.decision || !msg.capture) {
-      return undefined;
-    }
-    if (msg.decision.status === "new" || msg.decision.status === "update") {
-      showSaveLoginToast({
-        decision: msg.decision,
-        username: msg.capture.username,
-        password: msg.capture.password,
-        suggestedName: deriveSuggestedName(),
-      });
-    }
-    return { ok: true };
-  });
 }
 
 function rescanDocument(): void {
@@ -211,12 +225,17 @@ function finalizeAllWatchers(reason: string): void {
     document,
     ...Array.from(document.querySelectorAll("form")),
   ];
+  let triggered = 0;
   for (const scope of scopes) {
     const watch = formMap.get(scope);
     if (!watch || !watch.currentSnapshot) continue;
     const snapshot = watch.currentSnapshot;
     watch.currentSnapshot = null; // 立即清，避免被同一信号重复触发
     void reportCapture(snapshot, reason);
+    triggered++;
+  }
+  if (triggered === 0) {
+    console.log("[ZPass] finalize skipped (no snapshot)", reason);
   }
 }
 
@@ -230,10 +249,12 @@ async function reportCapture(
     lastReportedFingerprint === fingerprint &&
     now - lastReportedAt < REPORT_DEDUPE_WINDOW_MS
   ) {
+    console.log("[ZPass] report skipped (dedupe)", reason, snapshot.username);
     return;
   }
   lastReportedFingerprint = fingerprint;
   lastReportedAt = now;
+  console.log("[ZPass] report capture", reason, snapshot.username);
 
   try {
     const response = await browser.runtime.sendMessage({
@@ -241,6 +262,10 @@ async function reportCapture(
       payload: {
         username: snapshot.username,
         password: snapshot.password,
+        // 页面 title 上报作建议名称——入 background 队列后，跨页面跳转重推
+        // toast 时还能拿到当初页面的名字。新页面的 title 并不能代表“登录
+        // 成功后的那个服务”（往往变成 Dashboard 或 Home）。
+        suggestedName: snapshot.pageTitle || undefined,
       },
     });
     if (!response || response.ok !== true || !response.result) {
@@ -250,17 +275,27 @@ async function reportCapture(
       return;
     }
     const decision = response.result as SaveLoginDecision;
+    console.log("[ZPass] received decision", decision.status, decision.origin);
     if (decision.status === "new" || decision.status === "update") {
-      showSaveLoginToast({
+      // 本地「即时弹」分支：在原页还在时立即弹 iframe。如果后续页面跳转，
+      // iframe 随原页 DOM 卸载是预期之内的——background 队列里同一份 capture
+      // 会被新页面 content-script 的 checkSaveQueue / tabs.onUpdated push 重拉。
+      const payload: ShowSaveToastMessage = {
+        type: "zpass.showSaveToast",
         decision,
-        username: snapshot.username,
-        password: snapshot.password,
-        suggestedName: snapshot.pageTitle || deriveSuggestedName(),
-      });
+        capture: {
+          origin: decision.origin,
+          url: location.href,
+          username: snapshot.username,
+          password: snapshot.password,
+          suggestedName: snapshot.pageTitle || deriveSuggestedName(),
+        },
+      };
+      showSaveBar(payload);
     } else if (decision.status === "locked") {
-      // 用户没解锁 —— 弹「解锁并保存」 toast。background 已记下 capture，
-      // 解锁后会主动 push showSaveToast。
-      showLockedSaveToast();
+      // 用户未解锁 —— 弹「解锁并保存」。background 已记下 capture，解锁后会
+      // 主动 push 升级后的 zpass.showSaveToast、iframe 会被重新 init 为 save bar。
+      showLockedBar();
     }
     // status=none 静默
   } catch {

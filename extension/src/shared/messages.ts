@@ -20,9 +20,34 @@ export interface ExtensionRequest {
     | "zpass.generateLoginTotp"
     | "zpass.captureLogin"
     | "zpass.saveLogin"
-    | "zpass.ignoreSaveOrigin";
+    | "zpass.ignoreSaveOrigin"
+    | "zpass.checkSaveQueue";
   itemId?: string;
   payload?: unknown;
+}
+
+/**
+ * background → content-script 主动推送的「显示保存 toast」消息。
+ *
+ * 触发场景：
+ *   1. captureLogin 时 vault 处于 locked，用户解锁后回放（既有路径）。
+ *   2. 表单提交后页面发生导航跳转，新页面 content-script ready 时从队列拉回。
+ *   3. background tabs.onUpdated 检测到该 tab 的目标 origin 加载完成，主动 push。
+ *
+ * 关键：decision + capture 必须由 background 校验过 sender tab + origin 才下发，
+ * content-script 这边不再做合法性判断（信任 background 单一裁决点）。
+ */
+export interface ShowSaveToastMessage {
+  type: "zpass.showSaveToast";
+  decision: SaveLoginDecision;
+  capture: {
+    origin: string;
+    url: string;
+    username: string;
+    password: string;
+    /** 建议给条目用的名称（多半是触发捕获的页面 title，可空）。 */
+    suggestedName?: string;
+  };
 }
 
 export interface ExtensionResponse<T = unknown> {
