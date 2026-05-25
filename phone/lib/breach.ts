@@ -79,7 +79,8 @@ async function queryHibp(
     resp = await fetch(`https://api.pwnedpasswords.com/range/${prefix}`, {
       method: "GET",
       headers: {
-        "User-Agent": "ZPass-PasswordManager",
+        // 不显式设 User-Agent —— RN 网络层会忽略业务 UA 并打 warning，
+        // 留给原生默认（okhttp / CFNetwork）即可。HIBP 不强制特定 UA。
         "Add-Padding": "true",
       },
       signal: ctrl?.signal,

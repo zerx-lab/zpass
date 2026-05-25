@@ -9,7 +9,12 @@ vars:
   # Directory uses Node's arch naming (x64/arm64/ia32) because it's consumed by
   # Electron at runtime via `process.arch`. Go's GOARCH (amd64/386) is mapped here.
   NODE_ARCH: '{{if eq ARCH "amd64"}}x64{{else if eq ARCH "386"}}ia32{{else}}{{ARCH}}{{end}}'
-  PLATFORM_DIR: "{{OS}}-{{.NODE_ARCH}}"
+  # Windows 上 task 的 OS 变量是 "windows", 但 Electron 的 process.platform 是
+  # "win32" — backend.ts 用后者拼路径找 sidecar, 所以这里要把目录名也对齐到
+  # "win32-x64", 否则打包后 Windows 端找不到 desktop-backend.exe (linux/darwin
+  # 两侧命名一致, 不受影响).
+  NODE_OS: '{{if eq OS "windows"}}win32{{else}}{{OS}}{{end}}'
+  PLATFORM_DIR: "{{.NODE_OS}}-{{.NODE_ARCH}}"
   BIN_OUT: 'bin/{{.PLATFORM_DIR}}/{{.GO_BIN}}{{if eq OS "windows"}}.exe{{end}}'
   AGENT_BIN_OUT: 'bin/{{.PLATFORM_DIR}}/zpass-agent{{if eq OS "windows"}}.exe{{end}}'
   NATIVE_HOST_BIN_OUT: 'bin/{{.PLATFORM_DIR}}/zpass-native-host{{if eq OS "windows"}}.exe{{end}}'

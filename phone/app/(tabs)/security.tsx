@@ -364,6 +364,13 @@ export default function SecurityScreen() {
     [breachResults],
   );
 
+  // 单条扫描失败（断网 / HIBP 拒绝）的数量。完全失败时绝对不能展示"无泄露"
+  // 绿盾，否则用户会误以为安全。
+  const breachErrorCount = useMemo(
+    () => (breachResults ?? []).filter((r) => r.error).length,
+    [breachResults],
+  );
+
   // breach 结果转 LoginIssue（合并到行动建议）
   const breachIssues: LoginIssue[] = useMemo(() => {
     return breachedItems
@@ -413,7 +420,7 @@ export default function SecurityScreen() {
   const hasLogins = stats.totalLogins > 0;
 
   const onOpenItem = (id: string) => {
-    router.push(`/vault/${id}` as never);
+    router.push(`/vault/${id}` as any);
   };
 
   const formatTime = (ts: number) => {
@@ -679,7 +686,7 @@ export default function SecurityScreen() {
                       正在扫描…
                     </Text>
                   </View>
-                ) : breachedItems.length === 0 ? (
+                ) : breachedItems.length === 0 && breachErrorCount === 0 ? (
                   <View style={styles.scanClear}>
                     <IconSymbol
                       name="checkmark.shield.fill"
@@ -688,6 +695,19 @@ export default function SecurityScreen() {
                     />
                     <Text style={[styles.scanClearText, { color: c.text2 }]}>
                       未发现任何密码出现在已知泄露数据中
+                    </Text>
+                  </View>
+                ) : breachedItems.length === 0 && breachErrorCount > 0 ? (
+                  /* 全部失败：没有 pwned，但 errorCount>0 —— 绝不能展示绿盾。
+                   * 多为断网或 HIBP 5xx；提示用户重试，避免误判为"安全"。 */
+                  <View style={styles.scanClear}>
+                    <IconSymbol
+                      name="exclamationmark.triangle.fill"
+                      size={24}
+                      color={c.warn}
+                    />
+                    <Text style={[styles.scanClearText, { color: c.text2 }]}>
+                      {breachErrorCount} 条扫描失败 · 请检查网络后重试
                     </Text>
                   </View>
                 ) : (
@@ -702,6 +722,16 @@ export default function SecurityScreen() {
                         发现 {breachedItems.length} 个密码出现在已知泄露数据中
                       </Text>
                     </View>
+                    {breachErrorCount > 0 ? (
+                      <Text
+                        style={[
+                          styles.scanPartialErrorText,
+                          { color: c.warn },
+                        ]}
+                      >
+                        另有 {breachErrorCount} 条扫描失败，建议重试
+                      </Text>
+                    ) : null}
                     <View
                       style={[
                         styles.innerList,
@@ -1052,6 +1082,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   scanFoundText: { fontSize: 12, fontWeight: "500" },
+  scanPartialErrorText: { fontSize: 11, lineHeight: 15 },
   poweredBy: {
     fontSize: 10,
     textAlign: "center",

@@ -136,6 +136,13 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const [breachScanning, setBreachScanning] = useState(false);
   const [breachLastScanAt, setBreachLastScanAt] = useState<number | null>(null);
 
+  // 扫描代际 token：lock / reset 时递增，扫描完成对比 token 不一致就丢弃结果。
+  // 防止"用户扫描中途按锁屏 → 扫描完成后又把含明文条目名的 results 回写到 state"。
+  const breachGenerationRef = useRef(0);
+  // allItems 镜像 —— runBreachScan 通过 ref 读最新条目列表，
+  // 这样 useCallback deps 可以为空，回调引用稳定。
+  const allItemsRef = useRef<VaultItem[]>([]);
+
   // 启动时探测一次 vault 状态；若已 initialized，顺便把 plaintext 的 spaces
   // 拉一遍 —— 锁屏页 / 我的页头像要展示"当前空间名首字符"，spaces 是
   // plaintext，不需要解锁就能读（参见 vault-service.listSpaces 的注释）。
@@ -196,6 +203,12 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       setAllItems([]);
     }
   }, [locked, refresh]);
+
+  // 把最新 allItems 同步到 ref —— 让 runBreachScan 无需把 allItems 放进
+  // useCallback deps（条目每变一次回调引用就重建，会污染消费者 useEffect deps）
+  useEffect(() => {
+    allItemsRef.current = allItems;
+  }, [allItems]);
 
   // 当前空间下的 items（按 spaceId 过滤；缺省 spaceId 视为默认空间）
   const items = useMemo(() => {
@@ -315,6 +328,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     setActiveSpaceIdState(null);
     setLocked(true);
     setInitialized(false);
+    breachGenerationRef.current += 1;
     clearBreachCache();
     setBreachResults(null);
     setBreachLastScanAt(null);
@@ -356,6 +370,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     setAllItems([]);
     // 锁定即清空 breach 状态：保留扫描结果会让锁屏后仍能看到条目名，违反
     // "锁定即清空内存视图" 约定。下次解锁需要手动重新扫描。
+    // 递增 generation：进行中的扫描完成时会发现 token 不一致，自动丢弃结果，
+    // 避免锁屏后扫描完成把含明文条目名的 results 又写回 state。
+    breachGenerationRef.current += 1;
     clearBreachCache();
     setBreachResults(null);
     setBreachLastScanAt(null);
@@ -440,9 +457,12 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const runBreachScan = useCallback(
     async (force = false): Promise<void> => {
       if (breachScanInflightRef.current) return;
-      // 跨空间扫描整个 vault 的 login 条目 —— 与 desktop 行为一致
-      // （breach 风险与空间分组无关，整库一次性出报告更直观）
-      const loginsToScan = allItems
+      // 捕获本次扫描的代际 token，扫描完成时对比；中途 lock/reset 会让 token 失配
+      const myGeneration = breachGenerationRef.current;
+      // 通过 ref 读最新条目快照 —— useCallback deps 因此可以为空
+      // （否则每次条目变化都会重建 runBreachScan 引用）
+      // 跨空间扫描整个 vault 的 login 条目，与 desktop 行为一致
+      const loginsToScan = allItemsRef.current
         .filter((i): i is Extract<VaultItem, { type: "login" }> => i.type === "login")
         .map((i) => ({ id: i.id, name: i.name, password: i.password }));
 
@@ -450,16 +470,21 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       setBreachScanning(true);
       try {
         const results = await batchCheckBreaches(loginsToScan, { force });
+        // 代际不一致 = 扫描期间用户锁屏/重置，丢弃结果（含明文条目名）
+        if (breachGenerationRef.current !== myGeneration) return;
         setBreachResults(results);
         setBreachLastScanAt(Date.now());
       } catch (e) {
         console.warn("runBreachScan failed", e);
       } finally {
-        setBreachScanning(false);
+        // 同样校验代际：lock 已经把 breachScanning 置 false，这里别再覆盖
+        if (breachGenerationRef.current === myGeneration) {
+          setBreachScanning(false);
+        }
         breachScanInflightRef.current = false;
       }
     },
-    [allItems],
+    [],
   );
 
   const value = useMemo<VaultContextValue>(
