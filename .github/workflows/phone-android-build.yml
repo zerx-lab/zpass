@@ -1,0 +1,232 @@
+name: Build Phone (Android)
+
+# ZPass phone Android 多架构 APK 打包 workflow（Expo + React Native + gomobile AAR）
+# -----------------------------------------------------------------------------
+# 目标矩阵:
+#   - arm64-v8a   主流 Android 手机（2017 年后几乎全覆盖）
+#   - x86_64      Chromebook / 部分平板 / Android Studio 模拟器
+#   - universal   含 4 个 ABI 的兜底包，任何设备都能装
+#
+# 触发方式:
+#   1. push tags 'v*'         自动构建并上传到对应 tag 的 GitHub Release
+#   2. workflow_dispatch      手动触发；release=true + tag_name 非空时上传
+#
+# 关键设计:
+#   - phone/android/ 是 expo prebuild 的产物（phone/.gitignore 里），CI 必须
+#     先编 mobilecrypto.aar，再 `expo prebuild --platform android`。prebuild
+#     时 plugins/with-mobilecrypto.js 自动把 AAR 复制到 android/app/libs/.
+#   - 多架构通过 Gradle `splits.abi` 一次构建出多个 APK，避免跑 N 次 gradle.
+#     splits 配置在 CI 里 patch 到 app/build.gradle —— 这个文件每次 prebuild
+#     都会被重新生成，所以 patch 不会污染源码。
+#   - include 全部 4 个 ABI 是为了让 universal APK 真的 universal（含 .so
+#     齐全），即便最终只 release arm64-v8a / x86_64 / universal 三个 APK.
+#   - 签名走 phone/android/app/build.gradle 默认逻辑：未设置 ZPASS_UPLOAD_*
+#     gradle property 时回落到 debug.keystore. 产物可 adb install / 直接
+#     分发到手机安装，但不可上架 Play Store，也无法覆盖已安装的正式签名版.
+#   - RN 0.81 强制 JDK 17（系统默认 Java 26 会让 Kotlin Gradle Plugin 崩）.
+#   - gomobile bind 需要 NDK；runner 自带 $ANDROID_HOME/ndk/<ver>，
+#     build-android.sh 会自动选最新版本.
+# -----------------------------------------------------------------------------
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "是否在构建完成后上传到 GitHub Release（需配合 tag_name）"
+        required: false
+        default: false
+        type: boolean
+      tag_name:
+        description: "Release 的 tag 名（如 v0.1.0），release=true 时必填"
+        required: false
+        type: string
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: phone-android-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.26"
+  NODE_VERSION: "20"
+  JAVA_VERSION: "17"
+
+jobs:
+  # ===========================================================================
+  # Android - arm64-v8a + x86_64 + universal APK
+  # ===========================================================================
+  build-android:
+    name: Android (arm64-v8a / x86_64 / universal)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+        working-directory: phone
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: phone/package-lock.json
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: mobilecrypto/go.sum
+
+      # gomobile / gobind 必须装在 PATH 上，build-android.sh 才能找到.
+      # 不 cache：go install 本身很快（~10s），cache miss 时反而拖慢.
+      - name: Install gomobile + gobind
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      # runner 自带 Android SDK，ANDROID_HOME 已经设好.
+      # build-android.sh 会从 $ANDROID_HOME/ndk/<ver> 选最新 NDK；这里只
+      # 顺手打印一下版本，方便排查.
+      - name: Inspect Android SDK / NDK
+        run: |
+          echo "ANDROID_HOME      = $ANDROID_HOME"
+          echo "ANDROID_NDK_ROOT  = ${ANDROID_NDK_ROOT:-(unset)}"
+          if [ -d "$ANDROID_HOME/ndk" ]; then
+            echo "Installed NDK versions:"
+            ls -1 "$ANDROID_HOME/ndk" | sed 's/^/  /'
+          fi
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      # 编 mobilecrypto AAR（gomobile bind 4 个 ABI）.
+      # 产物在 mobilecrypto/build/mobilecrypto.aar；下一步 expo prebuild
+      # 会触发 with-mobilecrypto plugin 自动复制到 phone/android/app/libs/.
+      - name: Build mobilecrypto AAR (gomobile bind, 4 ABI)
+        working-directory: mobilecrypto
+        run: bash scripts/build-android.sh
+
+      # --no-install 跳过 expo 装 cocoapods / npm install 的额外开销，
+      # 这里 npm ci 已经装过依赖.
+      - name: Expo prebuild (generate phone/android/)
+        run: npx expo prebuild --platform android --no-install
+
+      # 把 ABI splits 配置注入到 app/build.gradle 的 android {} 块顶部.
+      # 用 python re.sub 保证只在 android { 后插一次，且失败可见.
+      # universalApk = true 让 gradle 额外产出一个含全部 ABI 的 APK，
+      # 即便我们 release 时只挑 3 个发布，universal 也是真正全 ABI 的兜底.
+      - name: Inject splits.abi into app/build.gradle
+        working-directory: phone/android
+        run: |
+          python3 - <<'PY'
+          import re, pathlib, sys
+          p = pathlib.Path('app/build.gradle')
+          src = p.read_text()
+          splits = """
+              splits {
+                  abi {
+                      enable true
+                      reset()
+                      include 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
+                      universalApk true
+                  }
+              }
+          """
+          new, n = re.subn(r'(android\s*\{\s*\n)', r'\1' + splits, src, count=1)
+          if n != 1:
+              sys.exit('[error] android { ... } block not found in app/build.gradle')
+          p.write_text(new)
+          print('[ok] splits.abi injected')
+          PY
+          grep -n 'splits' app/build.gradle
+
+      # debug.keystore 由 build.gradle 默认 signingConfig 兜底；
+      # 未设置 ZPASS_UPLOAD_STORE_FILE 时 release buildType 也复用 debug 签名.
+      - name: Build release APKs (gradle assembleRelease)
+        working-directory: phone/android
+        run: ./gradlew assembleRelease --no-daemon
+
+      # Gradle ABI splits + universalApk=true 的输出布局：
+      #   app/build/outputs/apk/release/app-arm64-v8a-release.apk
+      #   app/build/outputs/apk/release/app-armeabi-v7a-release.apk
+      #   app/build/outputs/apk/release/app-x86-release.apk
+      #   app/build/outputs/apk/release/app-x86_64-release.apk
+      #   app/build/outputs/apk/release/app-universal-release.apk
+      # 重命名为稳定的 release 资产名（无版本号），与 desktop 资产风格一致.
+      - name: Stage release assets
+        run: |
+          mkdir -p release
+          shopt -s nullglob
+
+          OUT=android/app/build/outputs/apk/release
+
+          for f in "$OUT"/app-arm64-v8a-release.apk; do
+            cp "$f" "release/ZPass-android-arm64-v8a.apk"
+          done
+          for f in "$OUT"/app-x86_64-release.apk; do
+            cp "$f" "release/ZPass-android-x86_64.apk"
+          done
+          for f in "$OUT"/app-universal-release.apk; do
+            cp "$f" "release/ZPass-android-universal.apk"
+          done
+
+          echo "--- release/ contents ---"
+          ls -lah release/
+
+          # 三个产物缺一不可，缺则中断，提前暴露 splits 配置失效
+          for required in \
+            ZPass-android-arm64-v8a.apk \
+            ZPass-android-x86_64.apk \
+            ZPass-android-universal.apk; do
+            if [ ! -f "release/$required" ]; then
+              echo "[error] missing release asset: $required" >&2
+              exit 1
+            fi
+          done
+
+      - name: Resolve release context
+        id: release_ctx
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" \
+               && "${{ inputs.release }}" == "true" \
+               && -n "${{ inputs.tag_name }}" ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ inputs.tag_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zpass-android
+          path: phone/release/*
+          if-no-files-found: error
+
+      - name: Publish to GitHub Release
+        if: steps.release_ctx.outputs.publish == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_ctx.outputs.tag }}
+          name: ZPass ${{ steps.release_ctx.outputs.tag }}
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          files: phone/release/*
