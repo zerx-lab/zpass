@@ -81,8 +81,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: phone/package-lock.json
+
+      # phone 实际用 bun（Taskfile 全程 bunx；bun.lock 是最新锁文件，
+      # package-lock.json 已落后，`npm ci` 会因 lockfile out-of-sync 直接拒绝）.
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -110,8 +115,8 @@ jobs:
             ls -1 "$ANDROID_HOME/ndk" | sed 's/^/  /'
           fi
 
-      - name: Install npm dependencies
-        run: npm ci
+      - name: Install dependencies (bun)
+        run: bun install --frozen-lockfile
 
       # 编 mobilecrypto AAR（gomobile bind 4 个 ABI）.
       # 产物在 mobilecrypto/build/mobilecrypto.aar；下一步 expo prebuild
@@ -123,7 +128,7 @@ jobs:
       # --no-install 跳过 expo 装 cocoapods / npm install 的额外开销，
       # 这里 npm ci 已经装过依赖.
       - name: Expo prebuild (generate phone/android/)
-        run: npx expo prebuild --platform android --no-install
+        run: bunx expo prebuild --platform android --no-install
 
       # 把 ABI splits 配置注入到 app/build.gradle 的 android {} 块顶部.
       # 用 python re.sub 保证只在 android { 后插一次，且失败可见.
