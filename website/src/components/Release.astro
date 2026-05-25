@@ -1,126 +1,762 @@
 ---
 // ============================================================================
-// Release — “即将发布” 状态区块（id=download）
+// Release — 下载区块（id=download）
 // ---------------------------------------------------------------------------
-// 替换原 Subscribe（邮件订阅）区块。产品已进入发布前最后阶段，不再收集邮箱，
-// 改为：
-//   - 左卡：大字号 “即将发布” 标语 + 简短说明 + “联系我们” 次级 CTA
-//   - 右卡：保留原 build status 列表（各平台构建状态）
+// 取代原 "即将发布 + build status" 双卡布局。v0.0.2 已正式发布，本区块直接
+// 渲染各平台 / 各架构的下载链接：
 //
-// 保留 <section id="download"> 锚点，确保 Nav / Hero / Pricing / Mobile /
-// Desktop 中所有 #download 链接仍能落到正确位置。
+//   - 顶部头：版本徽标 + 章节标题 + 简短说明 + GitHub release notes 链接
+//   - 4 个平台卡片：Windows / Linux / Android / 浏览器扩展
+//       · 每张卡顶部带 platform icon + 适用范围副标题
+//       · 中部 "推荐" 主下载按钮（取数据中第一个 recommended 的 asset）
+//       · 折叠展开 "其他版本"：列出剩余架构 / 格式 + 文件大小
+//   - 末尾附 iOS 占位卡（开发中）+ SHA-256 校验提示
+//
+// 资产清单数据源：src/data/release.ts（手工维护，新版本发布后只需更新该文件）。
 // ============================================================================
 
 import type { SiteStrings } from "../i18n/strings";
+import {
+	PLATFORMS,
+	RELEASE_TAG_URL,
+	RELEASE_VERSION,
+	formatSize,
+	type PlatformGroup,
+	type ReleaseAsset,
+} from "../data/release";
 
 export interface Props {
 	t: SiteStrings;
+	locale?: "en" | "zh";
 }
 
-const { t } = Astro.props;
+const { t, locale = "en" } = Astro.props;
+const isZh = locale === "zh";
+
+interface Resolved {
+	id: PlatformGroup["id"];
+	title: string;
+	subtitle: string;
+	primary: ReleaseAsset;
+	primaryNote: string;
+	others: Array<{ asset: ReleaseAsset; note: string }>;
+}
+
+// 把 PlatformGroup 解析成当前 locale 下的渲染数据
+const resolved: Resolved[] = PLATFORMS.map((p) => {
+	const primary = p.assets.find((a) => a.recommended) ?? p.assets[0];
+	const others = p.assets
+		.filter((a) => a !== primary)
+		.map((a) => ({
+			asset: a,
+			note: (isZh ? a.noteZh : a.noteEn) ?? "",
+		}));
+	return {
+		id: p.id,
+		title: isZh ? p.titleZh : p.titleEn,
+		subtitle: isZh ? p.subtitleZh : p.subtitleEn,
+		primary,
+		primaryNote: (isZh ? primary.noteZh : primary.noteEn) ?? "",
+		others,
+	};
+});
 ---
 
-<section class="install" id="download">
+<section class="download-section" id="download">
 	<div class="wrap">
-		<div class="install-grid">
-			<!-- ===== 卡片 1：即将发布 ===== -->
-			<div class="install-card reveal">
-				<div class="head">
-					<span class="t">{t.release_title}</span>
-					<span class="tag">{t.release_eyebrow}</span>
-				</div>
-
-				<div class="body release-body">
-					<p class="release-headline">{t.release_headline}</p>
-					<p class="release-sub">{t.release_sub}</p>
-
-					<div class="release-cta-row">
-						<button
-							type="button"
-							class="btn primary release-contact-btn"
-							data-contact-open
-						>
-							{t.contact_trigger} <span class="arrow">→</span>
-						</button>
-					</div>
-				</div>
-
-				<div class="desc">{t.release_note}</div>
+		<!-- ========== 顶部头 ========== -->
+		<div class="download-head reveal">
+			<div class="index mono download-index">
+				{t.download_section_label}
 			</div>
-
-			<!-- ===== 卡片 2：构建状态（静态） ===== -->
-			<div class="install-card reveal">
-				<div class="head">
-					<span class="n">●</span>
-					<span class="t">{t.build_status_title}</span>
-					<span class="tag">{t.build_status_tag}</span>
+			<div class="download-head-body">
+				<div class="download-eyebrow mono">
+					<span class="dot" aria-hidden="true"></span>
+					{t.release_eyebrow}
 				</div>
-				<div class="body">
-					<div class="comment">{t.build_status_comment_desktop}</div>
-					<div class="cmd">
-						<span style="color: var(--accent);">●</span> {t.build_status_macos}
-					</div>
-					<div class="cmd">
-						<span style="color: var(--accent);">●</span> {
-							t.build_status_windows
-						}
-					</div>
-					<div class="cmd">
-						<span style="color: var(--accent);">●</span> {t.build_status_linux}
-					</div>
-					<div class="comment" style="margin-top: 8px;">
-						{t.build_status_comment_mobile}
-					</div>
-					<div class="cmd">
-						<span style="color: var(--accent);">●</span> {t.mobile_status_ios}
-					</div>
-					<div class="cmd">
-						<span style="color: var(--accent);">●</span> {
-							t.mobile_status_android
-						}
-					</div>
-					<div class="comment" style="margin-top: 8px;">
-						{t.build_status_comment_extension}
-					</div>
-					<div class="cmd">
-						<span style="color: var(--accent);">●</span> {
-							t.build_status_browser_ext
-						}
-					</div>
+				<h2 class="download-title">{t.release_title}</h2>
+				<p class="download-sub">{t.release_sub}</p>
+				<div class="download-head-cta">
+					<a
+						class="download-notes-link mono"
+						href={RELEASE_TAG_URL}
+						target="_blank"
+						rel="noopener"
+					>
+						{t.download_release_notes}
+						<span class="arrow" aria-hidden="true">→</span>
+					</a>
+					<span class="download-version mono">{RELEASE_VERSION}</span>
 				</div>
-				<div class="desc">{t.release_eyebrow}</div>
 			</div>
 		</div>
+
+		<!-- ========== 平台下载卡片网格 ========== -->
+		<div class="download-grid">
+			{
+				resolved.map((p) => (
+					<article class={`dl-card dl-card--${p.id} reveal`}>
+						<header class="dl-card-head">
+							<span class="dl-icon" aria-hidden="true">
+								{p.id === "windows" && (
+									<svg
+										viewBox="0 0 24 24"
+										width="22"
+										height="22"
+										fill="currentColor"
+									>
+										<path d="M3 5.5l8-1.1v8.1H3V5.5zm0 13l8 1.1V11.6H3V18.5zm9 1.3l9 1.2V11.6h-9v8.2zm0-15.6V12h9V3l-9 1.2z" />
+									</svg>
+								)}
+								{p.id === "linux" && (
+									<svg
+										viewBox="0 0 24 24"
+										width="22"
+										height="22"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="1.6"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+									>
+										<path d="M9 4c-1.2 1-1.6 2.6-1.4 4.4.3 2 .1 3.2-1 5C5.4 15 5 16 5 17c0 1.5 1 2.5 2 3" />
+										<path d="M15 4c1.2 1 1.6 2.6 1.4 4.4-.3 2-.1 3.2 1 5 1.2 1.6 1.6 2.6 1.6 3.6 0 1.5-1 2.5-2 3" />
+										<path d="M7 20h10l-1-3H8l-1 3z" />
+										<circle cx="10" cy="9" r="0.8" fill="currentColor" />
+										<circle cx="14" cy="9" r="0.8" fill="currentColor" />
+									</svg>
+								)}
+								{p.id === "android" && (
+									<svg
+										viewBox="0 0 24 24"
+										width="22"
+										height="22"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="1.6"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+									>
+										<path d="M5 11a7 7 0 0114 0v6H5v-6z" />
+										<path d="M5 17v3M19 17v3" />
+										<path d="M8 7L6 4M16 7l2-3" />
+										<circle cx="9" cy="12" r="0.8" fill="currentColor" />
+										<circle cx="15" cy="12" r="0.8" fill="currentColor" />
+									</svg>
+								)}
+								{p.id === "extension" && (
+									<svg
+										viewBox="0 0 24 24"
+										width="22"
+										height="22"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="1.6"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+									>
+										<path d="M5 8h6V5a2 2 0 114 0v3h4v4h-3a2 2 0 100 4h3v4H5v-6H2a2 2 0 110-4h3V8z" />
+									</svg>
+								)}
+							</span>
+							<div class="dl-head-meta">
+								<h3 class="dl-card-title">{p.title}</h3>
+								<p class="dl-card-sub mono">{p.subtitle}</p>
+							</div>
+							<span class="dl-card-tag mono">
+								{p.primary.format}
+							</span>
+						</header>
+
+						<div class="dl-card-body">
+							<div class="dl-primary">
+								<div class="dl-primary-row">
+									<span class="dl-badge mono">
+										{t.download_recommended}
+									</span>
+									<span class="dl-arch mono">{p.primary.arch}</span>
+									<span class="dl-size mono">
+										{formatSize(p.primary.sizeBytes)}
+									</span>
+								</div>
+								<a
+									class="btn primary dl-primary-btn"
+									href={p.primary.url}
+									rel="noopener"
+									download
+								>
+									<svg
+										class="dl-arrow"
+										viewBox="0 0 24 24"
+										width="14"
+										height="14"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										aria-hidden="true"
+									>
+										<path d="M12 4v12" />
+										<path d="M6 12l6 6 6-6" />
+										<path d="M4 20h16" />
+									</svg>
+									<span class="dl-btn-text">{p.primary.label}</span>
+								</a>
+								{p.primaryNote && (
+									<p class="dl-primary-note">{p.primaryNote}</p>
+								)}
+							</div>
+
+							{p.others.length > 0 && (
+								<details class="dl-others">
+									<summary>
+										<span>{t.download_more_variants}</span>
+										<span class="dl-others-count mono">
+											{p.others.length}
+										</span>
+										<svg
+											class="dl-chev"
+											viewBox="0 0 24 24"
+											width="13"
+											height="13"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="2"
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											aria-hidden="true"
+										>
+											<path d="M6 9l6 6 6-6" />
+										</svg>
+									</summary>
+
+									<ul class="dl-others-list">
+										{p.others.map(({ asset, note }) => (
+											<li class="dl-other">
+												<a
+													class="dl-other-link"
+													href={asset.url}
+													rel="noopener"
+													download
+												>
+													<div class="dl-other-top">
+														<span class="dl-other-label">
+															{asset.label}
+														</span>
+														<span class="dl-other-meta mono">
+															<span class="dl-format">{asset.format}</span>
+															<span class="dot" aria-hidden="true">·</span>
+															<span>{formatSize(asset.sizeBytes)}</span>
+														</span>
+													</div>
+													{note && (
+														<div class="dl-other-note">{note}</div>
+													)}
+												</a>
+											</li>
+										))}
+									</ul>
+								</details>
+							)}
+						</div>
+					</article>
+				))
+			}
+
+			<!-- ========== iOS 占位卡 ========== -->
+			<article class="dl-card dl-card--ios reveal">
+				<header class="dl-card-head">
+					<span class="dl-icon" aria-hidden="true">
+						<svg
+							viewBox="0 0 24 24"
+							width="22"
+							height="22"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="1.6"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+						>
+							<path d="M16 4c0 1.5-.6 2.6-1.6 3.4M8 7.5C6 9 5 11 5 13.5c0 3 1.5 5.5 3 5.5 1 0 1.5-.5 3-.5s2 .5 3 .5c1.5 0 3-2.5 3-5.5 0-1.5-.4-2.8-1-3.5" />
+							<path d="M11 4.5c0 1.7 1.3 3 3 3" />
+						</svg>
+					</span>
+					<div class="dl-head-meta">
+						<h3 class="dl-card-title">{t.download_ios_title}</h3>
+						<p class="dl-card-sub mono">
+							{isZh ? "iPhone · iPad · TestFlight" : "iPhone · iPad · TestFlight"}
+						</p>
+					</div>
+					<span class="dl-card-tag mono dl-card-tag--pending">
+						{isZh ? "筹备中" : "in prep"}
+					</span>
+				</header>
+
+				<div class="dl-card-body dl-card-body--pending">
+					<p class="dl-ios-note">{t.download_ios_note}</p>
+					<button type="button" class="btn dl-ios-cta" data-contact-open>
+						<span class="dl-btn-text">{t.contact_trigger}</span>
+						<span class="arrow" aria-hidden="true">→</span>
+					</button>
+				</div>
+			</article>
+		</div>
+
+		<!-- ========== 底部说明 ========== -->
+		<p class="download-foot mono reveal">
+			<svg
+				viewBox="0 0 24 24"
+				width="13"
+				height="13"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="1.6"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+				aria-hidden="true"
+			>
+				<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z" />
+				<path d="M9 12l2 2 4-4" />
+			</svg>
+			<span>{t.download_verify_hint}</span>
+			<span class="sep" aria-hidden="true">·</span>
+			<span>{t.release_note}</span>
+		</p>
 	</div>
 </section>
 
 <style>
-	.release-body {
-		font-family: var(--font-sans);
-		justify-content: space-between;
+	.download-section {
+		padding: 80px 0;
+		border-bottom: 1px solid var(--line-soft);
 	}
-	.release-headline {
-		margin: 0;
-		font-size: 22px;
-		line-height: 1.3;
-		font-weight: 500;
-		letter-spacing: -0.01em;
+
+	/* ============== 顶部头 ============== */
+	.download-head {
+		display: grid;
+		grid-template-columns: 96px 1fr;
+		gap: 32px;
+		align-items: flex-start;
+		margin-bottom: 40px;
+	}
+	.download-head .index {
+		font-size: 11px;
+		color: var(--text-3);
+		letter-spacing: 0.08em;
+		padding-top: 6px;
+	}
+	.download-head .index b {
 		color: var(--text);
+		font-weight: 500;
 	}
-	.release-sub {
-		margin: 12px 0 0;
-		font-size: 14px;
-		line-height: 1.6;
+	.download-index {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		color: var(--text);
+		font-weight: 500;
+		text-transform: uppercase;
+	}
+	.download-index::before {
+		content: "";
+		width: 18px;
+		height: 1px;
+		background: var(--text-3);
+	}
+	.download-head-body {
+		min-width: 0;
+	}
+	.download-eyebrow {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		font-size: 11px;
+		letter-spacing: 0.08em;
 		color: var(--text-2);
+		padding: 4px 10px;
+		border: 1px solid var(--line);
+		border-radius: 999px;
+		background: var(--bg-elev);
 	}
-	.release-cta-row {
-		margin-top: auto;
-		padding-top: 20px;
+	.download-eyebrow .dot {
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		background: var(--accent);
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+	}
+	.download-title {
+		margin: 14px 0 0;
+		font-size: clamp(28px, 4vw, 42px);
+		line-height: 1.1;
+		letter-spacing: -0.02em;
+	}
+	.download-sub {
+		margin: 14px 0 0;
+		max-width: 64ch;
+		color: var(--text-2);
+		font-size: 15px;
+		line-height: 1.65;
+	}
+	.download-head-cta {
+		margin-top: 18px;
 		display: flex;
-		gap: 10px;
+		align-items: center;
+		gap: 14px;
 		flex-wrap: wrap;
 	}
-	.release-contact-btn {
+	.download-notes-link {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		font-size: 12px;
+		color: var(--text);
+		text-decoration: none;
+		padding: 6px 12px;
+		border: 1px solid var(--line);
+		border-radius: var(--radius);
+		background: var(--bg-elev);
+		transition:
+			border-color 0.15s,
+			background 0.15s,
+			color 0.15s;
+	}
+	.download-notes-link:hover {
+		border-color: var(--text-4);
+		background: var(--bg-hover);
+	}
+	.download-notes-link .arrow {
+		opacity: 0.7;
+	}
+	.download-version {
+		font-size: 11px;
+		color: var(--text-3);
+		padding: 3px 8px;
+		border: 1px solid var(--line);
+		border-radius: 4px;
+		background: var(--bg-elev);
+	}
+
+	/* ============== 卡片网格 ============== */
+	.download-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+		gap: 18px;
+	}
+
+	.dl-card {
+		display: flex;
+		flex-direction: column;
+		border: 1px solid var(--line);
+		border-radius: var(--radius-lg);
+		background: var(--bg-elev);
+		overflow: hidden;
+		position: relative;
+		transition:
+			border-color 0.2s,
+			transform 0.2s;
+	}
+	.dl-card::before {
+		content: "";
+		position: absolute;
+		left: 0;
+		right: 0;
+		top: 0;
+		height: 2px;
+		background: linear-gradient(
+			90deg,
+			color-mix(in srgb, var(--accent) 0%, transparent),
+			color-mix(in srgb, var(--accent) 60%, transparent),
+			color-mix(in srgb, var(--accent) 0%, transparent)
+		);
+		opacity: 0;
+		transition: opacity 0.2s;
+	}
+	.dl-card:hover {
+		border-color: var(--text-4);
+	}
+	.dl-card:hover::before {
+		opacity: 1;
+	}
+	.dl-card--ios {
+		background: var(--bg);
+	}
+	.dl-card--ios:hover {
+		border-color: var(--line);
+	}
+	.dl-card--ios:hover::before {
+		opacity: 0;
+	}
+
+	/* —— 卡片头 —— */
+	.dl-card-head {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 16px 18px;
+		border-bottom: 1px solid var(--line-soft);
+	}
+	.dl-icon {
+		width: 36px;
+		height: 36px;
+		flex-shrink: 0;
+		border-radius: 8px;
+		background: var(--bg-elev-2);
+		border: 1px solid var(--line);
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		color: var(--text);
+	}
+	.dl-head-meta {
+		flex: 1;
+		min-width: 0;
+	}
+	.dl-card-title {
+		margin: 0;
+		font-size: 16px;
+		font-weight: 600;
+		letter-spacing: -0.01em;
+	}
+	.dl-card-sub {
+		margin: 4px 0 0;
+		font-size: 11px;
+		color: var(--text-3);
+		letter-spacing: 0.02em;
+	}
+	.dl-card-tag {
+		font-size: 10px;
+		padding: 2px 7px;
+		border: 1px solid var(--line);
+		border-radius: 4px;
+		color: var(--text-2);
+		background: var(--bg);
+		text-transform: lowercase;
+		letter-spacing: 0.03em;
+	}
+	.dl-card-tag--pending {
+		color: var(--text-3);
+	}
+
+	/* —— 卡片主体 —— */
+	.dl-card-body {
+		padding: 18px;
+		display: flex;
+		flex-direction: column;
+		gap: 14px;
+		flex: 1;
+	}
+
+	/* —— 推荐下载块 —— */
+	.dl-primary-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+	.dl-badge {
+		font-size: 10px;
+		padding: 2px 7px;
+		background: var(--accent);
+		color: var(--accent-ink);
+		border-radius: 4px;
+		font-weight: 600;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+	}
+	.dl-arch {
+		font-size: 11px;
+		color: var(--text-2);
+		padding: 2px 7px;
+		border: 1px solid var(--line);
+		border-radius: 4px;
+		background: var(--bg);
+	}
+	.dl-size {
+		margin-left: auto;
+		font-size: 11px;
+		color: var(--text-3);
+	}
+	.dl-primary-btn {
+		margin-top: 10px;
+		width: 100%;
+		justify-content: center;
+		height: 40px;
 		font-size: 13px;
+		font-weight: 500;
+	}
+	.dl-arrow {
+		flex-shrink: 0;
+	}
+	.dl-btn-text {
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.dl-primary-note {
+		margin: 0;
+		font-size: 12px;
+		color: var(--text-3);
+		line-height: 1.55;
+	}
+
+	/* —— 其他版本（details/summary）—— */
+	.dl-others {
+		border-top: 1px solid var(--line-soft);
+		padding-top: 14px;
+		margin-top: 2px;
+	}
+	.dl-others summary {
+		list-style: none;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		font-size: 12px;
+		color: var(--text-2);
+		padding: 4px 0;
+		transition: color 0.15s;
+	}
+	.dl-others summary::-webkit-details-marker {
+		display: none;
+	}
+	.dl-others summary:hover {
+		color: var(--text);
+	}
+	.dl-others-count {
+		font-size: 10px;
+		padding: 1px 6px;
+		border: 1px solid var(--line);
+		border-radius: 3px;
+		color: var(--text-3);
+		background: var(--bg);
+	}
+	.dl-chev {
+		margin-left: auto;
+		color: var(--text-3);
+		transition: transform 0.2s;
+	}
+	.dl-others[open] .dl-chev {
+		transform: rotate(180deg);
+	}
+
+	.dl-others-list {
+		list-style: none;
+		margin: 10px 0 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	.dl-other {
+		margin: 0;
+	}
+	.dl-other-link {
+		display: block;
+		padding: 10px 12px;
+		border: 1px solid var(--line-soft);
+		border-radius: var(--radius);
+		background: var(--bg);
+		text-decoration: none;
+		color: var(--text);
+		transition:
+			border-color 0.15s,
+			background 0.15s,
+			color 0.15s;
+	}
+	.dl-other-link:hover {
+		border-color: var(--text-4);
+		background: var(--bg-hover);
+	}
+	.dl-other-top {
+		display: flex;
+		align-items: baseline;
+		gap: 8px;
+	}
+	.dl-other-label {
+		font-size: 13px;
+		font-weight: 500;
+		color: var(--text);
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.dl-other-meta {
+		font-size: 10px;
+		color: var(--text-3);
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		flex-shrink: 0;
+	}
+	.dl-format {
+		color: var(--text-2);
+	}
+	.dl-other-meta .dot {
+		opacity: 0.5;
+	}
+	.dl-other-note {
+		margin-top: 4px;
+		font-size: 11px;
+		color: var(--text-3);
+		line-height: 1.5;
+	}
+
+	/* —— iOS 占位 —— */
+	.dl-card-body--pending {
+		justify-content: space-between;
+	}
+	.dl-ios-note {
+		margin: 0;
+		font-size: 13px;
+		color: var(--text-2);
+		line-height: 1.65;
+	}
+	.dl-ios-cta {
+		align-self: flex-start;
+		margin-top: 4px;
+	}
+
+	/* ============== 底部说明 ============== */
+	.download-foot {
+		margin-top: 28px;
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+		padding: 10px 14px;
+		font-size: 11px;
+		color: var(--text-3);
+		border: 1px solid var(--line-soft);
+		border-radius: var(--radius);
+		background: var(--bg-elev);
+	}
+	.download-foot svg {
+		flex-shrink: 0;
+		color: var(--accent);
+	}
+	.download-foot .sep {
+		color: var(--text-4);
+	}
+
+	/* ============== 响应式 ============== */
+	@media (max-width: 720px) {
+		.download-section {
+			padding: 56px 0;
+		}
+		.download-head {
+			grid-template-columns: 1fr;
+			gap: 12px;
+			margin-bottom: 28px;
+		}
+		.download-head .index {
+			padding-top: 0;
+		}
+		.dl-primary-btn {
+			height: 44px;
+		}
 	}
 </style>

@@ -32,23 +32,20 @@ export interface SiteStrings {
 	hero_cta_primary: string;
 	hero_availability: string;
 
-	// release (取代原 subscribe 区块：“即将发布” 状态卡)
+	// release / download（取代原 “即将发布” 状态卡）
 	release_eyebrow: string;
 	release_title: string;
-	release_headline: string;
 	release_sub: string;
 	release_note: string;
 
-	// build status 卡（Release 区块右侧）
-	build_status_title: string;
-	build_status_tag: string;
-	build_status_comment_desktop: string;
-	build_status_comment_mobile: string;
-	build_status_comment_extension: string;
-	build_status_macos: string;
-	build_status_windows: string;
-	build_status_linux: string;
-	build_status_browser_ext: string;
+	// 下载卡片通用文案
+	download_section_label: string;
+	download_recommended: string;
+	download_more_variants: string;
+	download_release_notes: string;
+	download_ios_title: string;
+	download_ios_note: string;
+	download_verify_hint: string;
 
 	// features
 	section_features: string;
@@ -274,7 +271,7 @@ export interface SiteStrings {
 const en: SiteStrings = {
 	nav_features: "Features",
 	nav_security: "Security",
-	nav_download: "Release",
+	nav_download: "Download",
 	nav_pricing: "Pricing",
 	nav_docs: "Docs",
 	nav_signin: "Sign in",
@@ -287,26 +284,24 @@ const en: SiteStrings = {
 	hero_title_2: "Only you hold the key.",
 	hero_sub:
 		"ZPass keeps your logins, passkeys and 2FA codes encrypted on your own devices. We never see them in plain text — not in transit, not at rest, not anywhere on our servers. Native apps for every platform you use.",
-	hero_cta_primary: "See release status",
-	hero_availability: "macOS · Windows · Linux · iOS · Android · Browser ext.",
+	hero_cta_primary: "Download v0.0.2",
+	hero_availability: "Windows · Linux · Android · Chrome / Firefox · iOS soon",
 
-	build_status_title: "build status",
-	build_status_tag: "live",
-	build_status_comment_desktop: "// desktop client",
-	build_status_comment_mobile: "// mobile",
-	build_status_comment_extension: "// extension",
-	build_status_macos: "macOS · launching soon",
-	build_status_windows: "Windows · launching soon",
-	build_status_linux: "Linux · launching soon",
-	build_status_browser_ext: "Chrome / Firefox / Safari · launching soon",
-
-	release_eyebrow: "LAUNCHING SOON",
-	release_title: "ZPass is almost ready.",
-	release_headline: "The first public release is just around the corner.",
+	release_eyebrow: "AVAILABLE NOW · v0.0.2",
+	release_title: "Download ZPass",
 	release_sub:
-		"We're finalizing builds for every platform. If you have a question, a partnership idea or a security disclosure, reach out below — we read every message.",
+		"Native builds for every platform you use, all carved out of the same audited Rust core. Pick the package that fits your machine — everything is end-to-end encrypted by design.",
 	release_note:
-		"No mailing list, no marketing, no waitlist sign-up. Just ship.",
+		"All artifacts are signed and reproducible. Each asset on the release page ships its own SHA-256 so you can verify before you install.",
+
+	download_section_label: "DOWNLOAD",
+	download_recommended: "Recommended",
+	download_more_variants: "Other variants",
+	download_release_notes: "Full release notes on GitHub",
+	download_ios_title: "iOS",
+	download_ios_note:
+		"TestFlight beta is in preparation. Reach out through Contact if you'd like early access — or watch this page for the public link.",
+	download_verify_hint: "Verify SHA-256 before installing",
 
 	section_features: "Features",
 	section_features_sub:
@@ -353,7 +348,7 @@ const en: SiteStrings = {
 	mobile_body:
 		"Sign in to apps and websites with a single tap through the iOS and Android system keyboard. 2FA codes surface on the lock screen when you're about to use them — and stay out of sight the rest of the time.",
 	mobile_status_ios: "iOS · in development",
-	mobile_status_android: "Android · in development",
+	mobile_status_android: "Android · v0.0.2 available",
 	mobile_status_autofill: "system autofill",
 	mobile_phone_kicker: "VAULT · 412 ITEMS",
 	mobile_phone_greeting: "Good evening, Alex",
@@ -368,8 +363,8 @@ const en: SiteStrings = {
 	desktop_body:
 		"Everything is decrypted locally. ⌘K opens the command palette, ⌘L locks the app instantly, and the full vault stays usable with no network at all. Same encrypted core as the mobile app — just with more room to breathe.",
 	desktop_status_macos: "macOS · in development",
-	desktop_status_windows: "Windows · in development",
-	desktop_status_linux: "Linux · in development",
+	desktop_status_windows: "Windows · v0.0.2 available",
+	desktop_status_linux: "Linux · v0.0.2 available",
 	desktop_status_extra: "⌘K command palette · offline-first",
 	desktop_section_label: "DESKTOP",
 	desktop_ui_brand_tag: "v2.4",
@@ -596,7 +591,7 @@ const en: SiteStrings = {
 const zh: SiteStrings = {
 	nav_features: "功能",
 	nav_security: "安全",
-	nav_download: "发布",
+	nav_download: "下载",
 	nav_pricing: "价格",
 	nav_docs: "文档",
 	nav_signin: "登录",
@@ -609,25 +604,24 @@ const zh: SiteStrings = {
 	hero_title_2: "只有你拿得到钥匙。",
 	hero_sub:
 		"ZPass 把你的登录信息、通行密钥和两步验证码统一加密存放在本地设备。未经加密的明文不会进入网络、不会落到磁盘、也不会出现在我们的服务器上——我们看不到，任何第三方也看不到。覆盖你日常使用的每一个平台。",
-	hero_cta_primary: "查看发布状态",
-	hero_availability: "macOS · Windows · Linux · iOS · Android · 浏览器扩展",
+	hero_cta_primary: "下载 v0.0.2",
+	hero_availability: "Windows · Linux · Android · Chrome / Firefox · iOS 即将到来",
 
-	build_status_title: "构建状态",
-	build_status_tag: "实时",
-	build_status_comment_desktop: "// 桌面客户端",
-	build_status_comment_mobile: "// 移动端",
-	build_status_comment_extension: "// 浏览器扩展",
-	build_status_macos: "macOS · 即将发布",
-	build_status_windows: "Windows · 即将发布",
-	build_status_linux: "Linux · 即将发布",
-	build_status_browser_ext: "Chrome / Firefox / Safari · 即将发布",
-
-	release_eyebrow: "即将发布",
-	release_title: "ZPass 即将与你见面。",
-	release_headline: "首个公开版本即将上线。",
+	release_eyebrow: "现已发布 · v0.0.2",
+	release_title: "下载 ZPass",
 	release_sub:
-		"各平台的构建包正在做最后收尾。如有任何问题、合作意向或安全披露，欢迎通过下方联系我们——每一条消息我们都会认真看。",
-	release_note: "没有邮件名单、没有营销、没有候补注册。只为了发布。",
+		"覆盖你日常使用的每一个平台，全部基于同一份 Rust 内核构建。挑选适合你设备的安装包即可——所有版本都默认端到端加密。",
+	release_note:
+		"所有构建均可复现，并附 SHA-256 校验。可在 GitHub 发布页比对哈希后再安装。",
+
+	download_section_label: "下载",
+	download_recommended: "推荐版本",
+	download_more_variants: "其他版本",
+	download_release_notes: "查看完整版本说明",
+	download_ios_title: "iOS",
+	download_ios_note:
+		"TestFlight 测试通道筹备中。如需提前体验，欢迎通过页面右上角「联系我们」与我们联系，或关注本页等待公开链接。",
+	download_verify_hint: "安装前可校验 SHA-256",
 
 	section_features: "功能",
 	section_features_sub: "该有的都有，多余的一样没有，默认设置不玩套路。",
@@ -673,7 +667,7 @@ const zh: SiteStrings = {
 	mobile_body:
 		"通过 iOS 与 Android 系统级键盘，在 App 和网页里一键完成登录。两步验证码只在你将要使用时浮现在锁屏上，其余时间安静待在密码库里。",
 	mobile_status_ios: "iOS · 开发中",
-	mobile_status_android: "Android · 开发中",
+	mobile_status_android: "Android · 已发布 v0.0.2",
 	mobile_status_autofill: "系统自动填充",
 	mobile_phone_kicker: "密码库 · 412 项",
 	mobile_phone_greeting: "晚上好，Alex",
@@ -688,8 +682,8 @@ const zh: SiteStrings = {
 	desktop_body:
 		"所有解密都在本地完成。⌘K 唤出命令面板，⌘L 一键锁定，完全离线也能正常使用整个密码库。与移动端共用同一套加密内核——只是屏幕更大、呼吸更从容。",
 	desktop_status_macos: "macOS · 开发中",
-	desktop_status_windows: "Windows · 开发中",
-	desktop_status_linux: "Linux · 开发中",
+	desktop_status_windows: "Windows · 已发布 v0.0.2",
+	desktop_status_linux: "Linux · 已发布 v0.0.2",
 	desktop_status_extra: "⌘K 命令面板 · 离线优先",
 	desktop_section_label: "桌面端",
 	desktop_ui_brand_tag: "v2.4",
