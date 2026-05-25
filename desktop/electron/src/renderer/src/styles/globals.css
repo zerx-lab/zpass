@@ -357,7 +357,17 @@ select:focus-visible,
 	outline: none;
 }
 
-/* 滚动条 —— 细、低调，匹配设计原型 */
+/* 滚动条 —— 细、低调，匹配设计原型
+ *
+ * 三端差异：
+ *   - macOS 系统滚动条默认 overlay（无内容时隐藏，触摸/悬停才显形），
+ *     `data-platform="macos"` 下我们把宽度收到 0 然后在容器 hover 时
+ *     回到 8px，保留可见反馈但不在静默状态长期占用 8-10px 内边距，
+ *     与 Finder / 系统 App 的"无横条占位"观感对齐。
+ *   - Windows 11 / GNOME / KDE 用户更习惯持续可见的滚动条，保留 10px 默认。
+ *
+ * Firefox `scrollbar-width: thin` 在三端都按系统期望显示，无需平台分支。
+ */
 *::-webkit-scrollbar {
 	width: 10px;
 	height: 10px;
@@ -375,6 +385,19 @@ select:focus-visible,
 
 *::-webkit-scrollbar-thumb:hover {
 	background: var(--text-4);
+}
+
+/* macOS overlay scrollbar — 静默宽度 0，悬停回到 8px */
+html[data-platform="macos"] *::-webkit-scrollbar {
+	width: 0;
+	height: 0;
+}
+html[data-platform="macos"] :hover::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+html[data-platform="macos"] *::-webkit-scrollbar-thumb {
+	border-width: 1px;
 }
 
 /* Firefox */
@@ -518,6 +541,37 @@ button:disabled:hover,
  * ──────────────────────────────────────────────────────────── */
 .resize-handle:hover .resize-handle-line {
 	background-color: var(--text-4);
+}
+
+/* ─── 系统偏好：reduce-motion（无障碍兜底） ───────────────────
+ * 三端用户都可以在系统偏好里勾选"减弱动效"（macOS 辅助功能 / Win 显示
+ * 设置 / GNOME 通用辅助 / KDE 工作区行为）。Electron 通过 prefers-reduced-motion
+ * media query 透传该偏好；我们在全局把所有动画 / 过渡时长压到 ~0，
+ * 避免眩晕 / 视觉敏感用户被动效干扰。
+ * 不要写在组件层 —— 一处兜底比 30+ 组件各自判断更安全。
+ * ──────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.001ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.001ms !important;
+		scroll-behavior: auto !important;
+	}
+}
+
+/* ─── 窗口失焦视觉（三端原生窗口惯例） ───────────────────────
+ * 主进程的 BrowserWindow blur/focus → main.tsx 写 <html data-window-blurred>。
+ * macOS / Windows 11 / GNOME 失活窗口的标题栏文字会整体调淡，主区不变。
+ * 这里只 affect 自定义 Titlebar Portal 容器（#titlebar-root，见 index.html）
+ * 与流内的 MiniTitlebar（[data-mini-titlebar]）—— 整体 0.7 opacity，
+ * 不动主内容色阶，避免误伤业务 UI。
+ * ──────────────────────────────────────────────────────────── */
+html[data-window-blurred] #titlebar-root,
+html[data-window-blurred] [data-mini-titlebar] {
+	opacity: 0.65;
+	transition: opacity 120ms ease;
 }
 
 /* ─── Sidebar 收起/展开过渡 ────────────────────────────────────

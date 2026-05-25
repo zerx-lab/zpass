@@ -84,7 +84,7 @@ export function ApprovalToast() {
 	if (requests.length === 0) return null;
 
 	return (
-		<div className="pointer-events-none fixed inset-0 z-[9999] flex items-end justify-center p-6">
+		<div className="pointer-events-none fixed inset-0 z-(--z-critical) flex items-end justify-center p-6">
 			<div className="pointer-events-auto flex w-full max-w-md flex-col gap-2">
 				{requests.map((req) => (
 					<ApprovalCard
@@ -242,7 +242,7 @@ function ApprovalCard({
 						id={`trust-${request.id}`}
 						value={trustSeconds}
 						onChange={(e) => setTrustSeconds(Number(e.target.value))}
-						className="rounded-md border border-(--line) bg-(--bg) px-2.5 py-1.5 text-[12px] text-(--text) focus:outline-none focus:ring-1 focus:ring-(--text-2)"
+						className="rounded-md border border-(--line) bg-(--bg) px-2.5 py-1.5 text-[12px] text-(--text) outline-none transition-colors focus:border-(--text-3)"
 					>
 						{trustOptions.map((opt) => (
 							<option key={opt.value} value={opt.value}>

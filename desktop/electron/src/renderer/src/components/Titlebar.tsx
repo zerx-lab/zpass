@@ -158,6 +158,26 @@ export function Titlebar() {
     Window.Close().catch((err) => console.error("Close failed", err));
   };
 
+  /**
+   * 右键拖拽区 → Windows 系统菜单
+   * -----------------------------------------------------------------------
+   * Windows 11 用户右键原生标题栏会弹出"还原 / 移动 / 大小 / 最小化 /
+   * 最大化 / 关闭"系统菜单（同 Alt+Space）。frameless 自绘标题栏不会
+   * 自动获得这个菜单 —— 主进程通过 `desktop:window:show-system-menu` IPC
+   * 弹出。macOS / Linux 主进程端是 no-op，所以这里无需平台分支。
+   *
+   * 仅在拖拽区生效：按钮区域已设 -webkit-app-region: no-drag，事件不会
+   * 冒泡到这里；用户左右键点击按钮的行为不会被这个 handler 影响。
+   */
+  const onDragRegionContextMenu = (e: React.MouseEvent<HTMLDivElement>) => {
+    // 阻止默认 webview 菜单（main.tsx 已经在 PROD 全局拦了，但 DEV 没拦；
+    // 显式 preventDefault 让两个模式一致）
+    e.preventDefault();
+    window.desktop?.window?.showSystemMenu?.(e.clientX, e.clientY).catch(() => {
+      // 非 Windows / 无桥接环境忽略
+    });
+  };
+
   const getWindowButtonStyle = (
     kind: "minimize" | "maximize" | "close",
   ): CSSProperties => {
@@ -233,6 +253,7 @@ export function Titlebar() {
           ? { paddingLeft: "var(--titlebar-traffic-lights-inset)" }
           : undefined),
       }}
+      onContextMenu={onDragRegionContextMenu}
     >
       {/*
 				左侧品牌标识 —— 仅保留 logo（7×7 Z 点阵），不再渲染 "ZPass" 文字。

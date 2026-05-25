@@ -63,6 +63,27 @@ const api = {
       ipcRenderer.invoke("desktop:window:unfullscreen") as Promise<void>,
     close: () => ipcRenderer.invoke("desktop:window:close") as Promise<void>,
     /**
+     * Toggle fullscreen on the focused window. Bound to F11 (Win/Linux) and
+     * ⌃⌘F (macOS) by the renderer's Shortcuts component; the native menu
+     * triggers the same IPC. We funnel both paths here so the keymap stays
+     * single-source-of-truth.
+     */
+    toggleFullscreen: () =>
+      ipcRenderer.invoke("desktop:window:toggle-fullscreen") as Promise<void>,
+    /**
+     * Windows-only: pop the native window system menu (Restore / Move /
+     * Minimize / Maximize / Close) at the given client-area point. On
+     * macOS/Linux this is a no-op — see main.ts comment for rationale.
+     * The renderer's Titlebar wires this to onContextMenu over the
+     * drag region so right-clicking the titlebar matches Windows 11 native
+     * windows.
+     */
+    showSystemMenu: (x: number, y: number) =>
+      ipcRenderer.invoke("desktop:window:show-system-menu", {
+        x,
+        y,
+      }) as Promise<void>,
+    /**
      * Notify the main process whether closing the window should quit the
      * app or hide it into the system tray. Called from ThemeSync whenever
      * the user-facing preference (`prefs.closeBehavior`) changes.
@@ -72,6 +93,38 @@ const api = {
         "desktop:window:set-close-behavior",
         mode,
       ) as Promise<void>,
+    /**
+     * Subscribe to window focus/blur events emitted by the BrowserWindow.
+     * Renderer uses this to drive `<html data-window-blurred>` so the
+     * titlebar / topbar can render a subtly-dimmed "inactive window" look
+     * matching macOS / Windows / GNOME native behavior. Returns an
+     * unsubscribe function.
+     */
+    onFocusChange: (handler: (focused: boolean) => void) => {
+      const wrapped = (_ev: Electron.IpcRendererEvent, focused: boolean) => {
+        handler(focused);
+      };
+      ipcRenderer.on("desktop:window:focus", wrapped);
+      return () => {
+        ipcRenderer.removeListener("desktop:window:focus", wrapped);
+      };
+    },
+    /**
+     * Subscribe to native menu commands (macOS App Menu items). Renderer
+     * binds Settings / Lock so the menu and the in-app buttons share the
+     * same handlers. Returns an unsubscribe function.
+     */
+    onMenuCommand: (
+      command: "lock" | "open-settings",
+      handler: () => void,
+    ) => {
+      const channel = `desktop:menu:${command}`;
+      const wrapped = () => handler();
+      ipcRenderer.on(channel, wrapped);
+      return () => {
+        ipcRenderer.removeListener(channel, wrapped);
+      };
+    },
     /**
      * Subscribe to "about-to-hide-to-tray" notifications.
      *

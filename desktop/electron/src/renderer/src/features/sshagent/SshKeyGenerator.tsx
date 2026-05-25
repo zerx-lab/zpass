@@ -53,7 +53,7 @@ export function SshKeyModeTabs({
 }) {
 	const { t } = useTranslation();
 	return (
-		<div className="flex items-center gap-1 rounded-(--radius) border border-(--line) bg-(--bg-elev-2) p-1">
+		<div className="flex items-center gap-1 rounded-md border border-(--line) bg-(--bg-elev-2) p-1">
 			<TabButton
 				active={mode === "generate"}
 				disabled={disabled}
@@ -223,7 +223,7 @@ export function SshKeyGeneratorPanel({
 	};
 
 	return (
-		<div className="flex flex-col gap-3 rounded-(--radius) border border-(--line) bg-(--bg-elev-2) p-3.5">
+		<div className="flex flex-col gap-3 rounded-md border border-(--line) bg-(--bg-elev-2) p-3.5">
 			{/* 提示行 */}
 			<div className="flex items-center gap-2 text-[12px] text-(--text-3)">
 				<KeyRound size={13} strokeWidth={1.5} />

@@ -1,3 +1,5 @@
+import * as RadixDialog from "@radix-ui/react-dialog";
+import { clsx } from "clsx";
 import {
 	AlertTriangle,
 	AppWindow,
@@ -59,6 +61,30 @@ import { useSpacesStore } from "@/stores/spaces";
  * 数据源：usePrefsStore（zustand + persist）是偏好唯一真源�? * ThemeSync 订阅 store 变化并把值写�?<html data-*> �?i18next，本页无需手动同步�? */
 
 type IconComp = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>;
+
+/**
+ * 共享：取 Radix Dialog 的 Portal 容器
+ * ---------------------------------------------------------------------------
+ * 与 ExportDialog / ImportDialog / CmdK / VaultPage 等已 Radix 化的弹层一致，
+ * 统一挂到 #portal-root（位于 #root 之外），避免 #root 的 zoom stacking
+ * context 把 Overlay 锁死、被 Titlebar 盖住等老 bug。
+ */
+const dialogPortalContainer = () =>
+	typeof document !== "undefined"
+		? document.getElementById("portal-root")
+		: null;
+
+/** Radix Dialog 通用 Overlay / Content className（统一 backdrop + glass） */
+const DIALOG_OVERLAY_CLASS = clsx(
+	"fixed inset-0 z-50 zpass-backdrop",
+	"data-[state=open]:animate-[zpass-overlay-in_140ms_ease-out]",
+);
+const DIALOG_CONTENT_BASE_CLASS = clsx(
+	"fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2",
+	"flex flex-col gap-4 rounded-xl shadow-lg p-6",
+	"zpass-glass focus:outline-none",
+	"data-[state=open]:animate-[zpass-dialog-in_180ms_ease-out]",
+);
 
 /* ─────────────────────────────────────────────────────────────
  * 通用原子组件
@@ -148,45 +174,53 @@ function ConfirmDialog({
 	variant?: "danger" | "warn";
 	warning?: string;
 }) {
-	if (!open) return null;
 	return (
-		<div
-			className="fixed inset-0 z-500 flex items-center justify-center bg-black/50 animate-in fade-in-0 duration-150"
-			onClick={onClose}
+		<RadixDialog.Root
+			open={open}
+			onOpenChange={(v) => {
+				if (!v) onClose();
+			}}
 		>
-			<div
-				className="flex w-100 flex-col gap-4 rounded-lg border border-(--line) bg-(--bg-elev-2) p-6 shadow-lg animate-in slide-in-from-bottom-2 fade-in-0 duration-200"
-				onClick={(e) => e.stopPropagation()}
-			>
-				<h3 className="text-[16px] font-semibold text-(--text)">{title}</h3>
-				<p className="text-[13px] leading-relaxed text-(--text-2)">{message}</p>
-				{warning && (
-					<div className="flex items-start gap-2.5 rounded-sm border border-(--warn) bg-(--warn)/6 px-3 py-2.5 text-[12px] leading-relaxed text-(--warn)">
-						<AlertTriangle
-							size={14}
-							strokeWidth={1.5}
-							className="mt-0.5 shrink-0"
-						/>
-						<span>{warning}</span>
+			<RadixDialog.Portal container={dialogPortalContainer()}>
+				<RadixDialog.Overlay className={DIALOG_OVERLAY_CLASS} />
+				<RadixDialog.Content
+					aria-describedby={undefined}
+					className={clsx(DIALOG_CONTENT_BASE_CLASS, "w-100")}
+				>
+					<RadixDialog.Title className="text-[16px] font-semibold text-(--text)">
+						{title}
+					</RadixDialog.Title>
+					<p className="text-[13px] leading-relaxed text-(--text-2)">
+						{message}
+					</p>
+					{warning && (
+						<div className="flex items-start gap-2.5 rounded-sm border border-(--warn) bg-(--warn)/6 px-3 py-2.5 text-[12px] leading-relaxed text-(--warn)">
+							<AlertTriangle
+								size={14}
+								strokeWidth={1.5}
+								className="mt-0.5 shrink-0"
+							/>
+							<span>{warning}</span>
+						</div>
+					)}
+					<div className="flex justify-end gap-3 pt-1">
+						<Button variant="secondary" size="md" onClick={onClose}>
+							{cancelLabel}
+						</Button>
+						<Button
+							variant={variant === "danger" ? "danger" : "warn"}
+							size="md"
+							onClick={() => {
+								onConfirm();
+								onClose();
+							}}
+						>
+							{confirmLabel}
+						</Button>
 					</div>
-				)}
-				<div className="flex justify-end gap-3 pt-1">
-					<Button variant="secondary" size="md" onClick={onClose}>
-						{cancelLabel}
-					</Button>
-					<Button
-						variant={variant === "danger" ? "danger" : "warn"}
-						size="md"
-						onClick={() => {
-							onConfirm();
-							onClose();
-						}}
-					>
-						{confirmLabel}
-					</Button>
-				</div>
-			</div>
-		</div>
+				</RadixDialog.Content>
+			</RadixDialog.Portal>
+		</RadixDialog.Root>
 	);
 }
 
@@ -271,8 +305,6 @@ function SpaceEditDialog({
 		}
 	}, [open, initialName]);
 
-	if (!open) return null;
-
 	// 当前用于预览的头像值（patch 优先于 initial）
 	const previewAvatarUrl =
 		avatarPatch !== undefined ? avatarPatch : initialAvatarDataUrl;
@@ -318,17 +350,26 @@ function SpaceEditDialog({
 	};
 
 	return (
-		<div
-			className="fixed inset-0 z-500 flex items-center justify-center bg-black/50 animate-in fade-in-0 duration-150"
-			onClick={onClose}
+		<RadixDialog.Root
+			open={open}
+			onOpenChange={(v) => {
+				if (!v && !uploading) onClose();
+			}}
 		>
-			<div
-				className="flex w-110 flex-col gap-4 rounded-lg border border-(--line) bg-(--bg-elev-2) p-6 shadow-lg animate-in slide-in-from-bottom-2 fade-in-0 duration-200"
-				onClick={(e) => e.stopPropagation()}
-			>
-				<h3 className="text-[16px] font-semibold text-(--text)">{title}</h3>
+			<RadixDialog.Portal container={dialogPortalContainer()}>
+				<RadixDialog.Overlay className={DIALOG_OVERLAY_CLASS} />
+				<RadixDialog.Content
+					aria-describedby={undefined}
+					className={clsx(DIALOG_CONTENT_BASE_CLASS, "w-110")}
+					onEscapeKeyDown={(e) => {
+						if (uploading) e.preventDefault();
+					}}
+				>
+					<RadixDialog.Title className="text-[16px] font-semibold text-(--text)">
+						{title}
+					</RadixDialog.Title>
 
-				{/* 头像编辑区 —— 预览 + 上传/移除按钮 + 提示 */}
+					{/* 头像编辑区 —— 预览 + 上传/移除按钮 + 提示 */}
 				<div className="flex items-center gap-4">
 					<SpaceAvatar
 						space={{
@@ -336,7 +377,7 @@ function SpaceEditDialog({
 							glyph: previewGlyph,
 							name: trimmedName || initialName,
 						}}
-						className="h-16 w-16 rounded-lg text-[24px]"
+						className="h-12 w-12 rounded-lg text-[20px]"
 					/>
 					<div className="flex min-w-0 flex-1 flex-col gap-2">
 						<div className="flex flex-wrap gap-2">
@@ -418,8 +459,9 @@ function SpaceEditDialog({
 						{confirmLabel}
 					</Button>
 				</div>
-			</div>
-		</div>
+				</RadixDialog.Content>
+			</RadixDialog.Portal>
+		</RadixDialog.Root>
 	);
 }
 
@@ -470,65 +512,69 @@ function CreateSpaceDialog({
 		return first.toUpperCase();
 	})();
 
-	if (!open) return null;
 	return (
-		<div
-			className="fixed inset-0 z-500 flex items-center justify-center bg-black/50 animate-in fade-in-0 duration-150"
-			onClick={handleClose}
+		<RadixDialog.Root
+			open={open}
+			onOpenChange={(v) => {
+				if (!v) handleClose();
+			}}
 		>
-			<div
-				className="flex w-100 flex-col gap-4 rounded-lg border border-(--line) bg-(--bg-elev-2) p-6 shadow-lg animate-in slide-in-from-bottom-2 fade-in-0 duration-200"
-				onClick={(e) => e.stopPropagation()}
-			>
-				<h3 className="text-[16px] font-semibold text-(--text)">{title}</h3>
+			<RadixDialog.Portal container={dialogPortalContainer()}>
+				<RadixDialog.Overlay className={DIALOG_OVERLAY_CLASS} />
+				<RadixDialog.Content
+					aria-describedby={undefined}
+					className={clsx(DIALOG_CONTENT_BASE_CLASS, "w-100")}
+				>
+					<RadixDialog.Title className="text-[16px] font-semibold text-(--text)">
+						{title}
+					</RadixDialog.Title>
 
-				{/* glyph 预览 + 名称输入 */}
-				<div className="flex items-center gap-3">
-					<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-sm border border-(--line) bg-(--bg-elev) font-mono text-[16px] font-semibold text-(--text)">
-						{glyphPreview}
+					{/* glyph 预览 + 名称输入 */}
+					<div className="flex items-center gap-3">
+						<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-sm border border-(--line) bg-(--bg-elev) font-mono text-[16px] font-semibold text-(--text)">
+							{glyphPreview}
+						</div>
+						<input
+							type="text"
+							value={name}
+							onChange={(e) => setName(e.target.value)}
+							onKeyDown={(e) => {
+								if (e.key === "Enter" && name.trim()) handleConfirm();
+							}}
+							placeholder={namePlaceholder}
+							autoFocus
+							className="w-full rounded-sm border border-(--line) bg-(--bg) px-3 py-2 text-[14px] text-(--text) outline-none transition-colors focus:border-(--text-3)"
+						/>
 					</div>
+
+					{/* 副标题（tag）输入 */}
 					<input
 						type="text"
-						value={name}
-						onChange={(e) => setName(e.target.value)}
+						value={tag}
+						onChange={(e) => setTag(e.target.value)}
 						onKeyDown={(e) => {
 							if (e.key === "Enter" && name.trim()) handleConfirm();
-							if (e.key === "Escape") handleClose();
 						}}
-						placeholder={namePlaceholder}
-						autoFocus
+						placeholder={tagPlaceholder}
 						className="w-full rounded-sm border border-(--line) bg-(--bg) px-3 py-2 text-[14px] text-(--text) outline-none transition-colors focus:border-(--text-3)"
 					/>
-				</div>
 
-				{/* 副标题（tag）输�?*/}
-				<input
-					type="text"
-					value={tag}
-					onChange={(e) => setTag(e.target.value)}
-					onKeyDown={(e) => {
-						if (e.key === "Enter" && name.trim()) handleConfirm();
-						if (e.key === "Escape") handleClose();
-					}}
-					placeholder={tagPlaceholder}
-					className="w-full rounded-sm border border-(--line) bg-(--bg) px-3 py-2 text-[14px] text-(--text) outline-none transition-colors focus:border-(--text-3)"
-				/>
-
-				<div className="flex justify-end gap-3 pt-1">
-					<Button variant="secondary" size="md" onClick={handleClose}>
-						{cancelLabel}
-					</Button>
-					<Button
-						variant="default"
-						size="md"
-						disabled={!name.trim()}
-						onClick={handleConfirm}
-					>
-						{confirmLabel}
-					</Button>
-				</div>
-			</div>
-		</div>
+					<div className="flex justify-end gap-3 pt-1">
+						<Button variant="secondary" size="md" onClick={handleClose}>
+							{cancelLabel}
+						</Button>
+						<Button
+							variant="default"
+							size="md"
+							disabled={!name.trim()}
+							onClick={handleConfirm}
+						>
+							{confirmLabel}
+						</Button>
+					</div>
+				</RadixDialog.Content>
+			</RadixDialog.Portal>
+		</RadixDialog.Root>
 	);
 }
 
@@ -1167,7 +1213,7 @@ function TrustedDeviceSection() {
 					>
 						<span
 							className={
-								"absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform " +
+								"absolute top-0.5 h-4 w-4 rounded-full bg-(--bg) transition-transform " +
 								(enabled ? "translate-x-4" : "translate-x-0.5")
 							}
 						/>
@@ -1262,24 +1308,30 @@ function EnableTrustedDeviceDialog({
 		}
 	}, [password, loading, t, onSuccess]);
 
-	if (!open) return null;
 	return (
-		<div
-			className="fixed inset-0 z-500 flex items-center justify-center bg-black/50 animate-in fade-in-0 duration-150"
-			onClick={handleClose}
+		<RadixDialog.Root
+			open={open}
+			onOpenChange={(v) => {
+				if (!v) handleClose();
+			}}
 		>
-			<div
-				className="flex w-110 flex-col gap-4 rounded-lg border border-(--line) bg-(--bg-elev-2) p-6 shadow-lg animate-in slide-in-from-bottom-2 fade-in-0 duration-200"
-				onClick={(e) => e.stopPropagation()}
-			>
-				<h3 className="text-[16px] font-semibold text-(--text)">
-					{t("settings_trusted_device_enable_title")}
-				</h3>
-				<p className="text-[13px] leading-relaxed text-(--text-2)">
-					{t("settings_trusted_device_enable_msg")}
-				</p>
+			<RadixDialog.Portal container={dialogPortalContainer()}>
+				<RadixDialog.Overlay className={DIALOG_OVERLAY_CLASS} />
+				<RadixDialog.Content
+					aria-describedby={undefined}
+					className={clsx(DIALOG_CONTENT_BASE_CLASS, "w-110")}
+					onEscapeKeyDown={(e) => {
+						if (loading) e.preventDefault();
+					}}
+				>
+					<RadixDialog.Title className="text-[16px] font-semibold text-(--text)">
+						{t("settings_trusted_device_enable_title")}
+					</RadixDialog.Title>
+					<p className="text-[13px] leading-relaxed text-(--text-2)">
+						{t("settings_trusted_device_enable_msg")}
+					</p>
 
-				{/* 适用 / 不适用场景说明 —�?帮助用户判断是否真应该启�?*/}
+					{/* 适用 / 不适用场景说明 —— 帮助用户判断是否真应该启用 */}
 				<div className="flex flex-col gap-2.5 rounded-sm border border-(--line-soft) bg-(--bg-elev) px-3.5 py-3 text-[12px] leading-relaxed">
 					<div className="flex flex-col gap-1">
 						<span className="text-[11px] font-medium text-(--text-2)">
@@ -1354,8 +1406,9 @@ function EnableTrustedDeviceDialog({
 						{t("settings_trusted_device_enable_confirm")}
 					</Button>
 				</div>
-			</div>
-		</div>
+				</RadixDialog.Content>
+			</RadixDialog.Portal>
+		</RadixDialog.Root>
 	);
 }
 

@@ -428,7 +428,7 @@ function ResultOk({
 			</dl>
 
 			{/* 警告条 */}
-			<div className="rounded-(--radius-sm,5px) border border-(--line) bg-(--bg-elev) px-3 py-2 text-[11px] leading-relaxed text-(--text-3)">
+			<div className="rounded-sm border border-(--line) bg-(--bg-elev) px-3 py-2 text-[11px] leading-relaxed text-(--text-3)">
 				{t("qr_trust_warning")}
 			</div>
 
@@ -497,7 +497,7 @@ function ResultBad({
 			<div className="text-[11.5px] leading-relaxed text-(--text-3)">{t(hintKey as never)}</div>
 			{/* 识别到的非 otpauth 内容 —— 让用户判断是不是扫错图 */}
 			{rawText && (
-				<div className="rounded-(--radius-sm,5px) border border-(--line) bg-(--bg-elev) px-3 py-2">
+				<div className="rounded-sm border border-(--line) bg-(--bg-elev) px-3 py-2">
 					<div className="mb-1 text-[10.5px] tracking-wider text-(--text-4) uppercase">
 						{t("qr_err_detected_content")}
 					</div>

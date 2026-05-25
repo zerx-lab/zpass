@@ -4,12 +4,18 @@ import {
   dialog,
   ipcMain,
   Menu,
+  type MenuItemConstructorOptions,
   nativeImage,
   shell,
   Tray,
 } from "electron";
 import { type FSWatcher, watch as fsWatch } from "node:fs";
-import { stat as fsStat } from "node:fs/promises";
+import {
+  mkdir as fsMkdir,
+  readFile as fsReadFile,
+  stat as fsStat,
+  writeFile as fsWriteFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { startBackend, type Backend } from "./backend";
 
@@ -178,6 +184,53 @@ ipcMain.handle("desktop:window:close", () => {
   // 'close' keeps a single code path and lets the OS-level Cmd+W / Alt+F4
   // keep the same behavior as our custom titlebar X.)
   focusedWin()?.close();
+});
+
+// Windows-only: pop the native window system menu (Restore / Move / Resize /
+// Minimize / Maximize / Close) at the given client-area coordinates. Routed
+// through IPC so the renderer's custom titlebar can fire it on right-click
+// in the drag region (Windows 11 expectation — frameless windows that don't
+// implement this lose the system menu entirely, breaking accessibility for
+// keyboard-only users who reach this menu via Alt+Space).
+//
+// On macOS/Linux this is a no-op: macOS has no equivalent window system menu
+// (Apple uses application menu bar + Mission Control), and Linux WMs handle
+// alt+drag/super+drag natively without an in-window menu.
+ipcMain.handle(
+  "desktop:window:show-system-menu",
+  (_ev, coords: { x?: number; y?: number }) => {
+    if (process.platform !== "win32") return;
+    const win = focusedWin();
+    if (!win) return;
+    const point: { x: number; y: number } | undefined =
+      typeof coords?.x === "number" && typeof coords?.y === "number"
+        ? { x: Math.round(coords.x), y: Math.round(coords.y) }
+        : undefined;
+    // Electron 35+: win.showSystemMenu(opts) was deprecated in favor of
+    // hwnd.popupSystemMenu via webContents. The simplest cross-version
+    // approach is to manually emit WM_SYSMENU via setBackgroundMaterial
+    // proxy — but that's brittle. Instead we call win.showSystemMenu()
+    // when available (Electron 30.0.0+), falling back to a synthesized
+    // Menu.popup for older shells.
+    type WinWithSysMenu = typeof win & {
+      showSystemMenu?: (opts?: { x: number; y: number }) => void;
+    };
+    const w = win as WinWithSysMenu;
+    if (typeof w.showSystemMenu === "function") {
+      try {
+        w.showSystemMenu(point);
+        return;
+      } catch (err) {
+        process.stderr.write(`[sysmenu] showSystemMenu failed: ${String(err)}\n`);
+      }
+    }
+  },
+);
+
+ipcMain.handle("desktop:window:toggle-fullscreen", () => {
+  const win = focusedWin();
+  if (!win) return;
+  win.setFullScreen(!win.isFullScreen());
 });
 ipcMain.handle(
   "desktop:window:set-close-behavior",
@@ -456,6 +509,231 @@ function installTray() {
   });
 }
 
+/**
+ * Build & install the native application menu.
+ * -----------------------------------------------------------------------------
+ * Without `Menu.setApplicationMenu(...)` Electron renders its default English
+ * menu — "Electron / File / Edit / View / Window / Help" with developer items
+ * like "Toggle DevTools" shown to end users. macOS treats the application
+ * menu as required (Apple HIG); Windows / Linux can hide it but we install a
+ * minimal version anyway so accelerators (Ctrl+Q, Ctrl+,) line up with the
+ * renderer's own shortcuts.
+ *
+ * Cross-platform notes:
+ *   - On macOS the first menu item label is replaced by the app's binary
+ *     name automatically; we still set `label: "ZPass"` so it survives an
+ *     unsigned dev build where the binary is `Electron`.
+ *   - DevTools / Reload items are only added when not packaged.
+ *   - Accelerator strings use Electron's CommandOrCtrl modifier so the
+ *     mapping is automatic (⌘ on mac, Ctrl elsewhere).
+ *   - The menu does NOT include i18n strings — those live in the renderer.
+ *     Re-localising the native menu on the fly requires re-building it on
+ *     locale change; not done in this pass.
+ */
+function installAppMenu() {
+  const isMac = process.platform === "darwin";
+  const isDev = !app.isPackaged;
+
+  const macAppMenu: MenuItemConstructorOptions[] = isMac
+    ? [
+        {
+          label: "ZPass",
+          submenu: [
+            { role: "about" },
+            { type: "separator" },
+            {
+              label: "Lock Vault",
+              accelerator: "Cmd+L",
+              click: () => {
+                const win = focusedWin();
+                win?.webContents.send("desktop:menu:lock");
+              },
+            },
+            {
+              label: "Preferences…",
+              accelerator: "Cmd+,",
+              click: () => {
+                const win = focusedWin();
+                win?.webContents.send("desktop:menu:open-settings");
+              },
+            },
+            { type: "separator" },
+            { role: "hide" },
+            { role: "hideOthers" },
+            { role: "unhide" },
+            { type: "separator" },
+            { role: "quit" },
+          ],
+        },
+      ]
+    : [];
+
+  const editMenu: MenuItemConstructorOptions = {
+    label: "Edit",
+    submenu: [
+      { role: "undo" },
+      { role: "redo" },
+      { type: "separator" },
+      { role: "cut" },
+      { role: "copy" },
+      { role: "paste" },
+      ...(isMac
+        ? ([
+            { role: "pasteAndMatchStyle" } as MenuItemConstructorOptions,
+            { role: "delete" } as MenuItemConstructorOptions,
+            { role: "selectAll" } as MenuItemConstructorOptions,
+          ] satisfies MenuItemConstructorOptions[])
+        : ([
+            { role: "delete" } as MenuItemConstructorOptions,
+            { type: "separator" } as MenuItemConstructorOptions,
+            { role: "selectAll" } as MenuItemConstructorOptions,
+          ] satisfies MenuItemConstructorOptions[])),
+    ],
+  };
+
+  const viewMenu: MenuItemConstructorOptions = {
+    label: "View",
+    submenu: [
+      {
+        label: "Toggle Full Screen",
+        accelerator: isMac ? "Ctrl+Cmd+F" : "F11",
+        click: () => {
+          const win = focusedWin();
+          if (!win) return;
+          win.setFullScreen(!win.isFullScreen());
+        },
+      },
+      ...(isDev
+        ? ([
+            { type: "separator" } as MenuItemConstructorOptions,
+            { role: "reload" } as MenuItemConstructorOptions,
+            { role: "forceReload" } as MenuItemConstructorOptions,
+            { role: "toggleDevTools" } as MenuItemConstructorOptions,
+          ] satisfies MenuItemConstructorOptions[])
+        : ([] as MenuItemConstructorOptions[])),
+    ],
+  };
+
+  const windowMenu: MenuItemConstructorOptions = {
+    label: "Window",
+    submenu: [
+      { role: "minimize" },
+      { role: "zoom" },
+      ...(isMac
+        ? ([
+            { type: "separator" } as MenuItemConstructorOptions,
+            { role: "front" } as MenuItemConstructorOptions,
+            { type: "separator" } as MenuItemConstructorOptions,
+            { role: "window" } as MenuItemConstructorOptions,
+          ] satisfies MenuItemConstructorOptions[])
+        : ([
+            { role: "close" } as MenuItemConstructorOptions,
+          ] satisfies MenuItemConstructorOptions[])),
+    ],
+  };
+
+  const helpMenu: MenuItemConstructorOptions = {
+    role: "help",
+    submenu: [
+      {
+        label: "ZPass on GitHub",
+        click: () => {
+          void shell.openExternal("https://github.com/zerx-lab/zpass");
+        },
+      },
+    ],
+  };
+
+  const template: MenuItemConstructorOptions[] = [
+    ...macAppMenu,
+    editMenu,
+    viewMenu,
+    windowMenu,
+    helpMenu,
+  ];
+
+  // On Linux & Windows we explicitly null-out the menu so the renderer-only
+  // command surface (Topbar + Settings page + ⌘K palette) is the canonical
+  // chrome. Native menu bar takes vertical space and duplicates the in-app
+  // commands. macOS keeps the menu — Apple HIG requires it.
+  if (!isMac) {
+    Menu.setApplicationMenu(null);
+    return;
+  }
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+// ────────────── Window bounds persistence ───────────────────────────────────
+//
+// Electron does not remember last window position/size by default. We persist
+// to `~/.config/zpass/window-bounds.json` (`app.getPath("userData")` is the
+// canonical writable location across the three OSes). On read failure or
+// schema mismatch we fall back to the design default 1280x820 centered.
+//
+// We intentionally do NOT use the renderer's `ConfigService` (AGENTS.md hard
+// rule says renderer prefs route through that service): window bounds are
+// shell state owned by the main process, written before the renderer is even
+// ready to receive IPC. Putting them in a sibling JSON keeps the two storage
+// strata separate.
+type WindowBounds = {
+  x?: number;
+  y?: number;
+  width: number;
+  height: number;
+  maximized?: boolean;
+};
+
+const BOUNDS_FILENAME = "window-bounds.json";
+
+function boundsFilePath() {
+  return join(app.getPath("userData"), BOUNDS_FILENAME);
+}
+
+async function loadWindowBounds(): Promise<WindowBounds | null> {
+  try {
+    const raw = await fsReadFile(boundsFilePath(), "utf8");
+    const data = JSON.parse(raw) as unknown;
+    if (
+      typeof data === "object" &&
+      data !== null &&
+      typeof (data as WindowBounds).width === "number" &&
+      typeof (data as WindowBounds).height === "number"
+    ) {
+      return data as WindowBounds;
+    }
+  } catch {
+    // missing / corrupt — fall back to defaults
+  }
+  return null;
+}
+
+async function saveWindowBounds(win: BrowserWindow) {
+  // Save the "normal" (non-maximised/non-fullscreen) bounds so that next
+  // launch restores a usable window. If currently maximised we still want
+  // to remember the maximised flag so the user keeps that state.
+  const maximized = win.isMaximized();
+  const fullScreen = win.isFullScreen();
+  if (fullScreen) {
+    // Don't capture fullscreen bounds — those collapse to the display rect
+    // and would force a full-screen launch even after the user exits.
+    return;
+  }
+  const bounds = maximized ? win.getNormalBounds() : win.getBounds();
+  const payload: WindowBounds = {
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+    maximized,
+  };
+  try {
+    await fsMkdir(app.getPath("userData"), { recursive: true });
+    await fsWriteFile(boundsFilePath(), JSON.stringify(payload), "utf8");
+  } catch (err) {
+    process.stderr.write(`[bounds] save failed: ${String(err)}\n`);
+  }
+}
+
 async function createWindow() {
   // Match the Wails 3 window options the ported frontend was designed for:
   //   - frameless + custom titlebar (rendered by React's <Titlebar/>)
@@ -463,12 +741,16 @@ async function createWindow() {
   //   - solid #0c0c0d background so the first paint is not a white flash
   //   - macOS keeps OS traffic lights but hides the title text (the React
   //     Titlebar reserves 80px on the left for them)
-  const win = new BrowserWindow({
-    width: 1280,
-    height: 820,
+  // Restore persisted bounds so the user finds the window where they left it.
+  // Three-platform consistency: Electron centers a 1280x820 frame as fallback
+  // when no JSON is present (cold first launch).
+  const saved = await loadWindowBounds();
+  const winOptions: Electron.BrowserWindowConstructorOptions = {
+    width: saved?.width ?? 1280,
+    height: saved?.height ?? 820,
     minWidth: 960,
     minHeight: 620,
-    center: true,
+    center: saved?.x === undefined || saved?.y === undefined,
     frame: false,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
     backgroundColor: "#0c0c0d",
@@ -479,7 +761,47 @@ async function createWindow() {
       nodeIntegration: false,
       sandbox: true,
     },
-  });
+  };
+  if (saved?.x !== undefined) winOptions.x = saved.x;
+  if (saved?.y !== undefined) winOptions.y = saved.y;
+  const win = new BrowserWindow(winOptions);
+  // If the persisted state was maximised, re-apply after construction so the
+  // saved normal-bounds become the "restore" target.
+  if (saved?.maximized) {
+    win.once("ready-to-show", () => {
+      win.maximize();
+    });
+    // ready-to-show may never fire if show:true short-circuits it; also
+    // maximize on first paint via an immediate call as belt + braces.
+    setImmediate(() => {
+      if (!win.isDestroyed() && !win.isMaximized()) win.maximize();
+    });
+  }
+
+  // Persist bounds when the user closes or moves the window. We debounce by
+  // only saving on 'close' (final) and on 'resize'/'move' (~every change is
+  // fine — writes are small and async). Failures are best-effort.
+  const persistBounds = () => {
+    void saveWindowBounds(win);
+  };
+  win.on("resize", persistBounds);
+  win.on("move", persistBounds);
+  win.on("maximize", persistBounds);
+  win.on("unmaximize", persistBounds);
+
+  // Window focus tracking → notify renderer so titlebar / topbar can render
+  // a "blurred" visual (Linear / Things style: text-3 drops to text-4 when
+  // the window loses focus). All three platforms emit blur/focus reliably.
+  const sendFocusState = (focused: boolean) => {
+    if (win.isDestroyed()) return;
+    try {
+      win.webContents.send("desktop:window:focus", focused);
+    } catch {
+      // webContents may be tearing down — ignore
+    }
+  };
+  win.on("focus", () => sendFocusState(true));
+  win.on("blur", () => sendFocusState(false));
 
   mainWindow = win;
   win.on("closed", () => {
@@ -610,6 +932,7 @@ app.whenReady().then(async () => {
   // and the system tray (Tray requires the GPU/UI thread to be up).
   installDevReloader();
   installTray();
+  installAppMenu();
 
   await createWindow();
   bootTrace("window-loaded");

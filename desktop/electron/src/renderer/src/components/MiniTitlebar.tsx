@@ -115,6 +115,7 @@ export function MiniTitlebar({
 
   return (
     <div
+      data-mini-titlebar
       className={clsx(
         "relative z-10 flex h-9 shrink-0 items-center justify-end border-b border-(--line-soft) bg-(--bg) pr-0 select-none",
         className,

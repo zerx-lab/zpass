@@ -71,7 +71,14 @@
 //   /unlock 之外所有已解锁路由都由 <LockGuard> 守卫 —— locked=true 时强制
 //   重定向到 /unlock，解锁后才放行到 AppShell。详见 src/app/LockGuard.tsx。
 
-import { createBrowserRouter, Navigate, Outlet } from "react-router-dom";
+import { useEffect } from "react";
+import {
+	createBrowserRouter,
+	Navigate,
+	Outlet,
+	useNavigate,
+} from "react-router-dom";
+import { useLockStore } from "@/stores/lock";
 import { AppShell } from "@/app/AppShell";
 import { LockGuard } from "@/app/LockGuard";
 import { OnboardingGuard } from "@/app/OnboardingGuard";
@@ -110,6 +117,34 @@ import { WelcomePage } from "@/features/welcome/WelcomePage";
  *               保留在此处是为了代码路径单一。
  */
 function RootLayout() {
+	const navigate = useNavigate();
+	const lock = useLockStore((s) => s.lock);
+
+	// ─────────────────────────────────────────────────────────────
+	// 原生 App Menu 命令桥接
+	// ---------------------------------------------------------------------------
+	// macOS 系统菜单栏（main.ts `installAppMenu`）里有 "Preferences…" /
+	// "Lock Vault" 两项，点击时主进程通过 webContents.send 把指令推到这里。
+	// 渲染进程在 RouterProvider 子树内才能调 useNavigate，所以挂载在
+	// RootLayout 而不是 App.tsx 兄弟层的 Shortcuts。
+	// 三端一致：Win/Linux 没原生菜单也仍能收到命令（IPC 通道存在），
+	// 未来加 tray 菜单"打开偏好"同样复用这条通道。
+	// ─────────────────────────────────────────────────────────────
+	useEffect(() => {
+		const desk = window.desktop?.window;
+		if (!desk?.onMenuCommand) return;
+		const unsubSettings = desk.onMenuCommand("open-settings", () => {
+			navigate("/settings");
+		});
+		const unsubLock = desk.onMenuCommand("lock", () => {
+			lock();
+		});
+		return () => {
+			unsubSettings();
+			unsubLock();
+		};
+	}, [navigate, lock]);
+
 	return (
 		<>
 			<Outlet />

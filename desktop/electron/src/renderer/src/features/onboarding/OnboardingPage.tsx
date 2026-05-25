@@ -214,7 +214,7 @@ export function OnboardingPage() {
 					{/* 标题 + 副文案 */}
 					<div className="flex flex-col gap-2">
 						<span className="text-xs text-(--text-3)">{greeting}</span>
-						<h1 className="text-2xl font-semibold tracking-tight text-(--text)">
+						<h1 className="text-xl font-semibold tracking-tight text-(--text)">
 							{t("onboarding_title")}
 						</h1>
 						<p className="text-sm leading-relaxed text-(--text-2)">

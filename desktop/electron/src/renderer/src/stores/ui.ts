@@ -56,6 +56,24 @@ export interface UIState {
 	 */
 	newItemRequest: number;
 
+	/**
+	 * "请求打开编辑对话框（指定 itemId）" 的信号
+	 *
+	 * 与 newItemRequest 同样的"单调计数器 + 业务字段"模式：每次调用
+	 * requestEditItem(id) 都把 counter 递增并写下目标 id；订阅方
+	 * （VaultPage）的 useEffect 比较 counter 变化即触发 openEditDialog。
+	 *
+	 * 业务流：
+	 *   1. 用户在 TotpPage / 其他列表页点条目的"编辑"按钮
+	 *      → requestEditItem(id) + navigate("/vault?filter=<type>")
+	 *   2. VaultPage 挂载/已挂载 → 订阅 editItemRequest counter 变化
+	 *      → selectItem(id) + 等 fetchItem 完成 → setDialogMode("edit")
+	 *
+	 * 用 { id, counter } 一起放在 store：避免"id 变了但 counter 没变"
+	 * 或"counter 变了但 id 还停留在上一次"的竞态。
+	 */
+	editItemRequest: { id: string; counter: number } | null;
+
 	openCmdk: () => void;
 	closeCmdk: () => void;
 	toggleCmdk: () => void;
@@ -66,6 +84,9 @@ export interface UIState {
 
 	/** 触发"打开新建条目对话框"的全局信号 */
 	requestNewItem: () => void;
+
+	/** 触发"打开指定条目编辑对话框"的全局信号 */
+	requestEditItem: (id: string) => void;
 
 	/** 推入一条 Toast；返回该 toast 的 id 便于外部手动 dismiss */
 	pushToast: (toast: Omit<ToastItem, "id"> & { id?: string }) => string;
@@ -85,6 +106,7 @@ export const useUIStore = create<UIState>((set) => ({
 	tweaksOpen: false,
 	toasts: [],
 	newItemRequest: 0,
+	editItemRequest: null,
 
 	openCmdk: () => set({ cmdkOpen: true }),
 	closeCmdk: () => set({ cmdkOpen: false }),
@@ -95,6 +117,14 @@ export const useUIStore = create<UIState>((set) => ({
 	toggleTweaks: () => set((s) => ({ tweaksOpen: !s.tweaksOpen })),
 
 	requestNewItem: () => set((s) => ({ newItemRequest: s.newItemRequest + 1 })),
+
+	requestEditItem: (id) =>
+		set((s) => ({
+			editItemRequest: {
+				id,
+				counter: (s.editItemRequest?.counter ?? 0) + 1,
+			},
+		})),
 
 	pushToast: (toast) => {
 		const id = toast.id ?? genId();

@@ -93,6 +93,22 @@ const config: ForgeConfig = {
     // `icon` is base path; packager appends .png/.ico/.icns per platform.
     icon: "./assets/logo/zpass",
     extraResource: ["./bin", "./assets/logo"],
+    // Windows PE VERSIONINFO. Without code signing the UAC "Publisher" line
+    // stays "Unknown publisher" — that field reads strictly from the cert
+    // Subject CN and cannot be set here. But UAC's large title, Task
+    // Manager's process name, and the file-properties Details tab all read
+    // from VERSIONINFO, so populating these turns "zpass.exe / unknown"
+    // into "ZPass — Zero-knowledge password manager / ZPass" and removes
+    // most of the "what is this thing" confusion before users hit the
+    // SmartScreen / UAC dialogs.
+    appCopyright: "Copyright (C) 2020-2026 Denver Technologies, Inc.",
+    win32metadata: {
+      CompanyName: "ZPass",
+      FileDescription: "ZPass — Zero-knowledge password manager",
+      OriginalFilename: "zpass.exe",
+      ProductName: "ZPass",
+      InternalName: "zpass",
+    },
     // Strip ~65 MB of unused locale .pak files and the 20 MB Chromium
     // license dump from the packaged app. See trimElectronExtras above.
     afterExtract: [
@@ -178,6 +194,13 @@ const config: ForgeConfig = {
     new MakerSquirrel({
       // `name` becomes the Squirrel app id; must be a valid file/dir token.
       name: "zpass",
+      // `title` / `authors` / `description` populate the Setup.exe's own
+      // VERSIONINFO and the Add/Remove Programs entry. Without these the
+      // installer shows up as "zpass Setup" by an unknown author; with
+      // them the user sees "ZPass" by "ZPass" in both places.
+      title: "ZPass",
+      authors: "ZPass",
+      description: "Zero-knowledge desktop password manager",
       setupIcon: "./assets/logo/zpass.ico",
     }),
     new MakerZIP({}, ["darwin", "linux", "win32"]),

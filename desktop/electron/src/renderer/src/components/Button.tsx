@@ -69,11 +69,11 @@ const VARIANT_CLASSES: Record<Variant, string> = {
 		"hover:bg-(--bg-hover) hover:text-(--text) active:scale-[0.97]",
 
 	danger:
-		"bg-(--danger) text-white font-semibold border border-transparent " +
+		"bg-(--danger) text-(--danger-ink) font-semibold border border-transparent " +
 		"hover:opacity-90 active:scale-[0.97]",
 
 	warn:
-		"bg-(--warn) text-white font-semibold border border-transparent " +
+		"bg-(--warn) text-(--warn-ink) font-semibold border border-transparent " +
 		"hover:opacity-90 active:scale-[0.97]",
 
 	outline:
@@ -149,7 +149,8 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 		const base =
 			"inline-flex items-center justify-center whitespace-nowrap select-none " +
 			"transition-[opacity,transform,background-color,border-color,color] duration-150 " +
-			"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--text)/40 focus-visible:ring-offset-1 " +
+			// 键盘聚焦走 globals.css 统一 outline（1px var(--text) + offset 2px）。
+			// 这里不再叠加 ring/ring-offset，避免与全局 outline 双层视觉冲突（§6）。
 			"disabled:cursor-not-allowed disabled:opacity-40 disabled:pointer-events-none";
 
 		const classes = [

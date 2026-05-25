@@ -93,15 +93,12 @@ const SwitcherTrigger = forwardRef<HTMLButtonElement, TriggerProps>(
 				aria-label="Switch workspace"
 				{...rest}
 				className={clsx(
-					"group mx-2 mt-3 mb-2 flex h-12 w-[calc(100%-1rem)] items-center gap-2.5 rounded-(--radius) px-2",
+					"group mx-2 mt-3 mb-2 flex h-10 w-[calc(100%-1rem)] items-center gap-2.5 rounded-(--radius) px-2",
 					"transition-colors",
-					// 冗余保护：显式关闭所有 focus outline ——
-					// Sidebar 顶部空间有限，outline 会溢出到 Titlebar 导致"顶部边框被裁切"的视觉 bug
-					"outline-none focus:outline-none focus-visible:outline-none",
 					"hover:bg-(--bg-hover)",
 					"data-[state=open]:bg-(--bg-active)",
-					// 键盘聚焦态用内嵌 ring（不会溢出按钮外框）而非 outline
-					"focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-(--text-3)",
+					// 键盘聚焦走 globals.css §"聚焦样式" 统一 outline（1px var(--text)
+					// + offset 2px）。这里不再写局部 ring/outline-none —— 与 §6 对齐。
 					className,
 				)}
 			>
@@ -177,7 +174,7 @@ function WorkspaceSwitcherFallback({ collapsed }: { collapsed?: boolean }) {
 			type="button"
 			aria-label="Create workspace"
 			onClick={() => navigate("/onboarding")}
-			className="group mx-2 mt-3 mb-2 flex h-12 w-[calc(100%-1rem)] items-center gap-2.5 rounded-(--radius) px-2 outline-none transition-colors hover:bg-(--bg-hover) focus:outline-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-(--text-3)"
+			className="group mx-2 mt-3 mb-2 flex h-10 w-[calc(100%-1rem)] items-center gap-2.5 rounded-(--radius) px-2 outline-none transition-colors hover:bg-(--bg-hover) focus:outline-none focus-visible:outline-none"
 		>
 			<div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-(--radius) border border-(--line) border-dashed bg-(--bg-elev-2) font-mono text-[13px] font-semibold text-(--text-3)">
 				+
@@ -369,7 +366,7 @@ function WorkspaceSwitcherMain({
 									key={sp.id}
 									value={sp.id}
 									className={clsx(
-										"relative flex h-10 cursor-default items-center gap-2.5 rounded-sm px-2 text-[12.5px] text-(--text-2)",
+										"relative flex h-8 cursor-default items-center gap-2.5 rounded-sm px-2 text-[12.5px] text-(--text-2)",
 										// 冗余保护：关闭 focus outline —— 高亮态完全由 data-highlighted 的背景 + 前景表达
 										"outline-none focus:outline-none focus-visible:outline-none",
 										"transition-colors select-none",

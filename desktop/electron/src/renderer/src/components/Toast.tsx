@@ -130,7 +130,7 @@ function ToastItemView({
 				toast-item pointer-events-auto
 				flex items-start gap-2.5
 				min-w-[180px] max-w-[360px]
-				rounded-[7px]
+				rounded-md
 				zpass-glass
 				px-3.5 py-2.5
 				text-[12.5px] text-(--text)
@@ -239,7 +239,7 @@ export function Toast() {
 		<section
 			aria-label="Notifications"
 			className="
-				pointer-events-none fixed bottom-5 right-5 z-[60]
+				pointer-events-none fixed right-5 bottom-5 z-(--z-toast)
 				flex flex-col items-end gap-2
 			"
 		>

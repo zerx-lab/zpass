@@ -616,6 +616,7 @@ export function VaultPage() {
 
 	const pushToast = useUIStore((s) => s.pushToast);
 	const newItemRequest = useUIStore((s) => s.newItemRequest);
+	const editItemRequest = useUIStore((s) => s.editItemRequest);
 
 	// ----- 本地 UI 状态 -----
 	/** 对话框 mode："new" 新建 / "edit" 编辑当前选中条目 / null 关闭 */
@@ -776,6 +777,16 @@ export function VaultPage() {
 			setDialogMode("new");
 		}
 	}, [newItemRequest]);
+
+	// 订阅 TotpPage / 其他列表页"打开编辑"信号 —— 计数器递增即把对应
+	// 条目选中并打开编辑 dialog。openEditDialog 内部会等 fetchItem 完成
+	// 再切 dialogMode，所以跨页跳转后 itemDetails 缓存未命中也安全。
+	//
+	// biome-ignore lint/correctness/useExhaustiveDependencies: 仅 editItemRequest.counter 是触发依据
+	useEffect(() => {
+		if (!editItemRequest) return;
+		void openEditDialog(editItemRequest.id);
+	}, [editItemRequest?.counter]);
 
 	// ----- 派生数据 -----
 
@@ -1309,8 +1320,8 @@ function VaultListRow({
 				tabIndex={-1}
 				className={
 					selected
-						? "flex w-full items-center gap-2.5 rounded-[7px] bg-(--bg-active) px-2.5 py-2 text-left transition-colors focus:outline-none focus-visible:outline-none"
-						: "flex w-full items-center gap-2.5 rounded-[7px] px-2.5 py-2 text-left transition-colors hover:bg-(--bg-hover) focus:outline-none focus-visible:outline-none"
+						? "flex w-full items-center gap-2.5 rounded-md bg-(--bg-active) px-2.5 py-2 text-left transition-colors focus:outline-none focus-visible:outline-none"
+						: "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-(--bg-hover) focus:outline-none focus-visible:outline-none"
 				}
 			>
 				{/* 缩略字形方块 ——
@@ -1547,7 +1558,7 @@ function EmptyDetail() {
 	const { t } = useTranslation();
 	return (
 		<div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
-			<div className="flex h-14 w-14 items-center justify-center rounded-xl border border-dashed border-(--line) bg-(--bg-elev-2) text-(--text-3)">
+			<div className="flex h-12 w-12 items-center justify-center rounded-xl border border-dashed border-(--line) bg-(--bg-elev-2) text-(--text-3)">
 				<KeyRound size={20} strokeWidth={1.2} />
 			</div>
 			<div className="flex flex-col gap-1">

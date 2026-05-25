@@ -75,6 +75,19 @@ export function Shortcuts() {
 			Escape: () => {
 				closeCmdk();
 			},
+			// 全屏切换 —— 三端通用：F11（Win/Linux）+ ⌃⌘F（macOS HIG）
+			//   通过主进程 IPC 调 BrowserWindow.setFullScreen，三平台行为
+			//   交给 Electron 统一抽象（X11/Wayland 走 NETWM_STATE_FULLSCREEN，
+			//   Win 走 SetWindowPos，macOS 走 NSWindow.toggleFullScreen）
+			F11: (e: KeyboardEvent) => {
+				e.preventDefault();
+				void window.desktop?.window?.toggleFullscreen?.();
+			},
+			"Control+Meta+KeyF": (e: KeyboardEvent) => {
+				// macOS 系统默认 ⌃⌘F = Full Screen；保留同一物理组合给三端
+				e.preventDefault();
+				void window.desktop?.window?.toggleFullscreen?.();
+			},
 		});
 
 		return () => {

@@ -122,6 +122,7 @@ export function TotpPage() {
 	const setOtpSnapshots = useVaultStore((s) => s.setOtpSnapshots);
 	const setOtpSnapshot = useVaultStore((s) => s.setOtpSnapshot);
 	const selectItem = useVaultStore((s) => s.selectItem);
+	const requestEditItem = useUIStore((s) => s.requestEditItem);
 
 	// 读取 URL 参数，chip 由 Topbar 通过 setSearchParams 写入
 	const sourceFilter: SourceFilter = readSourceFilter(
@@ -219,7 +220,7 @@ export function TotpPage() {
 		return (
 			<div className="flex h-full w-full items-center justify-center bg-(--bg-elev)">
 				<div className="flex max-w-md flex-col items-center gap-3 px-6 text-center">
-					<div className="flex h-14 w-14 items-center justify-center rounded-xl border border-dashed border-(--line) bg-(--bg-elev-2) text-(--text-3)">
+					<div className="flex h-12 w-12 items-center justify-center rounded-xl border border-dashed border-(--line) bg-(--bg-elev-2) text-(--text-3)">
 						<Smartphone size={20} strokeWidth={1.2} />
 					</div>
 					<p className="text-[14px] text-(--text-2)">{t("totp_empty")}</p>
@@ -255,14 +256,19 @@ export function TotpPage() {
 								detail={itemDetails[it.id]}
 								otpResult={otpSnapshots[it.id] ?? null}
 								onEdit={() => {
-									// 跳转到保险库时必须给出：
-									//   1. selectItem(id) —— VaultPage 不从 URL 同步 :itemId，
-									//      只走 store.selectedId；不调这个详情会袭用上一次选中。
-									//   2. URL 带上 `?filter=<条目类型>` —— Sidebar.NavRow 的 exactSearch
-									//      逻辑要求 pathname === '/vault' 且 ?filter 匹配；用 `/vault/:id`
-									//      路由会让 pathname 变成 `/vault/xxx`，导致侧边栏全黑（无任何项高亮）。
-									//      所以这里不用 `/vault/${id}`，而是 `/vault?filter=<type>` + selectItem。
+									// 直接打开编辑 dialog —— 用户期望是"点编辑按钮就编辑这一条"，
+									// 而不是"跳到保险库后自己再点一次编辑"。
+									//
+									// 实现：
+									//   1. selectItem(id) —— VaultPage 选中条目，让详情面板与
+									//      dialog 内的 existing 都拿到正确的条目
+									//   2. requestEditItem(id) —— 全局信号，VaultPage 订阅后调
+									//      openEditDialog(id) 真正打开编辑 modal（含 fetchItem 等待）
+									//   3. navigate(`/vault?filter=<type>`) —— 保证 URL / 侧边栏
+									//      高亮与"当前编辑的条目类型"一致；Sidebar.NavRow 的
+									//      exactSearch 要求 pathname='/vault' + ?filter 匹配
 									selectItem(it.id);
+									requestEditItem(it.id);
 									navigate(`/vault?filter=${it.type}`);
 								}}
 							/>
@@ -326,7 +332,7 @@ function TotpRow({
 	if (error) {
 		return (
 			<li>
-				<div className="flex items-center gap-3 rounded-[10px] border border-dashed border-(--line) bg-(--bg-elev) px-3 py-2.5">
+				<div className="flex items-center gap-3 rounded-lg border border-dashed border-(--line) bg-(--bg-elev) px-3 py-2.5">
 					<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-(--radius) border border-(--line) bg-(--bg-elev-2) font-mono text-[13px] font-semibold text-(--text-3)">
 						{glyph}
 					</div>
@@ -354,17 +360,33 @@ function TotpRow({
 		: 0;
 	const urgent = remaining <= 5;
 
+	const rowDisabled = !snapshot;
 	return (
 		<li>
-			{/* 整行点击 = 复制当前 OTP；hover 整体高亮 */}
-			<button
-				type="button"
-				onClick={copyCurrentCode}
-				onMouseDown={(e) => e.preventDefault()}
+			{/* 整行点击 = 复制当前 OTP；hover 整体高亮
+			 *
+			 * 用 div + role="button" 而不是 <button> —— 内部还嵌了"复制 / 编辑"
+			 * 两个真正的 <button>，HTML 不允许 button 嵌套 button（会触发 React
+			 * 的 hydration 报错与浏览器自动重排）。div 不带语义但通过 role
+			 * + aria-disabled + onKeyDown 补回可访问性；tabIndex=-1 与原本
+			 * button 实现一致（这一行不进入 Tab 顺序，键盘用户通过内部两个
+			 * 真按钮操作）。
+			 */}
+			<div
+				role="button"
 				tabIndex={-1}
-				disabled={!snapshot}
+				aria-disabled={rowDisabled}
+				onClick={() => {
+					if (rowDisabled) return;
+					void copyCurrentCode();
+				}}
+				onMouseDown={(e) => e.preventDefault()}
 				title={t("totp_row_click_to_copy")}
-				className="group flex w-full items-center gap-3 rounded-[10px] border border-(--line) bg-(--bg-elev) px-3 py-2.5 text-left transition-colors hover:bg-(--bg-hover) focus:outline-none focus-visible:outline-none disabled:cursor-default disabled:opacity-60"
+				className={
+					rowDisabled
+						? "group flex w-full cursor-default items-center gap-3 rounded-lg border border-(--line) bg-(--bg-elev) px-3 py-2.5 text-left opacity-60 transition-colors focus:outline-none focus-visible:outline-none"
+						: "group flex w-full cursor-pointer items-center gap-3 rounded-lg border border-(--line) bg-(--bg-elev) px-3 py-2.5 text-left transition-colors hover:bg-(--bg-hover) focus:outline-none focus-visible:outline-none"
+				}
 			>
 				{/* 字形方块 */}
 				<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-(--radius) border border-(--line) bg-(--bg-elev-2) font-mono text-[13px] font-semibold text-(--text)">
@@ -385,7 +407,7 @@ function TotpRow({
 				<div
 					className={
 						urgent
-							? "shrink-0 font-mono text-[20px] font-semibold tracking-[0.18em] tabular-nums text-(--danger,#ef4444) transition-colors"
+							? "shrink-0 font-mono text-[20px] font-semibold tracking-[0.18em] tabular-nums text-(--danger) transition-colors"
 							: "shrink-0 font-mono text-[20px] font-semibold tracking-[0.18em] tabular-nums text-(--text) transition-colors group-hover:text-(--accent)"
 					}
 				>
@@ -411,9 +433,9 @@ function TotpRow({
 					}}
 					onMouseDown={(e) => e.preventDefault()}
 					tabIndex={-1}
-					disabled={!snapshot}
+					disabled={rowDisabled}
 					title={t("detail_copy")}
-					className="ml-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-(--radius) text-(--text-3) opacity-0 transition-all hover:bg-(--bg-active) hover:text-(--text) focus:outline-none focus-visible:outline-none disabled:cursor-default group-hover:opacity-100"
+					className="ml-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-(--text-3) opacity-0 transition-all hover:bg-(--bg-active) hover:text-(--text) focus:outline-none focus-visible:outline-none disabled:cursor-default group-hover:opacity-100"
 				>
 					<Copy size={12} strokeWidth={1.5} />
 				</button>
@@ -432,7 +454,7 @@ function TotpRow({
 				>
 					<Pencil size={12} strokeWidth={1.5} />
 				</button>
-			</button>
+			</div>
 		</li>
 	);
 }

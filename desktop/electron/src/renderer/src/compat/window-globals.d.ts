@@ -37,6 +37,8 @@ export interface DesktopBridgeShape {
 		isFullscreen(): Promise<boolean>;
 		unfullscreen(): Promise<void>;
 		close(): Promise<void>;
+		toggleFullscreen(): Promise<void>;
+		showSystemMenu(x: number, y: number): Promise<void>;
 		setCloseBehavior(mode: "quit" | "tray"): Promise<void>;
 		/**
 		 * Subscribe to "about-to-hide-to-tray" notifications from the main
@@ -46,6 +48,21 @@ export interface DesktopBridgeShape {
 		 * does not trigger lockOnSwitch / lockOnSleep.
 		 */
 		onHidingToTray(handler: () => void): () => void;
+		/**
+		 * Subscribe to native window focus/blur events. Used to drive
+		 * `<html data-window-blurred>` so the titlebar can render a subtly
+		 * dimmed "inactive window" look — matches macOS/Win/GNOME native.
+		 */
+		onFocusChange(handler: (focused: boolean) => void): () => void;
+		/**
+		 * Subscribe to native App-Menu commands (macOS menu bar). The
+		 * renderer binds Lock / Open Preferences so menu and in-app actions
+		 * share handlers.
+		 */
+		onMenuCommand(
+			command: "lock" | "open-settings",
+			handler: () => void,
+		): () => void;
 	};
 	dialog: {
 		saveFile(opts: {

@@ -120,7 +120,7 @@ export function WelcomePage() {
 
 					{/* 主标题 + 副文案 */}
 					<div className="flex flex-col gap-2">
-						<h1 className="text-2xl font-semibold tracking-tight text-(--text)">
+						<h1 className="text-xl font-semibold tracking-tight text-(--text)">
 							{t("welcome_title")}
 						</h1>
 						<p className="text-sm leading-relaxed text-(--text-2)">
@@ -177,7 +177,7 @@ export function WelcomePage() {
 							disabled
 							aria-disabled="true"
 							title={t("welcome_signin_coming_soon")}
-							className="group flex cursor-not-allowed items-center gap-4 rounded-xl border border-(--line) bg-(--bg-elev-2) px-5 py-4 text-left opacity-60 transition-colors"
+							className="group flex cursor-not-allowed items-center gap-4 rounded-xl border border-(--line) bg-(--bg-elev-2) px-5 py-3 text-left opacity-60 transition-colors"
 						>
 							<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-(--line) bg-(--bg-elev) transition-colors">
 								<Cloud
@@ -207,7 +207,7 @@ export function WelcomePage() {
 						<button
 							type="button"
 							onClick={onSkip}
-							className="group flex items-center gap-4 rounded-xl border border-(--line) bg-(--bg-elev-2) px-5 py-4 text-left transition-colors hover:border-(--text-3) hover:bg-(--bg-active)"
+							className="group flex items-center gap-4 rounded-xl border border-(--line) bg-(--bg-elev-2) px-5 py-3 text-left transition-colors hover:border-(--text-3) hover:bg-(--bg-active)"
 						>
 							<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-(--line) bg-(--bg-elev) transition-colors group-hover:border-(--text-3)">
 								<UserRound

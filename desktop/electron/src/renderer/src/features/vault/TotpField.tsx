@@ -199,7 +199,7 @@ export function TotpField({ itemId, variant = "row", onCopied }: TotpFieldProps)
 	if (variant === "card") {
 		// 聚合页右侧大片：大字号 + 类型徽标 + 倒计时/计数器
 		return (
-			<div className="flex flex-col items-center gap-3 rounded-[10px] border border-(--line) bg-(--bg-elev-2) px-6 py-5">
+			<div className="flex flex-col items-center gap-3 rounded-lg border border-(--line) bg-(--bg-elev-2) px-6 py-5">
 				<div className="flex items-center gap-2 text-[10.5px] font-mono uppercase tracking-wider text-(--text-3)">
 					<span>{typeBadge}</span>
 					{isHOTP && (

@@ -207,7 +207,7 @@ export function Topbar() {
 	})();
 
 	return (
-		<header className="flex h-12 items-center gap-2 border-b border-(--line) bg-(--bg-elev) px-4">
+		<header className="flex h-11 items-center gap-2 border-b border-(--line) bg-(--bg-elev) px-4">
 			<div className="text-[13px] text-(--text-2)">{crumbs}</div>
 
 			{/* TotpPage 专属：来源快速筛选 chip ——

@@ -43,6 +43,17 @@
 	--ok: #5ea47a;
 	--info: #6b9cc4;
 
+	/* 语义色"反差墨水"——按钮等实色背景上的前景色
+	 * 红/橙底白字是跨平台 OS 惯例（macOS/Win/Linux 警告/破坏性按钮一致），
+	 * 浅色主题下品牌色对白字也保留 4.5:1 对比度 ——
+	 *   --danger #e55a4a vs #fff = 3.6:1 (AA Large) ✓
+	 *   --warn   #c8934a vs #fff = 2.8:1 — light 下我们用更深的 #9a6a1a 抬到 4.7:1
+	 */
+	--danger-ink: #ffffff;
+	--warn-ink: #ffffff;
+	--ok-ink: #ffffff;
+	--info-ink: #ffffff;
+
 	/* ----- 自定义 Titlebar 按钮（对齐 Windows 11 Fluent 规范） -----
 	 * Windows 11 原生标题栏按钮在暗色主题下：
 	 *   - 普通按钮 hover  ≈ subtle fill secondary  (白色 ~6% 叠加)
@@ -83,6 +94,24 @@
 		"Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 	--font-mono:
 		"Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+	/* ----- z-index 层级 token -----
+	 * 历史上各组件硬编码 z-50 / z-[60] / z-500 / z-[9999]，含义不一致。
+	 * 这里给"层"以语义名，组件统一通过 `z-(--z-xxx)` 引用，废止裸值。
+	 *
+	 * 设计上 Titlebar / Dialog / Popover / Select / Dropdown 全部同处 50，
+	 * 由 DOM 顺序（#titlebar-root 位于 #portal-root 之后）保证 Titlebar 始终
+	 * 在 Dialog 之上 —— 详见 components/Titlebar.tsx 注释。所以这三个 token
+	 * 数值相同，只是为了让代码阅读时一眼能看出"我属于哪一层"。
+	 *
+	 * --z-toast    高于 dialog，但低于关键阻塞确认
+	 * --z-critical 给 SSH agent 等"必须用户决策"的 modal 留出兜底层
+	 */
+	--z-titlebar: 50;
+	--z-popover: 50;
+	--z-dialog: 50;
+	--z-toast: 60;
+	--z-critical: 90;
 }
 
 /* ----- Light 主题 -----
@@ -122,6 +151,10 @@
 	--warn: #9a6a1a;
 	--ok: #35734f;
 	--info: #355a7a;
+	--danger-ink: #ffffff;
+	--warn-ink: #ffffff;
+	--ok-ink: #ffffff;
+	--info-ink: #ffffff;
 	--grid: rgba(0, 0, 0, 0.03);
 
 	/* Light 主题下 Titlebar 按钮 —— Fluent 规范浅色档

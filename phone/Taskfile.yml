@@ -8,6 +8,7 @@ version: "3"
 #   task emulator     启动 Android 模拟器（已开则跳过）
 #   task dev          一键：AAR + 模拟器 + expo run:android
 #   task metro        启动 metro dev server（脱离 run:android 单独开）
+#   task apk:release  一键打包 Android release APK（含最新 AAR）
 #
 # 第一次使用需要的工具：
 #   - Task：              go install github.com/go-task/task/v3/cmd/task@latest
@@ -157,6 +158,49 @@ tasks:
     deps: [aar:fast, emulator]
     cmds:
       - bunx expo run:android
+
+  # ---- release 打包 ----
+
+  apk:release:
+    desc: 一键打包 Android release APK（含最新 AAR）
+    deps: [aar]
+    dir: "{{.REPO_ROOT}}/phone/android"
+    cmds:
+      # 未指定 ZPASS_UPLOAD_STORE_FILE 时，gradle 会回落到 debug.keystore 签名，
+      # 产物可直接 adb install / 拷贝到手机安装，但不可上架 Play Store。
+      - ./gradlew assembleRelease
+      - |
+        APK="{{.REPO_ROOT}}/phone/android/app/build/outputs/apk/release/app-release.apk"
+        if [ ! -f "$APK" ]; then
+          echo "[error] 未找到 APK：$APK" >&2
+          exit 1
+        fi
+        echo ""
+        echo "[ok] release APK 已生成"
+        echo "  path: $APK"
+        echo "  size: $(du -h "$APK" | awk '{print $1}')"
+        if [ -z "$ZPASS_UPLOAD_STORE_FILE" ]; then
+          echo "  sign: debug.keystore（未配置 ZPASS_UPLOAD_STORE_FILE，仅供本地分发）"
+        else
+          echo "  sign: $ZPASS_UPLOAD_STORE_FILE"
+        fi
+
+  aab:release:
+    desc: 打包 Android release AAB（Play Store 上架格式）
+    deps: [aar]
+    dir: "{{.REPO_ROOT}}/phone/android"
+    cmds:
+      - ./gradlew bundleRelease
+      - |
+        AAB="{{.REPO_ROOT}}/phone/android/app/build/outputs/bundle/release/app-release.aab"
+        if [ ! -f "$AAB" ]; then
+          echo "[error] 未找到 AAB：$AAB" >&2
+          exit 1
+        fi
+        echo ""
+        echo "[ok] release AAB 已生成"
+        echo "  path: $AAB"
+        echo "  size: $(du -h "$AAB" | awk '{print $1}')"
 
   # ---- 排错 ----
 
