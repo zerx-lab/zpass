@@ -318,8 +318,13 @@ function installDevReloader() {
  */
 function resolveIcon(preferredSize?: 16 | 32 | 48 | 64 | 128 | 256) {
   const size = preferredSize ?? 256;
+  // `extraResource: ["./assets/logo"]` 把目录复制到 resources/logo/ (只保留
+  // 末段目录名), 所以 packaged 时正确路径是 resources/logo/png/...,
+  // 不是 resources/assets/logo/png/... — 后者只是 dev 时 __dirname 解析的
+  // 副产物. 两条都保留, 避免未来 extraResource 改回 ./assets 时再炸.
   const candidates = [
     join(__dirname, `../../assets/logo/png/zpass-${size}.png`),
+    join(process.resourcesPath ?? "", `logo/png/zpass-${size}.png`),
     join(process.resourcesPath ?? "", `assets/logo/png/zpass-${size}.png`),
     join(process.cwd(), `assets/logo/png/zpass-${size}.png`),
   ];

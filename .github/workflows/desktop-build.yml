@@ -252,6 +252,10 @@ jobs:
       # 到 /work 并以非 root 的 builder 用户跑 scripts/make-arch.sh.
       # 上一步 `task make` 已经顺带产出 out/zpass-linux-x64/, 正好是
       # make-arch.sh 需要的输入, 不会重复打包.
+      #
+      # docker 里 chown 给 builder 后, host runner 用户对 desktop/ 失去
+      # 写权, 后续 Stage release assets 的 mkdir release 会拒. 退出 docker
+      # 后立即 chown 回 runner UID/GID.
       - name: Build Arch pacman package (docker archlinux + makepkg)
         run: |
           docker run --rm \
@@ -265,6 +269,7 @@ jobs:
               chown -R builder:builder /work
               sudo -u builder env HOME=/home/builder bash scripts/make-arch.sh
             '
+          sudo chown -R "$(id -u):$(id -g)" "${{ github.workspace }}/desktop"
 
       # Forge 输出布局:
       #   out/make/AppImage/x64/<name>-<version>-<arch>.AppImage

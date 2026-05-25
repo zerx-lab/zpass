@@ -133,7 +133,21 @@ const config: ForgeConfig = {
         description: "Zero-knowledge desktop password manager",
         homepage: "https://github.com/zerx-lab/zpass",
         maintainer: "zerx-lab",
-        icon: "./assets/logo/png/zpass-512.png",
+        // 多尺寸 object → electron-installer-debian 装到
+        // /usr/share/icons/hicolor/<NxN>/apps/zpass.png (而不是单文件
+        // /usr/share/pixmaps/zpass.png), GNOME/KDE/任务栏才能按需挑分辨率.
+        // Forge 的 MakerDebConfigOptions 把 icon 标成 string, 实际
+        // electron-installer-debian 官方支持 {size: path} object.
+        // @ts-expect-error upstream type 不全, runtime ok
+        icon: {
+          "16x16": "./assets/logo/png/zpass-16.png",
+          "32x32": "./assets/logo/png/zpass-32.png",
+          "48x48": "./assets/logo/png/zpass-48.png",
+          "64x64": "./assets/logo/png/zpass-64.png",
+          "128x128": "./assets/logo/png/zpass-128.png",
+          "256x256": "./assets/logo/png/zpass-256.png",
+          "512x512": "./assets/logo/png/zpass-512.png",
+        },
         categories: ["Utility"],
         section: "utils",
         priority: "optional",
@@ -146,7 +160,17 @@ const config: ForgeConfig = {
         genericName: "Password Manager",
         description: "Zero-knowledge desktop password manager",
         homepage: "https://github.com/zerx-lab/zpass",
-        icon: "./assets/logo/png/zpass-512.png",
+        // 同 MakerDeb: 多尺寸 hicolor 注册而不是单张 pixmaps
+        // @ts-expect-error upstream type 不全, runtime ok
+        icon: {
+          "16x16": "./assets/logo/png/zpass-16.png",
+          "32x32": "./assets/logo/png/zpass-32.png",
+          "48x48": "./assets/logo/png/zpass-48.png",
+          "64x64": "./assets/logo/png/zpass-64.png",
+          "128x128": "./assets/logo/png/zpass-128.png",
+          "256x256": "./assets/logo/png/zpass-256.png",
+          "512x512": "./assets/logo/png/zpass-512.png",
+        },
         categories: ["Utility"],
         license: "MIT",
       },
