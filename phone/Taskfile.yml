@@ -4,23 +4,25 @@ version: "3"
 #
 # 典型用法：
 #   task              查看所有 task
-#   task aar          编译 mobilecrypto → AAR（gomobile bind）
+#   task so           编译 cryptocore → 4 ABI libcryptocore.so（cargo-ndk）
 #   task emulator     启动 Android 模拟器（已开则跳过）
-#   task dev          一键：AAR + 模拟器 + expo run:android
+#   task dev          一键：.so + 模拟器 + expo run:android
 #   task metro        启动 metro dev server（脱离 run:android 单独开）
-#   task apk:release  一键打包 Android release APK（含最新 AAR）
+#   task apk:release  一键打包 Android release APK（含最新 .so）
 #
 # 第一次使用需要的工具：
 #   - Task：              go install github.com/go-task/task/v3/cmd/task@latest
-#   - gomobile：          go install golang.org/x/mobile/cmd/gomobile@latest
-#                         go install golang.org/x/mobile/cmd/gobind@latest
+#   - Rust toolchain：    rustup（>=1.85 for edition 2024）
+#   - cargo-ndk：         cargo install cargo-ndk
+#   - Android target：    rustup target add aarch64-linux-android armv7-linux-androideabi \
+#                                            x86_64-linux-android i686-linux-android
 #   - JDK 17：            pacman / apt 装 openjdk-17（系统默认 Java 26 与 RN 0.81 不兼容）
 #   - Android SDK + NDK： Android Studio 安装；NDK 推荐 27.x
 
 vars:
   REPO_ROOT:
     sh: git rev-parse --show-toplevel
-  MOBILECRYPTO_DIR: "{{.REPO_ROOT}}/mobilecrypto"
+  CRYPTOCORE_DIR: "{{.REPO_ROOT}}/cryptocore"
 
   # 允许 env override；否则用 Arch/常见 Linux 默认路径
   JAVA_HOME_DEFAULT: /usr/lib/jvm/java-17-openjdk
@@ -34,7 +36,7 @@ env:
     sh: echo "${JAVA_HOME:-{{.JAVA_HOME_DEFAULT}}}"
   ANDROID_HOME:
     sh: echo "${ANDROID_HOME:-{{.ANDROID_HOME_DEFAULT}}}"
-  # gomobile bind 需要 NDK；未指定时从 SDK 下选最新版
+  # cargo-ndk 需要 NDK；未指定时从 SDK 下选最新版
   ANDROID_NDK_HOME:
     sh: |
       if [ -n "$ANDROID_NDK_HOME" ]; then
@@ -52,41 +54,43 @@ tasks:
     cmds:
       - task --list
 
-  # ---- mobilecrypto AAR ----
+  # ---- cryptocore .so ----
 
-  aar:
-    desc: 编译 mobilecrypto 为 Android AAR（gomobile bind）
-    dir: "{{.MOBILECRYPTO_DIR}}"
+  so:
+    desc: 编译 cryptocore 为 4 ABI libcryptocore.so（cargo-ndk）
+    dir: "{{.CRYPTOCORE_DIR}}"
     cmds:
-      # gomobile / gobind 装在 $HOME/go/bin，但 task 不可靠地覆盖 PATH，
-      # 这里 inline 加上以确保 build-android.sh 能找到 gomobile。
-      - PATH="$HOME/go/bin:$PATH" ./scripts/build-android.sh
+      - ./scripts/build-android.sh
     sources:
-      - "*.go"
-      - "go.mod"
-      - "go.sum"
+      - "src/**/*.rs"
+      - "Cargo.toml"
+      - "Cargo.lock"
     generates:
-      - "build/mobilecrypto.aar"
+      - "build/jniLibs/arm64-v8a/libcryptocore.so"
+      - "build/jniLibs/armeabi-v7a/libcryptocore.so"
+      - "build/jniLibs/x86_64/libcryptocore.so"
+      - "build/jniLibs/x86/libcryptocore.so"
 
-  aar:fast:
-    desc: 同 aar，只编 arm64（调试时省时间）
-    dir: "{{.MOBILECRYPTO_DIR}}"
+  so:fast:
+    desc: 同 so，只编 arm64-v8a（调试时省时间）
+    dir: "{{.CRYPTOCORE_DIR}}"
     env:
-      MOBILECRYPTO_TARGETS: "android/arm64"
+      CRYPTOCORE_ABIS: "arm64-v8a"
     cmds:
-      - PATH="$HOME/go/bin:$PATH" ./scripts/build-android.sh
+      - ./scripts/build-android.sh
 
-  aar:test:
-    desc: 跑 mobilecrypto Go 单测
-    dir: "{{.MOBILECRYPTO_DIR}}"
+  so:test:
+    desc: 跑 cryptocore Rust 单测 + 跨语言 fixture 校验
+    dir: "{{.CRYPTOCORE_DIR}}"
     cmds:
-      - go test ./...
+      - cargo test
 
-  aar:clean:
-    desc: 删除 AAR 产物（强制下次重新编）
+  so:clean:
+    desc: 删除 .so 产物（强制下次重新编）
     cmds:
-      - rm -rf {{.MOBILECRYPTO_DIR}}/build
-      - rm -f android/app/libs/mobilecrypto.aar modules/zpass-crypto/android/libs/mobilecrypto.aar
+      - rm -rf {{.CRYPTOCORE_DIR}}/build
+      - rm -rf {{.CRYPTOCORE_DIR}}/target
+      - rm -rf android/app/src/main/jniLibs
 
   # ---- 模拟器 ----
 
@@ -135,35 +139,38 @@ tasks:
       - bunx expo start -c
 
   prebuild:
-    desc: 执行 expo prebuild（plugin 会复制 AAR + 改 gradle）
-    deps: [aar]
+    desc: 执行 expo prebuild（plugin 会复制 .so 到 jniLibs）
+    deps: [so]
     cmds:
       - bunx expo prebuild --platform android
 
   android:
-    desc: 在已就绪的模拟器上 expo run:android（不重 build AAR/不启动模拟器）
+    desc: 在已就绪的模拟器上 expo run:android（不重 build .so/不启动模拟器）
     cmds:
       - bunx expo run:android
 
   # ---- 一键开发流程 ----
 
   dev:
-    desc: 一键：AAR + 启动模拟器 + expo run:android
-    deps: [aar, emulator]
+    desc: 一键：.so + prebuild(复制 .so 到 jniLibs) + 启动模拟器 + expo run:android
+    # prebuild 自带 so 依赖，所以 .so 先于 prebuild 完成；emulator 并行启动
+    deps: [prebuild, emulator]
     cmds:
       - bunx expo run:android
 
   dev:fast:
-    desc: dev 但只编 arm64 AAR
-    deps: [aar:fast, emulator]
+    desc: dev 但只编 arm64 .so
+    deps: [so:fast, emulator]
     cmds:
+      # 只编单 ABI 时不挂 prebuild 依赖，由这里显式 prebuild 一次复制 .so
+      - bunx expo prebuild --platform android
       - bunx expo run:android
 
   # ---- release 打包 ----
 
   apk:release:
-    desc: 一键打包 Android release APK（含最新 AAR）
-    deps: [aar]
+    desc: 一键打包 Android release APK（含最新 .so）
+    deps: [so]
     dir: "{{.REPO_ROOT}}/phone/android"
     cmds:
       # 未指定 ZPASS_UPLOAD_STORE_FILE 时，gradle 会回落到 debug.keystore 签名，
@@ -187,7 +194,7 @@ tasks:
 
   aab:release:
     desc: 打包 Android release AAB（Play Store 上架格式）
-    deps: [aar]
+    deps: [so]
     dir: "{{.REPO_ROOT}}/phone/android"
     cmds:
       - ./gradlew bundleRelease
@@ -205,7 +212,7 @@ tasks:
   # ---- 排错 ----
 
   doctor:
-    desc: 检查环境（Java/NDK/gomobile/AVD）
+    desc: 检查环境（Java/NDK/cargo-ndk/AVD）
     silent: true
     cmds:
       - 'echo "JAVA_HOME       = $JAVA_HOME"'
@@ -214,7 +221,8 @@ tasks:
       - 'echo ""'
       # 直接调用 $JAVA_HOME/bin/java，绕开 task 不可靠的 PATH 覆盖
       - 'echo "[java]"; "$JAVA_HOME/bin/java" -version 2>&1 | head -1'
-      - 'echo "[gomobile]"; "$HOME/go/bin/gomobile" version 2>/dev/null | head -1 || echo "  (not installed: go install golang.org/x/mobile/cmd/gomobile@latest)"'
+      - 'echo "[rust]"; cargo --version 2>/dev/null || echo "  (not installed: https://rustup.rs)"'
+      - 'echo "[cargo-ndk]"; cargo ndk --version 2>/dev/null || echo "  (not installed: cargo install cargo-ndk)"'
       - 'echo "[adb]"; $ANDROID_HOME/platform-tools/adb version 2>&1 | head -1'
       - 'echo "[avd]"; $ANDROID_HOME/emulator/emulator -list-avds 2>&1 | sed "s/^/  /"'
 

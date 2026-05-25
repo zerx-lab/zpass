@@ -30,7 +30,7 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
-      "./plugins/with-mobilecrypto",
+      "./plugins/with-cryptocore",
       "expo-router",
       [
         "expo-splash-screen",

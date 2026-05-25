@@ -64,7 +64,7 @@ export interface Argon2idParams {
 /**
  * 默认参数 —— 在 Initialize 时根据运行环境选择，写入 vault_meta 后永久绑定。
  *
- *   - 原生 Go (mobilecrypto AAR/XCFramework)：64 MiB / 3 iter / 4 lanes
+ *   - 原生 Rust (cryptocore .so/.a)：64 MiB / 3 iter / 4 lanes
  *     与 desktop cryptoutil.DefaultArgon2id 完全对齐；单次 ~200-400ms。
  *   - WASM 可用（web / JSC）：32 MiB / 3 iter / 2 lanes
  *     hash-wasm 实现 ~300-600ms。攻击者每核每秒仍只能尝试 ~2 次。
@@ -163,7 +163,7 @@ export function deriveKEK(
  * 异步派生 —— UI 路径使用，避免阻塞主线程
  *
  * 派生路径优先级（高 → 低）：
- *   1. 原生 Go (mobilecrypto)：Android/iOS 真机上的最优路径，约 200-400ms
+ *   1. 原生 Rust (cryptocore)：Android/iOS 真机上的最优路径，约 200-400ms
  *   2. hash-wasm：Web / JSC 上的 WASM 实现，约 300-600ms
  *   3. noble 纯 JS：Hermes 无原生模块时兜底，约 3-6s
  *

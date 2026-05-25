@@ -8,16 +8,6 @@ plugins {
 group = 'expo.modules.zpasscrypto'
 version = '0.1.0'
 
-// Android library 模块不能用 fileTree 直接引 AAR（只能引 .jar）。
-// 用 flatDir repo 让 gradle 把 libs/*.aar 当作"name=mobilecrypto, ext=aar"
-// 的本地 artifact 解析。AAR 由 plugins/with-mobilecrypto.js 在 prebuild
-// 时从 mobilecrypto/build/ 复制进 libs/。
-repositories {
-  flatDir {
-    dirs 'libs'
-  }
-}
-
 android {
   namespace 'expo.modules.zpasscrypto'
   defaultConfig {
@@ -26,8 +16,7 @@ android {
   }
 }
 
-dependencies {
-  // compileOnly：只为 Kotlin 编译期能 import com.zerx.zpass.mobilecrypto.Mobilecrypto
-  // 运行期由 phone/android/app/libs/mobilecrypto.aar 负责打包 .so 与 .class
-  compileOnly(name: 'mobilecrypto', ext: 'aar')
-}
+// 不再需要外部依赖：
+//   - Kotlin 桥（com.zerx.zpass.cryptocore.RustCryptoCore）直接在本 module 内编译
+//   - libcryptocore.so 由 plugins/with-cryptocore.js 在 prebuild 时复制到
+//     phone/android/app/src/main/jniLibs/<abi>/，运行期 System.loadLibrary 解析

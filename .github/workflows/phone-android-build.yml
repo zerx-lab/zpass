@@ -1,6 +1,6 @@
 name: Build Phone (Android)
 
-# ZPass phone Android 多架构 APK 打包 workflow（Expo + React Native + gomobile AAR）
+# ZPass phone Android 多架构 APK 打包 workflow（Expo + React Native + Rust cryptocore .so）
 # -----------------------------------------------------------------------------
 # 目标矩阵:
 #   - arm64-v8a   主流 Android 手机（2017 年后几乎全覆盖）
@@ -13,8 +13,9 @@ name: Build Phone (Android)
 #
 # 关键设计:
 #   - phone/android/ 是 expo prebuild 的产物（phone/.gitignore 里），CI 必须
-#     先编 mobilecrypto.aar，再 `expo prebuild --platform android`。prebuild
-#     时 plugins/with-mobilecrypto.js 自动把 AAR 复制到 android/app/libs/.
+#     先用 cargo-ndk 编 4 ABI 的 libcryptocore.so，再 `expo prebuild --platform android`。
+#     prebuild 时 plugins/with-cryptocore.js 自动把 .so 复制到
+#     android/app/src/main/jniLibs/<abi>/libcryptocore.so.
 #   - 多架构通过 Gradle `splits.abi` 一次构建出多个 APK，避免跑 N 次 gradle.
 #     splits 配置在 CI 里 patch 到 app/build.gradle —— 这个文件每次 prebuild
 #     都会被重新生成，所以 patch 不会污染源码。
@@ -24,7 +25,7 @@ name: Build Phone (Android)
 #     gradle property 时回落到 debug.keystore. 产物可 adb install / 直接
 #     分发到手机安装，但不可上架 Play Store，也无法覆盖已安装的正式签名版.
 #   - RN 0.81 强制 JDK 17（系统默认 Java 26 会让 Kotlin Gradle Plugin 崩）.
-#   - gomobile bind 需要 NDK；runner 自带 $ANDROID_HOME/ndk/<ver>，
+#   - cargo-ndk 需要 NDK；runner 自带 $ANDROID_HOME/ndk/<ver>，
 #     build-android.sh 会自动选最新版本.
 # -----------------------------------------------------------------------------
 
@@ -49,7 +50,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: "1.26"
+  RUST_TOOLCHAIN: "stable"
   NODE_VERSION: "20"
   JAVA_VERSION: "17"
 
@@ -89,19 +90,29 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
-          go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: mobilecrypto/go.sum
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
 
-      # gomobile / gobind 必须装在 PATH 上，build-android.sh 才能找到.
-      # 不 cache：go install 本身很快（~10s），cache miss 时反而拖慢.
-      - name: Install gomobile + gobind
+      - name: Cache Cargo registry + cryptocore target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            cryptocore/target
+          key: ${{ runner.os }}-cargo-cryptocore-${{ hashFiles('cryptocore/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-cryptocore-
+
+      # cargo-ndk 必须装在 PATH 上，build-android.sh 才能找到.
+      - name: Install cargo-ndk
         run: |
-          go install golang.org/x/mobile/cmd/gomobile@latest
-          go install golang.org/x/mobile/cmd/gobind@latest
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          if ! command -v cargo-ndk >/dev/null 2>&1; then
+            cargo install cargo-ndk --locked
+          fi
 
       # runner 自带 Android SDK，ANDROID_HOME 已经设好.
       # build-android.sh 会从 $ANDROID_HOME/ndk/<ver> 选最新 NDK；这里只
@@ -118,11 +129,12 @@ jobs:
       - name: Install dependencies (bun)
         run: bun install --frozen-lockfile
 
-      # 编 mobilecrypto AAR（gomobile bind 4 个 ABI）.
-      # 产物在 mobilecrypto/build/mobilecrypto.aar；下一步 expo prebuild
-      # 会触发 with-mobilecrypto plugin 自动复制到 phone/android/app/libs/.
-      - name: Build mobilecrypto AAR (gomobile bind, 4 ABI)
-        working-directory: mobilecrypto
+      # 编 cryptocore Rust → 4 ABI libcryptocore.so（cargo-ndk）.
+      # 产物在 cryptocore/build/jniLibs/<abi>/libcryptocore.so；下一步 expo prebuild
+      # 会触发 with-cryptocore plugin 自动复制到
+      # phone/android/app/src/main/jniLibs/<abi>/.
+      - name: Build cryptocore .so (cargo-ndk, 4 ABI)
+        working-directory: cryptocore
         run: bash scripts/build-android.sh
 
       # --no-install 跳过 expo 装 cocoapods / npm install 的额外开销，

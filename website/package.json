@@ -13,7 +13,6 @@
   },
   "dependencies": {
     "@astrojs/node": "^9.5.5",
-    "@openpanel/astro": "^1.4.1",
     "astro": "^5.5.5"
   },
   "devDependencies": {

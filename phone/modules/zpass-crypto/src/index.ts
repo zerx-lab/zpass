@@ -1,4 +1,4 @@
-// zpass-crypto —— Go (mobilecrypto) Native Bridge
+// zpass-crypto —— Rust (cryptocore) Native Bridge
 //
 // 设计：
 //   - 原生模块名固定为 "ZpassCrypto"（Android Kotlin / iOS Swift 注册时同名）
