@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 license = "MIT"
-description = "ZPass cross-platform crypto primitives (Argon2id + XChaCha20-Poly1305), byte-compatible with mobilecrypto (Go) and desktop cryptoutil."
+description = "ZPass cross-platform crypto primitives (Argon2id + XChaCha20-Poly1305). 同一 vault 文件可在 desktop / phone / extension 间互通解读。"
 
 [lib]
 # rlib  —— 给 Rust 端测试 / 未来 desktop 复用
@@ -28,9 +28,7 @@ getrandom = "0.2"
 jni = { version = "0.21", default-features = false, optional = true }
 
 [dev-dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-base64 = "0.22"
+# 单元测试里的 Argon2id 已知向量比对（lib.rs::derive_kek_known_vector）
 hex = "0.4"
 
 [profile.release]

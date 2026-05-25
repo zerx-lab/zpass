@@ -1,8 +1,7 @@
 //! ZPass 跨平台加密原语 —— Rust 实现
 //!
-//! 算法、参数、字节布局与 `mobilecrypto/crypto.go` 完全一致。同一 vault 文件
-//! 必须能在 desktop（Go）/ phone（Rust → JNI/NAPI）/ extension（@noble JS）
-//! 之间互相解读。
+//! 同一 vault 文件必须能在 desktop（Go cryptoutil）/ phone（Rust → JNI/NAPI）/
+//! extension（@noble JS）之间互相解读，算法、参数、字节布局都需严格对齐。
 //!
 //! 桥层（Android JNI / HarmonyOS NAPI / iOS Swift）只搬运字节，
 //! 不复写校验逻辑。
@@ -231,9 +230,10 @@ mod tests {
         assert_eq!(k1.len(), 32);
     }
 
-    /// 锁定 Argon2id 输出 —— 与 mobilecrypto/crypto_test.go::TestDeriveKEKKnownVector 同向量
+    /// 锁定 Argon2id 已知向量 —— 任何参数/实现回归都会触发断言失败。
+    /// 向量与 desktop (Go) / extension (@noble) 端必须保持字节级一致。
     #[test]
-    fn derive_kek_known_vector_matches_go() {
+    fn derive_kek_known_vector_is_stable() {
         let salt = vec![0xABu8; SALT_SIZE];
         let got = derive_kek("correct horse battery staple", &salt, 8 * 1024, 2, 2, 32)
             .unwrap();
@@ -244,7 +244,7 @@ mod tests {
     }
 
     #[test]
-    fn derive_kek_validation_order_matches_go() {
+    fn derive_kek_validation_order() {
         let salt = vec![0u8; SALT_SIZE];
         // (case_name, expected variant matcher)
         assert!(matches!(
