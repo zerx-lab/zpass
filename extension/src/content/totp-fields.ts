@@ -158,9 +158,8 @@ export function isTotpField(input: EventTarget | null): input is HTMLInputElemen
 }
 
 /**
- * isTotpCandidate —— 焦点驱动场景下的完整判定,叠加 disabled/readonly/可见性。
- *
- * 与 forms.ts 的 isLoginCandidate 风格一致,用于 AutofillController.handleFocusin。
+ * isTotpCandidate —— 完整判定,叠加 disabled/readonly/可见性。
+ * 内部供 findTotpInput 自动定位 OTP 输入框使用。
  */
 export function isTotpCandidate(input: EventTarget | null): input is HTMLInputElement {
   if (!isTotpField(input)) return false;

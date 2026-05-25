@@ -10,7 +10,7 @@ export default defineConfig({
     web_accessible_resources: [
       {
         // notification-bar.html 是 content-script 注入的 iframe 源，
-        // 需要授权它能被任何 http/https 页面加载。同时限定 matches
+        // 需要授权能被任何 http/https 页面加载。同时限定 matches
         // 避免被不受躲躲 origin 代加载。
         resources: ["notification-bar.html"],
         matches: ["http://*/*", "https://*/*"],

@@ -5,6 +5,8 @@
 //
 // 无任何种子数据 —— 真实加密 vault 由用户首次设置主密码后产生。
 
+import type { CustomField } from "@/lib/custom-fields";
+
 /* ----------------------------------------------------------------------------
  * 条目类型
  * -------------------------------------------------------------------------- */
@@ -41,6 +43,16 @@ export interface BaseItem {
   notes?: string;
   /** 是否收藏 */
   favorite?: boolean;
+  /**
+   * 自定义字段 —— 与 desktop `_customFields` 约定对齐：
+   * 持久化到 fields["_customFields"]，反序列化时回填到此处。
+   */
+  customFields?: CustomField[];
+  /**
+   * 所属空间 id —— 与 lib/spaces.ts 中的 Space.id 对应。
+   * 兼容性：未持久化该字段的旧 item 视为属于 DEFAULT_SPACE_ID。
+   */
+  spaceId?: string;
 }
 
 export interface LoginItem extends BaseItem {

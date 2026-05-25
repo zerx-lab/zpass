@@ -68,6 +68,10 @@ const MAPPING = {
   "photo.fill": "photo",
   "doc.on.clipboard": "content-paste",
   "checkmark.shield.fill": "verified-user",
+  // ── 自定义字段相关 ──────────────────────────────────────────
+  "text.alignleft": "text-fields",
+  "switch.2": "toggle-on",
+  link: "link",
 } as IconMapping;
 
 /**

@@ -30,8 +30,16 @@ import {
   readVaultFile,
   writeVaultFile,
   type EncryptedItemRow,
+  type VaultFile,
   type VaultMeta,
 } from "./vault-storage";
+import {
+  buildDefaultSpace,
+  DEFAULT_SPACE_ID,
+  newSpaceId,
+  sortSpaces,
+  type Space,
+} from "./spaces";
 
 /* ----------------------------------------------------------------------------
  * 错误类型（前端按 message 分支）
@@ -53,7 +61,9 @@ export type VaultErrorCode =
   | "password-too-weak"
   | "not-found"
   | "corrupt"
-  | "io";
+  | "io"
+  | "space-invalid"
+  | "space-last";
 
 /* ----------------------------------------------------------------------------
  * 状态查询
@@ -158,7 +168,13 @@ class VaultService {
     }
 
     const meta = buildInitialMeta(salt, wrappedDEK, verifier);
-    await writeVaultFile({ meta, items: [] });
+    const def = buildDefaultSpace();
+    await writeVaultFile({
+      meta,
+      items: [],
+      spaces: [def],
+      activeSpaceId: def.id,
+    });
 
     if (this.dek) wipeBytes(this.dek);
     this.dek = dek;
@@ -199,6 +215,27 @@ class VaultService {
       if (kek) wipeBytes(kek);
       if (dek) wipeBytes(dek);
     }
+
+    // 兼容旧 vault 文件：解锁后保证至少有一个空间存在；旧 item 的
+    // 缺省 spaceId 会被 ItemPayload.fields 默认视为 DEFAULT_SPACE_ID。
+    await this.ensureSpacesPersisted();
+  }
+
+  /** 若文件里没有 spaces，落盘一个默认空间；幂等 */
+  private async ensureSpacesPersisted(): Promise<void> {
+    const file = await readVaultFile();
+    const fixed = ensureDefaultsInSnapshot(file);
+    if (
+      file.spaces.length === fixed.spaces.length &&
+      file.activeSpaceId === fixed.activeSpaceId
+    ) {
+      return;
+    }
+    await writeVaultFile({
+      ...file,
+      spaces: fixed.spaces,
+      activeSpaceId: fixed.activeSpaceId,
+    });
   }
 
   lock(): void {
@@ -266,6 +303,131 @@ class VaultService {
   }
 
   /* ------------------------------------------------------------------------ */
+  /* 空间（Space）管理                                                          */
+  /* ------------------------------------------------------------------------ */
+  //
+  // 设计要点：
+  //   - 空间列表 plaintext 存在 vault file 顶层 `spaces` 字段
+  //   - activeSpaceId 也 plaintext 存顶层，方便锁定后下次解锁还原现场
+  //   - "默认空间"由 ensureDefaultSpace 在解锁 / Initialize 后保证存在；
+  //     即使用户删光了空间，下次读取也会自动补一个 default
+  //   - 空间不参与加密路径，删除空间不需要重写 items（只是按 spaceId 归位）
+
+  /** 拉取空间快照（不修改文件）。未初始化或锁定状态下也允许只读。 */
+  async listSpaces(): Promise<{ spaces: Space[]; activeSpaceId: string }> {
+    const file = await readVaultFile();
+    const { spaces, activeSpaceId } = ensureDefaultsInSnapshot(file);
+    return { spaces: sortSpaces(spaces), activeSpaceId };
+  }
+
+  /** 切换激活空间。id 必须存在；不抛错则保证落盘。 */
+  async setActiveSpace(id: string): Promise<void> {
+    this.requireUnlocked();
+    const file = await readVaultFile();
+    const fixed = ensureDefaultsInSnapshot(file);
+    const exists = fixed.spaces.some((s) => s.id === id);
+    if (!exists) throw new VaultError("space-invalid", "空间不存在");
+    await writeVaultFile({
+      ...file,
+      spaces: fixed.spaces,
+      activeSpaceId: id,
+    });
+  }
+
+  /**
+   * 新建空间 —— 名称必填、去空白；返回完整记录。
+   * order 取当前最大 order + 1，与 UI 显示编号一致。
+   */
+  async createSpace(name: string): Promise<Space> {
+    this.requireUnlocked();
+    const trimmed = (name ?? "").trim();
+    if (!trimmed) throw new VaultError("space-invalid", "空间名不能为空");
+    const file = await readVaultFile();
+    const fixed = ensureDefaultsInSnapshot(file);
+    const maxOrder = fixed.spaces.reduce(
+      (m, s) => (s.order > m ? s.order : m),
+      0,
+    );
+    const created: Space = {
+      id: newSpaceId(),
+      name: trimmed,
+      order: maxOrder + 1,
+      createdAt: this.nowMs(),
+    };
+    await writeVaultFile({
+      ...file,
+      spaces: [...fixed.spaces, created],
+      activeSpaceId: fixed.activeSpaceId,
+    });
+    return created;
+  }
+
+  /** 重命名空间（含默认空间） */
+  async renameSpace(id: string, name: string): Promise<void> {
+    this.requireUnlocked();
+    const trimmed = (name ?? "").trim();
+    if (!trimmed) throw new VaultError("space-invalid", "空间名不能为空");
+    const file = await readVaultFile();
+    const fixed = ensureDefaultsInSnapshot(file);
+    const idx = fixed.spaces.findIndex((s) => s.id === id);
+    if (idx === -1) throw new VaultError("space-invalid", "空间不存在");
+    const next = fixed.spaces.slice();
+    next[idx] = { ...next[idx], name: trimmed };
+    await writeVaultFile({
+      ...file,
+      spaces: next,
+      activeSpaceId: fixed.activeSpaceId,
+    });
+  }
+
+  /**
+   * 删除空间 —— 该空间下的所有 item 被迁回默认空间。
+   * 不允许删除最后一个空间（至少保留 1 个）。
+   */
+  async deleteSpace(id: string): Promise<void> {
+    this.requireUnlocked();
+    const file = await readVaultFile();
+    const fixed = ensureDefaultsInSnapshot(file);
+    if (fixed.spaces.length <= 1) {
+      throw new VaultError("space-last", "至少需要保留一个空间");
+    }
+    const target = fixed.spaces.find((s) => s.id === id);
+    if (!target) throw new VaultError("space-invalid", "空间不存在");
+    const remaining = fixed.spaces.filter((s) => s.id !== id);
+    // 选迁移目标：保留集合里的第一个（按 order）
+    const fallback = sortSpaces(remaining)[0]?.id ?? DEFAULT_SPACE_ID;
+    // 把目标空间下的 item 解密 -> 改 spaceId -> 重新加密
+    const nextItems: EncryptedItemRow[] = [];
+    for (const row of file.items) {
+      try {
+        const payload = this.decryptRow(row);
+        const curSpace = readSpaceIdFromFields(payload.fields) ?? fixed.activeSpaceId;
+        if (curSpace === id) {
+          payload.fields = {
+            ...(payload.fields ?? {}),
+            spaceId: fallback,
+          };
+          payload.updatedAt = this.nowMs();
+          nextItems.push(this.encryptPayload(payload));
+        } else {
+          nextItems.push(row);
+        }
+      } catch {
+        // 解密失败的 row 原样保留
+        nextItems.push(row);
+      }
+    }
+    const nextActive =
+      fixed.activeSpaceId === id ? fallback : fixed.activeSpaceId;
+    await writeVaultFile({
+      ...file,
+      items: nextItems,
+      spaces: remaining,
+      activeSpaceId: nextActive,
+    });
+  }
+
+  /* ------------------------------------------------------------------------ */
   /* CRUD                                                                     */
   /* ------------------------------------------------------------------------ */
 
@@ -309,17 +471,25 @@ class VaultService {
 
     const id = genItemId();
     const now = this.nowMs();
+    const file = await readVaultFile();
+    const fixed = ensureDefaultsInSnapshot(file);
+    // 显式 spaceId 优先；缺省回落到 activeSpaceId（首次解锁后保证非空）
+    const finalFields = { ...(fields ?? {}) };
+    if (typeof finalFields.spaceId !== "string" || !finalFields.spaceId) {
+      finalFields.spaceId = fixed.activeSpaceId;
+    }
     const payload: ItemPayload = {
       id,
       type,
       name: name.trim(),
-      fields: fields ?? {},
+      fields: finalFields,
       createdAt: now,
       updatedAt: now,
     };
-    const file = await readVaultFile();
     const row = this.encryptPayload(payload);
     file.items = [row, ...file.items];
+    file.spaces = fixed.spaces;
+    file.activeSpaceId = fixed.activeSpaceId;
     await writeVaultFile(file);
     return payload;
   }
@@ -356,27 +526,34 @@ class VaultService {
     await writeVaultFile(file);
   }
 
-  /** 批量导入：每条用新 id + 重新加密 */
+  /** 批量导入：每条用新 id + 重新加密；缺省 spaceId 注入当前激活空间 */
   async importItems(
     incoming: Omit<ItemPayload, "id" | "createdAt" | "updatedAt">[],
   ): Promise<number> {
     this.requireUnlocked();
     if (incoming.length === 0) return 0;
     const file = await readVaultFile();
+    const fixed = ensureDefaultsInSnapshot(file);
     const now = this.nowMs();
     const rows: EncryptedItemRow[] = incoming.map((it) => {
       const id = genItemId();
+      const fields = { ...(it.fields ?? {}) };
+      if (typeof fields.spaceId !== "string" || !fields.spaceId) {
+        fields.spaceId = fixed.activeSpaceId;
+      }
       const payload: ItemPayload = {
         id,
         type: it.type,
         name: it.name?.trim() || "未命名",
-        fields: it.fields ?? {},
+        fields,
         createdAt: now,
         updatedAt: now,
       };
       return this.encryptPayload(payload);
     });
     file.items = [...rows, ...file.items];
+    file.spaces = fixed.spaces;
+    file.activeSpaceId = fixed.activeSpaceId;
     await writeVaultFile(file);
     return rows.length;
   }
@@ -437,4 +614,32 @@ function genItemId(): string {
     hex += bytes[i].toString(16).padStart(2, "0");
   }
   return hex;
+}
+
+/* ----------------------------------------------------------------------------
+ * 空间帮助函数
+ * -------------------------------------------------------------------------- */
+
+/**
+ * 给 VaultFile 快照补齐"至少一个空间 + 一个有效 activeSpaceId"。
+ * 不写入文件，仅返回校准后的值。调用方决定是否落盘。
+ */
+function ensureDefaultsInSnapshot(file: VaultFile): {
+  spaces: Space[];
+  activeSpaceId: string;
+} {
+  const spaces = file.spaces.length > 0 ? file.spaces : [buildDefaultSpace()];
+  let active = file.activeSpaceId ?? "";
+  const exists = spaces.some((s) => s.id === active);
+  if (!exists) active = sortSpaces(spaces)[0].id;
+  return { spaces, activeSpaceId: active };
+}
+
+/** 从 ItemPayload.fields 安全取出 spaceId（兼容字符串以外的脏值） */
+export function readSpaceIdFromFields(
+  fields: Record<string, unknown> | undefined,
+): string | undefined {
+  if (!fields) return undefined;
+  const v = fields.spaceId;
+  return typeof v === "string" && v ? v : undefined;
 }

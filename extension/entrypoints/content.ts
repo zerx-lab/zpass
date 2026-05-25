@@ -1,29 +1,19 @@
 import {
   type LoginSecret,
-  type LoginSummary,
-  type LoginTotpCode,
   type PasskeyDescriptor,
   type PasskeyListResult,
-  type QueryLoginsResult,
 } from "../src/shared/messages";
 import {
   choosePasskeyCredential,
-  closeCredentialMenus,
   confirmPasskeyCreate,
-  createAutofillButton,
-  showCredentialMenu,
   showPageToast,
-  showTransientNotice,
 } from "../src/content/ui";
 import {
   fillLoginForm,
   fillTotpInput,
   findLoginFormForInput,
   findLoginForms,
-  isLoginCandidate,
-  type LoginForm,
 } from "../src/content/forms";
-import { isTotpCandidate } from "../src/content/totp-fields";
 import { installLoginCapture } from "../src/content/capture-login";
 
 export default defineContentScript({
@@ -31,38 +21,41 @@ export default defineContentScript({
   allFrames: true,
   runAt: "document_idle",
   main() {
-    const controller = new AutofillController();
+    // 扩展失效自愈：dev 热重载 / 扩展更新会让本 content script 变孤儿，
+    // 后续 browser.runtime.* 调用全部抛 "Extension context invalidated"。
+    // 检测到失效就静默错误 + reload 顶层页（子 frame 会随父页一起被重新注入）。
+    installExtensionContextWatchdog();
 
-    // 安装「提交后提示保存」捕获器。该模块自己负责 input/click/keydown/submit
-    // 等事件委托，与 AutofillController 的各个监听独立不冲突。
+    // 提交时提示保存登录 —— 与填充 UI 解耦，独立挂载。
     installLoginCapture();
 
-    // 窗口 scroll / resize 时同步按钮位置（仅在按钮可见时重定位）
-    window.addEventListener("scroll", () => controller.repositionIfVisible(), {
-      passive: true,
-      capture: true,
-    });
-    window.addEventListener("resize", () => controller.repositionIfVisible(), {
-      passive: true,
-    });
-
+    // 唯一的填充入口：popup 选条目后由 background 广播 zpass.fillLogin。
+    // 不再有 inline 浮动按钮 / 自动菜单 / ArrowDown 触发等任何页内 UI 路径。
     browser.runtime.onMessage.addListener(async (message: unknown) => {
       const msg = message as { type?: string; secret?: LoginSecret };
       if (msg.type !== "zpass.fillLogin" || !msg.secret) return undefined;
       try {
-        const activeForm = findLoginFormForInput(
-          document.activeElement as HTMLInputElement,
-        );
+        // 仅当焦点真的在 input 上时,才用「找焦点所在 form」路径。
+        // 否则 document.activeElement 通常是 <body>,会被 findLoginFormForInput
+        // 误当作 username 槽位返回,导致后续 simulateUserFill 对非 input 节点
+        // 调 valueSetter 抛 Illegal invocation,表现为「没聚焦就填不上」。
+        const active = document.activeElement;
+        const activeForm =
+          active instanceof HTMLInputElement
+            ? findLoginFormForInput(active)
+            : null;
         const form = activeForm ?? findLoginForms(document)[0];
         if (!form) {
-          // 本 frame 没有可填充的表单 —— 不返回应答，让主 frame
-          // 或其他 frame 的 listener 应答。返回 undefined 会让 sender
-          // 看到 sendResponse 不被调用。allFrames:true 下多 frame 同时收
-          // 到广播，只有能处理的那个应该应答。
+          // 本 frame 无可填表单 —— 不应答，allFrames:true 下交给其他 frame。
           return undefined;
         }
-        // 走 controller.performFill 不是裸调 fillLoginForm，让 filling 守卫生效
-        controller.performFill(form, msg.secret);
+        fillLoginForm(form, msg.secret);
+        if (msg.secret.totp?.code) {
+          // popup 携带了 TOTP code 时顺手填进 OTP input（如果页内存在）。
+          // 找不到 OTP input 就算了，main flow 已完成。
+          const otpInput = findOtpInput(form);
+          if (otpInput) fillTotpInput(otpInput, msg.secret.totp.code);
+        }
         return { ok: true };
       } catch (error) {
         return {
@@ -72,32 +65,91 @@ export default defineContentScript({
       }
     });
 
+    // Passkey 桥接：网页通过 window.postMessage 请求 list/create/sign/choose。
     window.addEventListener("message", (event) => {
       const message = event.data as PageBridgeRequest;
       if (event.source !== window || !isPageBridgeRequest(message)) return;
       void relayPasskeyRequest(message);
     });
-
-    // 跟随光标焦点 — 按钮只在 login candidate input 获焦时出现
-    document.addEventListener("focusin", (event) => {
-      controller.handleFocusin(event.target);
-    });
-    document.addEventListener("focusout", () => {
-      controller.handleFocusout();
-    });
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") closeCredentialMenus();
-      if (event.key === "ArrowDown") {
-        const active = document.activeElement;
-        if (isLoginCandidate(active)) {
-          void controller.openInlineForTarget(active);
-        } else if (isTotpCandidate(active)) {
-          void controller.openTotpInlineForTarget(active);
-        }
-      }
-    });
   },
 });
+
+/**
+ * 看门狗：定期检查 browser.runtime.id 是否还在。失效时静默 unhandledrejection
+ * 并 reload 顶层页面 —— 让 host page 重新加载一次,新 content script 会接上
+ * 新 service worker。子 frame 不主动 reload,等父页 reload 时一起被重新注入。
+ *
+ * 触发场景:
+ *   - WXT dev 模式热重载（最常见）
+ *   - chrome://extensions 手动重新加载
+ *   - 扩展自动更新 / 被禁用
+ */
+function installExtensionContextWatchdog(): void {
+  let triggered = false;
+  const handleInvalidated = (): void => {
+    if (triggered) return;
+    triggered = true;
+    if (window === window.top) {
+      try {
+        globalThis.location.reload();
+      } catch {
+        // sandboxed / cross-origin 限制下 reload 可能 throw —— 没辙,静默。
+      }
+    }
+  };
+
+  const isContextAlive = (): boolean => {
+    try {
+      return !!browser.runtime?.id;
+    } catch {
+      return false;
+    }
+  };
+
+  // 主动轮询：1s 频率,失效时 runtime API 通常在下一次调用前就被检测到。
+  const timer = globalThis.setInterval(() => {
+    if (!isContextAlive()) {
+      globalThis.clearInterval(timer);
+      handleInvalidated();
+    }
+  }, 1000);
+
+  // 被动监听：sendMessage 失败时 Chrome 抛 unhandledrejection,
+  // 我们 preventDefault 掉这条特定错误,顺手触发 reload。
+  globalThis.addEventListener("unhandledrejection", (event) => {
+    const reason = event.reason;
+    const message =
+      reason instanceof Error ? reason.message : String(reason ?? "");
+    if (message.includes("Extension context invalidated")) {
+      event.preventDefault();
+      handleInvalidated();
+    }
+  });
+}
+
+/**
+ * 在已识别的 LoginForm 周边寻找 OTP input —— 简化版。
+ * 不依赖 totp-fields.ts 的 isTotpCandidate（那是面向 focus 触发的复杂判定）；
+ * 这里只取 form / 上层 fieldset 里 autocomplete=one-time-code 的第一个，
+ * 或 name/id 含 "otp"/"code"/"verify" 的 type=text。找不到返回 null。
+ */
+function findOtpInput(form: { password: HTMLInputElement }): HTMLInputElement | null {
+  const root = form.password.form ?? document;
+  const explicit = root.querySelector<HTMLInputElement>(
+    'input[autocomplete="one-time-code"]',
+  );
+  if (explicit) return explicit;
+  const inputs = root.querySelectorAll<HTMLInputElement>(
+    'input[type="text"], input[type="tel"], input:not([type])',
+  );
+  for (const input of inputs) {
+    const key = `${input.name} ${input.id} ${input.placeholder ?? ""}`.toLowerCase();
+    if (/(otp|one[-_]?time|verify|verification|code|短信|验证码)/.test(key)) {
+      return input;
+    }
+  }
+  return null;
+}
 
 interface PageBridgeRequest {
   source: "zpass-page";
@@ -387,404 +439,3 @@ function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-/* ============================================================================
- * AutofillController — 单按钮跟随光标焦点模型
- * ----------------------------------------------------------------------------
- * 替代旧版「每个 password input 永久挂一个按钮」的设计：
- *   - 全局只创建 1 个浮动 Z 按钮
- *   - 监听 focusin / focusout，按钮跟随当前光标所在的 login input
- *     （username 或 password 均可触发，与 1Password / Bitwarden 一致）
- *   - 失焦后延迟 180ms 隐藏，给用户从 input 移到按钮的过渡时间
- *   - 鼠标 hover 按钮时保持显示
- *   - 填充进行中通过 filling 守卫禁用 focusin 反复弹菜单
- * ========================================================================== */
-class AutofillController {
-  /** 全局唯一浮动按钮 */
-  private readonly button: HTMLButtonElement;
-  /** 当前按钮锚定的 input；null 表示按钮处于隐藏状态 */
-  private currentAnchor: HTMLInputElement | null = null;
-  /**
-   * 当前锚定上下文是 login 还是 totp。为了在按钮被点击后，以及
-   * performFill 末尾重新 handleFocusin 时能走对的装配路径。
-   * - "login": 走 username/password下拉菜单 → revealLogin → fillLoginForm
-   * - "totp":  走 hasTotp 过滤后菜单 → generateLoginTotp → fillTotpInput
-   * - null:    按钮隐藏中
-   */
-  private currentMode: "login" | "totp" | null = null;
-  /** 锚定 input 的尺寸 / 位置变化监听器 */
-  private positionWatcher: ResizeObserver | null = null;
-  /** 失焦延迟隐藏的 timer */
-  private hideTimer: number | undefined;
-  private cachedLogins: QueryLoginsResult | null = null;
-  private cachedAt = 0;
-  /** 填充进行中标记 — 期间禁止 focusin 反复弹菜单（详 performFill） */
-  private filling = false;
-  /**
-   * 一次性标记：下一次 handleFocusin 只更新按钮位置，不自动弹下拉菜单。
-   * 用于 performFill 末尾：填充后按钮需要跟随到 password 旁，但用户并未希望
-   * 填完又弹个菜单出来遮住。
-   */
-  private suppressAutoMenuOnce = false;
-
-  constructor() {
-    this.button = createAutofillButton();
-    this.button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      void this.openMenuOnAnchor();
-    });
-    // mousedown 阻止 default 焦点切换：保留 input 焦点，避免触发站点的 onBlur 验证
-    this.button.addEventListener("mousedown", (event) => {
-      event.preventDefault();
-    });
-    // hover 按钮时取消隐藏调度，避免用户从 input 移到按钮过程中按钮消失
-    this.button.addEventListener("mouseenter", () => this.cancelHide());
-    this.button.addEventListener("mouseleave", () => this.scheduleHide());
-    document.documentElement.append(this.button);
-  }
-
-  isFilling(): boolean {
-    return this.filling;
-  }
-
-  /**
-   * 统一的填充入口：inline menu / Z button menu / popup fillLogin 三条路径皆走此。
-   * filling 守卫期间禁止 focusin 自动弹新菜单，本次填充末尾以 setTimeout(0)
-   * 释放（含义：让 fillLoginForm 同步触发的所有 focus / focusin / await microtask
-   * 跟完）。释放后主动 handleFocusin 一遍，让按钮跟随到填充末尾的 active input 旁。
-   */
-  performFill(form: LoginForm, secret: LoginSecret): void {
-    this.filling = true;
-    try {
-      fillLoginForm(form, secret);
-    } finally {
-      window.setTimeout(() => {
-        this.filling = false;
-        // focus() 在 already-focused 元素上不 fire focusin，手动重新评估
-        // 同时打上 suppressAutoMenuOnce：只跟随按钮，不自动重新弹菜单
-        this.suppressAutoMenuOnce = true;
-        this.handleFocusin(document.activeElement);
-      }, 0);
-    }
-  }
-
-  /**
-   * focusin handler — 依次判定（TOTP 优先于 login）：
-   *   1) totp candidate (autocomplete=one-time-code 或 OTP 关键字) → mode=totp,
-   *      弹 hasTotp 过滤过的菜单。优先于 login 是因为 OTP input 常常同时
-   *      是 type=text（与 USERNAME_TYPES 重叠），必须先拦截，避免被误路由。
-   *      另 isLoginCandidate 内部也已排除 TOTP，这里属于双重防护。
-   *   2) login candidate (username/password) → mode=login, 弹凭据菜单
-   *   3) 都不是 → 调度隐藏按钮
-   * suppressAutoMenuOnce 场景下只更新按钮位置，不自动弹菜单。
-   */
-  handleFocusin(target: EventTarget | null): void {
-    if (this.filling) return;
-
-    if (isTotpCandidate(target)) {
-      const input = target as HTMLInputElement;
-      this.cancelHide();
-      this.attachTo(input, "totp");
-      if (this.suppressAutoMenuOnce) {
-        this.suppressAutoMenuOnce = false;
-        return;
-      }
-      // focusin 自动触发 → silent：desktop 未启动 / 锁定时不弹气泡。
-      void this.openTotpInlineForTarget(input, { silent: true });
-      return;
-    }
-
-    if (isLoginCandidate(target)) {
-      const input = target as HTMLInputElement;
-      if (!this.belongsToLoginForm(input)) {
-        this.scheduleHide();
-        return;
-      }
-      this.cancelHide();
-      this.attachTo(input, "login");
-      if (this.suppressAutoMenuOnce) {
-        this.suppressAutoMenuOnce = false;
-        return;
-      }
-      // 同上：focusin 自动触发不该打扰用户输入。
-      void this.openInlineForTarget(input, { silent: true });
-      return;
-    }
-
-    this.scheduleHide();
-  }
-
-  /** focusout handler — 延迟隐藏给用户机会移到按钮上 */
-  handleFocusout(): void {
-    if (this.filling) return;
-    this.scheduleHide();
-  }
-
-  /** 窗口 scroll / resize / ResizeObserver 触发时调用 */
-  repositionIfVisible(): void {
-    if (this.currentAnchor) {
-      positionButton(this.button, this.currentAnchor);
-    }
-  }
-
-  /**
-   * silent=true：调用方（focusin 自动触发）希望 desktop 未启动 / 锁定时
-   * 完全静默，不弹气泡也不弹菜单。状态提示由工具栏红 alert 徽章承担。
-   * silent=false：用户主动行为（ArrowDown 等），失败时仍弹气泡解释。
-   */
-  async openInlineForTarget(
-    target: EventTarget | null,
-    options: { silent?: boolean } = {},
-  ): Promise<void> {
-    if (this.filling) return;
-    if (!isLoginCandidate(target)) return;
-    const form = findLoginFormForInput(target);
-    if (!form) return;
-    const result = await this.queryLogins(target, options);
-    if (!result || result.items.length === 0) return;
-    showCredentialMenu(target, result.items, async (item) => {
-      const secret = await reveal(item);
-      if (!secret) return;
-      this.performFill(form, secret);
-    });
-  }
-
-  /**
-   * TOTP 场景下的 inline 菜单。与 openInlineForTarget 并列：
-   *   - 显示所有匹配当前 origin 的条目（不过滤 hasTotp，对齐 Bitwarden）。
-   *     原因：用户可能有个账号没上 TOTP 但需要看到在 popup 手工复制，菜单过滤
-   *     会让他以为该账号不存在。
-   *   - 点击有 hasTotp 的 → 调 generateLoginTotp 要码，拿到填入 input
-   *   - 点击没 hasTotp 的 → 提示“该凭据未存 TOTP”（不报错、不填）
-   *   - 空列表时不会弹（避免遮担用户输入）
-   */
-  async openTotpInlineForTarget(
-    target: EventTarget | null,
-    options: { silent?: boolean } = {},
-  ): Promise<void> {
-    if (this.filling) return;
-    if (!isTotpCandidate(target)) return;
-    const result = await this.queryLogins(target, options);
-    if (!result) return;
-    if (result.items.length === 0) return;
-    showCredentialMenu(
-      target,
-      result.items,
-      async (item) => {
-        if (!item.hasTotp) {
-          showTransientNotice(
-            target as HTMLInputElement,
-            "该凭据未存验证码秘钥。",
-          );
-          return;
-        }
-        const code = await requestTotpCode(item);
-        if (!code) return;
-        this.performTotpFill(target as HTMLInputElement, code);
-      },
-      "totp",
-    );
-  }
-
-  /**
-   * TOTP 填充。与 performFill 同样使用 filling 守卫——TOTP input 上 focusin
-   * 反复弹菜单的问题与 password 场景一致，复用同一套机制。
-   */
-  performTotpFill(input: HTMLInputElement, code: LoginTotpCode): void {
-    this.filling = true;
-    try {
-      fillTotpInput(input, code.code);
-    } finally {
-      window.setTimeout(() => {
-        this.filling = false;
-        this.suppressAutoMenuOnce = true;
-        this.handleFocusin(document.activeElement);
-      }, 0);
-    }
-  }
-
-  private belongsToLoginForm(input: HTMLInputElement): boolean {
-    const forms = findLoginForms(document);
-    return forms.some(
-      (form) => form.password === input || form.username === input,
-    );
-  }
-
-  private attachTo(input: HTMLInputElement, mode: "login" | "totp"): void {
-    this.currentAnchor = input;
-    this.currentMode = mode;
-    this.positionWatcher?.disconnect();
-    this.positionWatcher = new ResizeObserver(() => this.repositionIfVisible());
-    this.positionWatcher.observe(input);
-    positionButton(this.button, input);
-    this.button.setAttribute("data-state", "visible");
-    this.button.setAttribute("data-mode", mode);
-  }
-
-  private hide(): void {
-    this.button.removeAttribute("data-state");
-    this.button.removeAttribute("data-mode");
-    this.currentAnchor = null;
-    this.currentMode = null;
-    this.positionWatcher?.disconnect();
-    this.positionWatcher = null;
-  }
-
-  private scheduleHide(): void {
-    this.cancelHide();
-    this.hideTimer = window.setTimeout(() => this.hide(), 180);
-  }
-
-  private cancelHide(): void {
-    if (this.hideTimer !== undefined) {
-      window.clearTimeout(this.hideTimer);
-      this.hideTimer = undefined;
-    }
-  }
-
-  /**
-   * 点击浮动 Z 按钮时的入口。根据 currentMode 分流到 login 菜单或 TOTP 菜单。
-   */
-  private async openMenuOnAnchor(): Promise<void> {
-    if (!this.currentAnchor) return;
-    if (this.currentMode === "totp") {
-      await this.openTotpMenu(this.currentAnchor, this.button);
-      return;
-    }
-    const form = findLoginFormForInput(this.currentAnchor);
-    if (!form) return;
-    await this.openMenu(form, this.button);
-  }
-
-  private async openMenu(form: LoginForm, anchor: HTMLElement): Promise<void> {
-    const result = await this.queryLogins(anchor);
-    if (!result) return;
-    if (result.items.length === 0) {
-      showTransientNotice(anchor, "当前站点没有匹配的 ZPass 登录项。");
-      return;
-    }
-    showCredentialMenu(anchor, result.items, async (item) => {
-      const secret = await reveal(item);
-      if (!secret) return;
-      this.performFill(form, secret);
-    });
-  }
-
-  /**
-   * 点击浮动 Z 按钮时的 TOTP 路径。与 openTotpInlineForTarget 不同的是
-   * 这里 anchor 是按钮本身（菜单弹在按钮下方），填充目标仍是当前 input。
-   * 同样不过滤 hasTotp，与 Bitwarden 对齐。
-   */
-  private async openTotpMenu(
-    input: HTMLInputElement,
-    anchor: HTMLElement,
-  ): Promise<void> {
-    const result = await this.queryLogins(anchor);
-    if (!result) return;
-    if (result.items.length === 0) {
-      showTransientNotice(anchor, "当前站点没有匹配的 ZPass 条目。");
-      return;
-    }
-    showCredentialMenu(
-      anchor,
-      result.items,
-      async (item) => {
-        if (!item.hasTotp) {
-          showTransientNotice(anchor, "该凭据未存验证码秘钥。");
-          return;
-        }
-        const code = await requestTotpCode(item);
-        if (!code) return;
-        this.performTotpFill(input, code);
-      },
-      "totp",
-    );
-  }
-
-  /**
-   * silent=true：desktop 未启动 / vault 锁定时不再 showTransientNotice，仅
-   * 返回 null 让调用方静默退出。focusin 自动触发的路径必须用 silent，避免
-   * 在用户聚焦输入框就弹气泡——状态提示由工具栏红 alert 徽章承担。
-   * silent=false：用户主动点 Z 按钮 / 走 ArrowDown 等动作，仍弹气泡解释。
-   */
-  private async queryLogins(
-    anchor: HTMLElement,
-    options: { silent?: boolean } = {},
-  ): Promise<QueryLoginsResult | null> {
-    if (this.cachedLogins && Date.now() - this.cachedAt < 5000) {
-      return this.cachedLogins;
-    }
-    const response = await browser.runtime.sendMessage({
-      type: "zpass.queryLogins",
-    });
-    if (!response?.ok) {
-      if (!options.silent) {
-        showTransientNotice(anchor, response?.error ?? "ZPass 当前不可用。");
-      }
-      return null;
-    }
-    const result = response.result as QueryLoginsResult;
-    if (!result.unlocked) {
-      if (!options.silent) {
-        showTransientNotice(anchor, "请先解锁 ZPass Desktop，再使用自动填充。");
-      }
-      return null;
-    }
-    this.cachedLogins = result;
-    this.cachedAt = Date.now();
-    return result;
-  }
-}
-
-async function reveal(item: LoginSummary): Promise<LoginSecret | null> {
-  const response = await browser.runtime.sendMessage({
-    type: "zpass.revealLogin",
-    itemId: item.id,
-  });
-  if (!response?.ok) {
-    return null;
-  }
-  return response.result as LoginSecret;
-}
-
-/**
- * 请求指定 login 条目的当前 OTP 码。失败返 null，调用方自行静默；
- * 包装后端错误为 toast 是 openTotpMenu / openTotpInlineForTarget 的职责，
- * 由于这里拿不到 anchor，仍然在外部控制路径里选择是否提示。
- */
-async function requestTotpCode(
-  item: LoginSummary,
-): Promise<LoginTotpCode | null> {
-  const response = await browser.runtime.sendMessage({
-    type: "zpass.generateLoginTotp",
-    itemId: item.id,
-  });
-  if (!response?.ok) return null;
-  return response.result as LoginTotpCode;
-}
-
-/**
- * input 不可见时 (width/height = 0 / display:none) 隐藏按钮，避免浮游位置错误。
- */
-function positionButton(button: HTMLElement, input: HTMLInputElement): void {
-  const rect = input.getBoundingClientRect();
-  if (rect.width <= 0 || rect.height <= 0) {
-    button.style.display = "none";
-    return;
-  }
-  button.style.display = "";
-
-  const BUTTON_SIZE = 24;
-  // 距输入框右边的内边距。取 8px 是与 Bitwarden / Chrome 默认 password
-  // manager 图标同位置。为了让按钮与可能存在的原生 icon 错开，本可以检测
-  // input 内部是否有同肳兄弟中的 button/svg，但 v1 先保持简单。
-  const INSIDE_PADDING = 8;
-
-  // 水平：压入输入框内部右侧
-  const left = rect.right - BUTTON_SIZE - INSIDE_PADDING;
-  // 垂直：与输入框中线对齐
-  const top = rect.top + (rect.height - BUTTON_SIZE) / 2;
-
-  button.style.left = `${window.scrollX + left}px`;
-  button.style.top = `${window.scrollY + top}px`;
-}

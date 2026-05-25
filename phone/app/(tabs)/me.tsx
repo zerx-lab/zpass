@@ -25,6 +25,8 @@ import { useTheme, type ThemeMode } from "@/contexts/theme-context";
 import { useVault } from "@/contexts/vault-context";
 import type { VaultItem, VaultItemType } from "@/data/vault";
 import { exportVault, pickAndParseImport } from "@/lib/transfer";
+import { sortSpaces, type Space } from "@/lib/spaces";
+import { IconSymbol } from "@/components/ui/icon-symbol";
 
 const MONO = Platform.select({ ios: "ui-monospace", default: "monospace" });
 
@@ -193,9 +195,21 @@ export default function MeScreen() {
     clearAll,
     reset,
     changeMasterPassword,
+    spaces,
+    activeSpaceId,
+    setActiveSpace,
+    createSpace,
+    renameSpace,
+    deleteSpace,
   } = useVault();
 
   const [pwModal, setPwModal] = useState(false);
+  const [spacesModal, setSpacesModal] = useState(false);
+
+  const activeSpaceName = React.useMemo(() => {
+    const sp = spaces.find((s) => s.id === activeSpaceId);
+    return sp?.name ?? "—";
+  }, [spaces, activeSpaceId]);
 
   /* ── 导出：明文备份 ── */
   const handleExport = React.useCallback(() => {
@@ -317,6 +331,16 @@ export default function MeScreen() {
 
   const typeCounts = React.useMemo(() => countByType(items), [items]);
 
+  const spacesRows: MenuRowConfig[] = [
+    {
+      key: "current-space",
+      label: "当前空间",
+      value: activeSpaceName,
+      showChevron: true,
+      onPress: () => setSpacesModal(true),
+    },
+  ];
+
   const securityRows: MenuRowConfig[] = [
     {
       key: "change-pwd",
@@ -417,6 +441,7 @@ export default function MeScreen() {
 
         <UserCard c={c} count={items.length} />
 
+        <MenuSection label="SPACES · 空间" rows={spacesRows} c={c} />
         <MenuSection label="STATS · 条目统计" rows={statsRows} c={c} />
         <MenuSection label="SECURITY · 安全与隐私" rows={securityRows} c={c} />
         <MenuSection label="APPEARANCE · 外观" rows={appearanceRows} c={c} />
@@ -430,6 +455,21 @@ export default function MeScreen() {
         visible={pwModal}
         onClose={() => setPwModal(false)}
         onSubmit={changeMasterPassword}
+      />
+
+      <SpacesModal
+        visible={spacesModal}
+        onClose={() => setSpacesModal(false)}
+        spaces={spaces}
+        activeSpaceId={activeSpaceId}
+        onSelect={async (id) => {
+          await setActiveSpace(id);
+          setSpacesModal(false);
+        }}
+        onCreate={createSpace}
+        onRename={renameSpace}
+        onDelete={deleteSpace}
+        c={c}
       />
     </SafeAreaView>
   );
@@ -573,6 +613,444 @@ function ModalField({
     </View>
   );
 }
+
+/* ----- 空间 modal ----- */
+//
+// 视觉对齐用户给的截图：
+//   标题 "空间"
+//   每行 [编号 | 名称 | 选中态]
+//   底部 "+ 新建空间"
+// 长按行 → ActionSheet（重命名 / 删除）。
+
+function SpacesModal({
+  visible,
+  onClose,
+  spaces,
+  activeSpaceId,
+  onSelect,
+  onCreate,
+  onRename,
+  onDelete,
+  c,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  spaces: Space[];
+  activeSpaceId: string | null;
+  onSelect: (id: string) => void | Promise<void>;
+  onCreate: (name: string) => Promise<Space | null>;
+  onRename: (
+    id: string,
+    name: string,
+  ) => Promise<{ ok: true } | { ok: false; code: string; message: string }>;
+  onDelete: (
+    id: string,
+  ) => Promise<{ ok: true } | { ok: false; code: string; message: string }>;
+  c: typeof Colors.dark;
+}) {
+  const [createMode, setCreateMode] = useState(false);
+  const [draftName, setDraftName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<Space | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+
+  const ordered = React.useMemo(() => sortSpaces(spaces), [spaces]);
+
+  const closeAll = () => {
+    setCreateMode(false);
+    setDraftName("");
+    setRenameTarget(null);
+    setRenameDraft("");
+    onClose();
+  };
+
+  const handleCreate = async () => {
+    const trimmed = draftName.trim();
+    if (!trimmed) {
+      Alert.alert("名称不能为空");
+      return;
+    }
+    setBusy(true);
+    const sp = await onCreate(trimmed);
+    setBusy(false);
+    if (sp) {
+      setCreateMode(false);
+      setDraftName("");
+    } else {
+      Alert.alert("创建失败", "请稍后重试");
+    }
+  };
+
+  const handleRow = (sp: Space) => {
+    Alert.alert(
+      sp.name,
+      undefined,
+      [
+        { text: "切换到此空间", onPress: () => onSelect(sp.id) },
+        {
+          text: "重命名",
+          onPress: () => {
+            setRenameTarget(sp);
+            setRenameDraft(sp.name);
+          },
+        },
+        {
+          text: "删除",
+          style: "destructive",
+          onPress: () => {
+            if (spaces.length <= 1) {
+              Alert.alert("无法删除", "至少需要保留一个空间");
+              return;
+            }
+            Alert.alert(
+              "删除空间",
+              `确认删除「${sp.name}」？该空间下的所有条目会迁移到其它空间。`,
+              [
+                { text: "取消", style: "cancel" },
+                {
+                  text: "删除",
+                  style: "destructive",
+                  onPress: async () => {
+                    const r = await onDelete(sp.id);
+                    if (!r.ok) Alert.alert("删除失败", r.message);
+                  },
+                },
+              ],
+            );
+          },
+        },
+        { text: "取消", style: "cancel" },
+      ],
+      { cancelable: true },
+    );
+  };
+
+  const handleRenameConfirm = async () => {
+    if (!renameTarget) return;
+    const trimmed = renameDraft.trim();
+    if (!trimmed) {
+      Alert.alert("名称不能为空");
+      return;
+    }
+    setBusy(true);
+    const r = await onRename(renameTarget.id, trimmed);
+    setBusy(false);
+    if (r.ok) {
+      setRenameTarget(null);
+      setRenameDraft("");
+    } else {
+      Alert.alert("重命名失败", r.message);
+    }
+  };
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={closeAll}
+    >
+      <TouchableOpacity
+        activeOpacity={1}
+        onPress={closeAll}
+        style={spacesModalStyles.backdrop}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={() => {}}
+          style={[
+            spacesModalStyles.card,
+            { backgroundColor: c.bgElev, borderColor: c.line },
+          ]}
+        >
+          <Text
+            style={[
+              spacesModalStyles.title,
+              { color: c.text3, fontFamily: MONO },
+            ]}
+          >
+            空间
+          </Text>
+
+          {ordered.length === 0 ? (
+            <Text
+              style={[
+                spacesModalStyles.empty,
+                { color: c.text3 },
+              ]}
+            >
+              没有空间
+            </Text>
+          ) : (
+            ordered.map((sp, idx) => {
+              const active = sp.id === activeSpaceId;
+              return (
+                <TouchableOpacity
+                  key={sp.id}
+                  activeOpacity={0.7}
+                  onPress={() => onSelect(sp.id)}
+                  onLongPress={() => handleRow(sp)}
+                  style={[
+                    spacesModalStyles.row,
+                    {
+                      backgroundColor: active ? c.bgHover : "transparent",
+                      borderColor: c.line,
+                      borderTopWidth: idx === 0 ? StyleSheet.hairlineWidth : 0,
+                    },
+                  ]}
+                >
+                  <View
+                    style={[
+                      spacesModalStyles.numChip,
+                      {
+                        backgroundColor: active ? c.text : c.bg,
+                        borderColor: active ? c.text : c.line,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        spacesModalStyles.numText,
+                        {
+                          color: active ? c.bg : c.text2,
+                          fontFamily: MONO,
+                        },
+                      ]}
+                    >
+                      {sp.order}
+                    </Text>
+                  </View>
+                  <Text
+                    style={[spacesModalStyles.rowName, { color: c.text }]}
+                    numberOfLines={1}
+                  >
+                    {sp.name}
+                  </Text>
+                  {active ? (
+                    <IconSymbol name="checkmark" size={16} color={c.text2} />
+                  ) : null}
+                </TouchableOpacity>
+              );
+            })
+          )}
+
+          {createMode ? (
+            <View style={spacesModalStyles.createWrap}>
+              <TextInput
+                style={[
+                  spacesModalStyles.createInput,
+                  {
+                    color: c.text,
+                    backgroundColor: c.bg,
+                    borderColor: c.line,
+                  },
+                ]}
+                value={draftName}
+                onChangeText={setDraftName}
+                placeholder="空间名"
+                placeholderTextColor={c.text3}
+                autoFocus
+                autoCapitalize="none"
+                autoCorrect={false}
+                maxLength={32}
+              />
+              <View style={spacesModalStyles.createActions}>
+                <TouchableOpacity
+                  onPress={() => {
+                    setCreateMode(false);
+                    setDraftName("");
+                  }}
+                  style={[
+                    spacesModalStyles.btn,
+                    spacesModalStyles.btnGhost,
+                    { borderColor: c.line },
+                  ]}
+                  disabled={busy}
+                >
+                  <Text style={{ color: c.text2 }}>取消</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handleCreate}
+                  style={[spacesModalStyles.btn, { backgroundColor: c.text }]}
+                  disabled={busy}
+                >
+                  {busy ? (
+                    <ActivityIndicator color={c.bg} />
+                  ) : (
+                    <Text style={{ color: c.bg, fontWeight: "700" }}>新建</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={() => setCreateMode(true)}
+              style={[
+                spacesModalStyles.addRow,
+                { borderTopColor: c.line },
+              ]}
+            >
+              <Text style={[spacesModalStyles.addText, { color: c.text2 }]}>
+                + 新建空间
+              </Text>
+            </TouchableOpacity>
+          )}
+        </TouchableOpacity>
+      </TouchableOpacity>
+
+      {/* 重命名 mini-modal */}
+      <Modal
+        visible={renameTarget !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRenameTarget(null)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          style={modalStyles.backdrop}
+        >
+          <View
+            style={[
+              modalStyles.card,
+              { backgroundColor: c.bgElev, borderColor: c.line },
+            ]}
+          >
+            <Text style={[modalStyles.title, { color: c.text }]}>
+              重命名空间
+            </Text>
+            <TextInput
+              style={[
+                modalStyles.fieldInput,
+                {
+                  color: c.text,
+                  backgroundColor: c.bg,
+                  borderColor: c.line,
+                  marginBottom: 12,
+                },
+              ]}
+              value={renameDraft}
+              onChangeText={setRenameDraft}
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoFocus
+              maxLength={32}
+            />
+            <View style={modalStyles.actions}>
+              <TouchableOpacity
+                onPress={() => setRenameTarget(null)}
+                style={[
+                  modalStyles.btn,
+                  modalStyles.btnGhost,
+                  { borderColor: c.line },
+                ]}
+                disabled={busy}
+              >
+                <Text style={[modalStyles.btnGhostText, { color: c.text2 }]}>
+                  取消
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleRenameConfirm}
+                style={[modalStyles.btn, { backgroundColor: c.text }]}
+                disabled={busy}
+              >
+                {busy ? (
+                  <ActivityIndicator color={c.bg} />
+                ) : (
+                  <Text style={[modalStyles.btnText, { color: c.bg }]}>
+                    确认
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+    </Modal>
+  );
+}
+
+const spacesModalStyles = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+  },
+  card: {
+    borderWidth: 1,
+    borderRadius: 14,
+    overflow: "hidden",
+  },
+  title: {
+    fontSize: 11,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 8,
+  },
+  empty: {
+    fontSize: 13,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    textAlign: "center",
+  },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  numChip: {
+    width: 22,
+    height: 22,
+    borderRadius: 5,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  numText: { fontSize: 11, fontWeight: "700" },
+  rowName: { flex: 1, fontSize: 14, fontWeight: "500" },
+  check: { fontSize: 16, fontWeight: "700" },
+  createWrap: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 10,
+  },
+  createInput: {
+    height: 40,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    fontSize: 14,
+  },
+  createActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 8,
+  },
+  btn: {
+    minWidth: 72,
+    height: 36,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  btnGhost: { borderWidth: 1, backgroundColor: "transparent" },
+  addRow: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    alignItems: "center",
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  addText: { fontSize: 14, fontWeight: "500" },
+});
 
 /* ----- styles ----- */
 

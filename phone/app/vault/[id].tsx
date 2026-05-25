@@ -31,6 +31,7 @@ import {
   TOTP_PERIOD,
 } from "@/lib/totp";
 import { copyText, copyEphemeral } from "@/lib/clipboard";
+import type { CustomField } from "@/lib/custom-fields";
 
 const MONO = Platform.select({ ios: "Menlo", default: "monospace" });
 
@@ -491,6 +492,11 @@ export default function VaultDetailScreen() {
 
         <DetailBody item={item} c={c} />
 
+        {/* 自定义字段（与 desktop 一致，渲染在原生字段下方） */}
+        {item.customFields && item.customFields.length > 0 ? (
+          <CustomFieldsSection fields={item.customFields} c={c} />
+        ) : null}
+
         {/* 标签 */}
         {item.tags && item.tags.length > 0 && (
           <Section title="标签" c={c}>
@@ -624,6 +630,180 @@ function DetailBody({
       );
   }
 }
+
+/* ── 自定义字段：详情渲染 ───────────────────────────────────── */
+//
+// 与 desktop CustomFieldsView 一致：每个字段单独成行；
+// text/hidden 支持复制（hidden 走 copyEphemeral 30s 自动清空），
+// boolean 渲染为只读 switch 样式，linked 显示关联字段键名。
+
+function CustomFieldsSection({
+  fields,
+  c,
+}: {
+  fields: CustomField[];
+  c: (typeof Colors)["dark"];
+}) {
+  return (
+    <Section title="自定义字段" c={c}>
+      {fields.map((f, idx) => (
+        <CustomFieldDetailRow
+          key={f.id}
+          field={f}
+          c={c}
+          isLast={idx === fields.length - 1}
+        />
+      ))}
+    </Section>
+  );
+}
+
+function CustomFieldDetailRow({
+  field,
+  c,
+  isLast,
+}: {
+  field: CustomField;
+  c: (typeof Colors)["dark"];
+  isLast: boolean;
+}) {
+  const [revealed, setRevealed] = useState(false);
+  const label = field.name?.trim() || "(未命名)";
+
+  if (field.type === "boolean") {
+    const on = Boolean(field.value);
+    return (
+      <View
+        style={[
+          fieldStyles.row,
+          { borderBottomColor: isLast ? "transparent" : c.lineSoft },
+        ]}
+      >
+        <View style={fieldStyles.left}>
+          <Text style={[fieldStyles.label, { color: c.text3 }]}>{label}</Text>
+          <Text style={[fieldStyles.value, { color: c.text }]}>
+            {on ? "已开启" : "已关闭"}
+          </Text>
+        </View>
+        <View style={fieldStyles.actions}>
+          <View
+            style={[
+              customDetailStyles.roSwitch,
+              { backgroundColor: on ? c.text : c.line },
+            ]}
+          >
+            <View
+              style={[
+                customDetailStyles.roSwitchThumb,
+                {
+                  backgroundColor: on ? c.bg : c.text3,
+                  transform: [{ translateX: on ? 14 : 0 }],
+                },
+              ]}
+            />
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  if (field.type === "linked") {
+    const target =
+      typeof field.value === "string" && field.value ? field.value : "(未关联)";
+    return (
+      <View
+        style={[
+          fieldStyles.row,
+          { borderBottomColor: isLast ? "transparent" : c.lineSoft },
+        ]}
+      >
+        <View style={fieldStyles.left}>
+          <Text style={[fieldStyles.label, { color: c.text3 }]}>{label}</Text>
+          <View style={customDetailStyles.linkRow}>
+            <IconSymbol name="link" size={13} color={c.text3} />
+            <Text
+              style={[
+                fieldStyles.value,
+                { color: c.text2, fontFamily: MONO },
+              ]}
+              numberOfLines={1}
+            >
+              {target}
+            </Text>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  const raw = typeof field.value === "string" ? field.value : "";
+  const masked = field.type === "hidden";
+  if (!raw && !masked) {
+    // 与原生 FieldRow 行为一致：空文本字段不渲染（boolean / linked 例外）
+    return null;
+  }
+  const display = masked && !revealed ? "•".repeat(Math.min(raw.length, 20)) : raw;
+  return (
+    <View
+      style={[
+        fieldStyles.row,
+        { borderBottomColor: isLast ? "transparent" : c.lineSoft },
+      ]}
+    >
+      <View style={fieldStyles.left}>
+        <Text style={[fieldStyles.label, { color: c.text3 }]}>{label}</Text>
+        <Text
+          style={[
+            fieldStyles.value,
+            { color: c.text, fontFamily: masked ? MONO : undefined },
+          ]}
+          numberOfLines={1}
+          ellipsizeMode="tail"
+        >
+          {display}
+        </Text>
+      </View>
+      <View style={fieldStyles.actions}>
+        {masked && (
+          <TouchableOpacity
+            onPress={() => setRevealed((v) => !v)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            style={[fieldStyles.iconBtn, { backgroundColor: c.bgHover }]}
+          >
+            <IconSymbol
+              name={revealed ? "eye.slash.fill" : "eye.fill"}
+              size={16}
+              color={c.text2}
+            />
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity
+          onPress={async () => {
+            if (masked) await copyEphemeral(raw);
+            else await copyText(raw);
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          }}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          style={[fieldStyles.iconBtn, { backgroundColor: c.bgHover }]}
+        >
+          <IconSymbol name="doc.on.doc.fill" size={16} color={c.text2} />
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+const customDetailStyles = StyleSheet.create({
+  roSwitch: {
+    width: 32,
+    height: 18,
+    borderRadius: 999,
+    justifyContent: "center",
+    paddingHorizontal: 2,
+  },
+  roSwitchThumb: { width: 14, height: 14, borderRadius: 999 },
+  linkRow: { flexDirection: "row", alignItems: "center", gap: 5 },
+});
 
 const heroStyles = StyleSheet.create({
   wrap: { alignItems: "center", paddingVertical: 24, gap: 8 },

@@ -26,6 +26,13 @@ import {
   VaultError,
   type ItemPayload,
 } from "@/lib/vault-service";
+import {
+  CUSTOM_FIELDS_KEY,
+  parseCustomFields,
+  serializeCustomFields,
+  type CustomField,
+} from "@/lib/custom-fields";
+import { DEFAULT_SPACE_ID, type Space } from "@/lib/spaces";
 
 /* ----------------------------------------------------------------------------
  * 类型
@@ -48,12 +55,24 @@ export type ActionResult =
   | { ok: false; code: string; message: string };
 
 interface VaultContextValue {
+  /** 当前激活空间下的条目（已按 spaceId 过滤） */
   items: VaultItem[];
+  /** 所有空间合并的全量条目（用于跨空间统计、调试等场景） */
+  allItems: VaultItem[];
   locked: boolean;
   /** vault 是否已经设置过主密码 */
   initialized: boolean;
   /** 首次状态探测是否完成（避免渲染期间闪烁 onboarding） */
   hydrated: boolean;
+
+  /** 空间列表（按 order 升序） */
+  spaces: Space[];
+  /** 当前激活空间 id；锁定时为 null */
+  activeSpaceId: string | null;
+  setActiveSpace: (id: string) => Promise<void>;
+  createSpace: (name: string) => Promise<Space | null>;
+  renameSpace: (id: string, name: string) => Promise<ActionResult>;
+  deleteSpace: (id: string) => Promise<ActionResult>;
 
   getItem: (id: string) => VaultItem | undefined;
   addItem: (draft: ItemDraft) => Promise<VaultItem | null>;
@@ -83,10 +102,12 @@ const VaultContext = createContext<VaultContextValue | null>(null);
  * -------------------------------------------------------------------------- */
 
 export function VaultProvider({ children }: { children: ReactNode }) {
-  const [items, setItems] = useState<VaultItem[]>([]);
+  const [allItems, setAllItems] = useState<VaultItem[]>([]);
   const [locked, setLocked] = useState(true);
   const [initialized, setInitialized] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+  const [spaces, setSpaces] = useState<Space[]>([]);
+  const [activeSpaceId, setActiveSpaceIdState] = useState<string | null>(null);
 
   // 启动时探测一次 vault 状态
   useEffect(() => {
@@ -111,26 +132,48 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // 解锁后自动加载 items；锁定后清空
+  // 解锁后自动加载 items + spaces；锁定后清空
   const refresh = useCallback(async () => {
     if (!vaultService.isUnlocked()) {
-      setItems([]);
+      setAllItems([]);
+      setSpaces([]);
+      setActiveSpaceIdState(null);
       return;
     }
-    const payloads = await vaultService.listItems();
-    setItems(payloads.map(toVaultItem));
+    const [payloads, spaceSnap] = await Promise.all([
+      vaultService.listItems(),
+      vaultService.listSpaces(),
+    ]);
+    setAllItems(payloads.map(toVaultItem));
+    setSpaces(spaceSnap.spaces);
+    setActiveSpaceIdState(spaceSnap.activeSpaceId);
   }, []);
 
   useEffect(() => {
-    if (!locked) refresh();
-    else setItems([]);
+    if (!locked) {
+      refresh();
+    } else {
+      setAllItems([]);
+      setSpaces([]);
+      setActiveSpaceIdState(null);
+    }
   }, [locked, refresh]);
+
+  // 当前空间下的 items（按 spaceId 过滤；缺省 spaceId 视为默认空间）
+  const items = useMemo(() => {
+    if (!activeSpaceId) return [];
+    return allItems.filter((it) => {
+      const sid = it.spaceId ?? DEFAULT_SPACE_ID;
+      return sid === activeSpaceId;
+    });
+  }, [allItems, activeSpaceId]);
 
   /* ---------------------------- CRUD ---------------------------- */
 
+  // getItem 走 allItems（详情页要能在跨空间深链时也能查到）
   const getItem = useCallback(
-    (id: string) => items.find((i) => i.id === id),
-    [items],
+    (id: string) => allItems.find((i) => i.id === id),
+    [allItems],
   );
 
   const addItem = useCallback(
@@ -139,7 +182,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       try {
         const created = await vaultService.createItem(type, name, fields);
         const item = toVaultItem(created);
-        setItems((prev) => [item, ...prev]);
+        setAllItems((prev) => [item, ...prev]);
         return item;
       } catch (e) {
         console.warn("addItem failed", e);
@@ -151,7 +194,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
   const updateItem = useCallback(
     async (id: string, patch: ItemPatch): Promise<void> => {
-      const cur = items.find((i) => i.id === id);
+      const cur = allItems.find((i) => i.id === id);
       if (!cur) return;
       const merged = { ...cur, ...patch, id } as VaultItem;
       const { type, name, fields } = fromDraft(merged as ItemDraft);
@@ -162,18 +205,18 @@ export function VaultProvider({ children }: { children: ReactNode }) {
           fields,
         });
         const next = toVaultItem(updated);
-        setItems((prev) => prev.map((i) => (i.id === id ? next : i)));
+        setAllItems((prev) => prev.map((i) => (i.id === id ? next : i)));
       } catch (e) {
         console.warn("updateItem failed", e);
       }
     },
-    [items],
+    [allItems],
   );
 
   const deleteItem = useCallback(async (id: string): Promise<void> => {
     try {
       await vaultService.deleteItem(id);
-      setItems((prev) => prev.filter((i) => i.id !== id));
+      setAllItems((prev) => prev.filter((i) => i.id !== id));
     } catch (e) {
       console.warn("deleteItem failed", e);
     }
@@ -181,11 +224,11 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
   const toggleFavorite = useCallback(
     async (id: string): Promise<void> => {
-      const cur = items.find((i) => i.id === id);
+      const cur = allItems.find((i) => i.id === id);
       if (!cur) return;
       await updateItem(id, { favorite: !cur.favorite } as ItemPatch);
     },
-    [items, updateItem],
+    [allItems, updateItem],
   );
 
   const importItems = useCallback(
@@ -211,7 +254,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const clearAll = useCallback(async (): Promise<void> => {
     try {
       await vaultService.clearAllItems();
-      setItems([]);
+      setAllItems([]);
     } catch (e) {
       console.warn("clearAll failed", e);
     }
@@ -219,7 +262,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
   const reset = useCallback(async (): Promise<void> => {
     await vaultService.reset();
-    setItems([]);
+    setAllItems([]);
+    setSpaces([]);
+    setActiveSpaceIdState(null);
     setLocked(true);
     setInitialized(false);
   }, []);
@@ -256,8 +301,67 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const lock = useCallback(() => {
     vaultService.lock();
     setLocked(true);
-    setItems([]);
+    setAllItems([]);
+    setSpaces([]);
+    setActiveSpaceIdState(null);
   }, []);
+
+  /* ---------------------- 空间操作 ---------------------- */
+
+  const setActiveSpace = useCallback(
+    async (id: string): Promise<void> => {
+      try {
+        await vaultService.setActiveSpace(id);
+        setActiveSpaceIdState(id);
+      } catch (e) {
+        console.warn("setActiveSpace failed", e);
+      }
+    },
+    [],
+  );
+
+  const createSpace = useCallback(
+    async (name: string): Promise<Space | null> => {
+      try {
+        const sp = await vaultService.createSpace(name);
+        setSpaces((prev) => [...prev, sp]);
+        return sp;
+      } catch (e) {
+        console.warn("createSpace failed", e);
+        return null;
+      }
+    },
+    [],
+  );
+
+  const renameSpace = useCallback(
+    async (id: string, name: string): Promise<ActionResult> => {
+      try {
+        await vaultService.renameSpace(id, name);
+        setSpaces((prev) =>
+          prev.map((s) => (s.id === id ? { ...s, name: name.trim() } : s)),
+        );
+        return { ok: true };
+      } catch (e) {
+        return toActionError(e);
+      }
+    },
+    [],
+  );
+
+  const deleteSpace = useCallback(
+    async (id: string): Promise<ActionResult> => {
+      try {
+        await vaultService.deleteSpace(id);
+        // 删除后会把 item.spaceId 改写为 fallback —— refresh 拉取最新快照
+        await refresh();
+        return { ok: true };
+      } catch (e) {
+        return toActionError(e);
+      }
+    },
+    [refresh],
+  );
 
   const changeMasterPassword = useCallback(
     async (oldPwd: string, newPwd: string): Promise<ActionResult> => {
@@ -274,9 +378,16 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const value = useMemo<VaultContextValue>(
     () => ({
       items,
+      allItems,
       locked,
       initialized,
       hydrated,
+      spaces,
+      activeSpaceId,
+      setActiveSpace,
+      createSpace,
+      renameSpace,
+      deleteSpace,
       getItem,
       addItem,
       updateItem,
@@ -292,9 +403,16 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     }),
     [
       items,
+      allItems,
       locked,
       initialized,
       hydrated,
+      spaces,
+      activeSpaceId,
+      setActiveSpace,
+      createSpace,
+      renameSpace,
+      deleteSpace,
       getItem,
       addItem,
       updateItem,
@@ -339,6 +457,9 @@ function toVaultItem(p: ItemPayload): VaultItem {
   if (Array.isArray(f.tags)) base.tags = f.tags.filter((t) => typeof t === "string");
   if (typeof f.notes === "string") base.notes = f.notes;
   if (typeof f.favorite === "boolean") base.favorite = f.favorite;
+  if (typeof f.spaceId === "string" && f.spaceId) base.spaceId = f.spaceId;
+  const cf = parseCustomFields(f as Record<string, unknown>);
+  if (cf.length > 0) base.customFields = cf;
 
   switch (p.type) {
     case "login":
@@ -416,6 +537,8 @@ interface BaseShape {
   tags?: string[];
   notes?: string;
   favorite?: boolean;
+  customFields?: CustomField[];
+  spaceId?: string;
 }
 
 function fromDraft(draft: ItemDraft): {
@@ -431,6 +554,8 @@ function fromDraft(draft: ItemDraft): {
   for (const [k, v] of Object.entries(rest)) {
     if (k === "id" || k === "modified") continue;
     if (v === undefined || v === null || v === "") continue;
+    // 自定义字段单独序列化到保留键，避免被原生字段路径覆盖
+    if (k === "customFields") continue;
     // 独立 totp 条目把 secret 持久化到 fields["totp"] —— 与 desktop
     // ItemTypeTOTP 字段约定一致（fields["totp"] 同时覆盖 login.totp 与
     // 独立 totp 两类来源），保证两端 JSON 导出可直接互导。
@@ -439,6 +564,11 @@ function fromDraft(draft: ItemDraft): {
       continue;
     }
     fields[k] = v;
+  }
+  const cf = (draft as { customFields?: CustomField[] }).customFields;
+  if (Array.isArray(cf) && cf.length > 0) {
+    const arr = serializeCustomFields(cf);
+    if (arr.length > 0) fields[CUSTOM_FIELDS_KEY] = arr;
   }
   return { type, name, fields };
 }

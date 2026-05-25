@@ -17,6 +17,7 @@ import {
   toB64,
   validateArgon2idParams,
 } from "./crypto";
+import type { Space } from "./spaces";
 
 /* ----------------------------------------------------------------------------
  * 文件路径
@@ -66,6 +67,16 @@ export interface EncryptedItemRow {
 export interface VaultFile {
   meta: VaultMeta | null;
   items: EncryptedItemRow[];
+  /**
+   * 空间列表（plaintext）—— 空间名敏感度低于条目内容，放顶层方便未来
+   * 在锁定态下也能展示。旧 vault 文件没有此字段时回退为空数组。
+   */
+  spaces: Space[];
+  /**
+   * 当前激活空间 id（plaintext）—— 解锁后用于过滤 items。
+   * 没有持久化值时由 VaultService 选择默认空间补齐。
+   */
+  activeSpaceId: string | null;
 }
 
 /* ----------------------------------------------------------------------------
@@ -94,6 +105,9 @@ interface FileJSON {
   schema: string;
   meta: MetaJSON | null;
   items: ItemJSON[];
+  /** v1 没有此字段；v2 起始落盘 */
+  spaces?: Space[];
+  activeSpaceId?: string | null;
 }
 
 const FILE_SCHEMA = "zpass-vault-file-v1";
@@ -151,12 +165,12 @@ function itemFromJSON(j: ItemJSON): EncryptedItemRow {
  * 读 / 写
  * -------------------------------------------------------------------------- */
 
-/** 读取整个 vault 文件；不存在时返回 {meta:null, items:[]} */
+/** 读取整个 vault 文件；不存在时返回空快照 */
 export async function readVaultFile(): Promise<VaultFile> {
   const path = vaultPath();
   const info = await FileSystem.getInfoAsync(path);
   if (!info.exists) {
-    return { meta: null, items: [] };
+    return { meta: null, items: [], spaces: [], activeSpaceId: null };
   }
   const text = await FileSystem.readAsStringAsync(path, {
     encoding: FileSystem.EncodingType.UTF8,
@@ -173,6 +187,9 @@ export async function readVaultFile(): Promise<VaultFile> {
   return {
     meta: parsed.meta ? metaFromJSON(parsed.meta) : null,
     items: Array.isArray(parsed.items) ? parsed.items.map(itemFromJSON) : [],
+    spaces: Array.isArray(parsed.spaces) ? parsed.spaces : [],
+    activeSpaceId:
+      typeof parsed.activeSpaceId === "string" ? parsed.activeSpaceId : null,
   };
 }
 
@@ -182,6 +199,8 @@ export async function writeVaultFile(file: VaultFile): Promise<void> {
     schema: FILE_SCHEMA,
     meta: file.meta ? metaToJSON(file.meta) : null,
     items: file.items.map(itemToJSON),
+    spaces: file.spaces ?? [],
+    activeSpaceId: file.activeSpaceId ?? null,
   };
   const text = JSON.stringify(json);
   const tmp = tmpPath();
