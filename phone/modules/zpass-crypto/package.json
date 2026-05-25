@@ -1,0 +1,8 @@
+{
+  "name": "zpass-crypto",
+  "version": "0.1.0",
+  "description": "Local Expo Module — Go (mobilecrypto) Android/iOS bridge",
+  "main": "index.ts",
+  "types": "index.ts",
+  "private": true
+}

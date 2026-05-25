@@ -8,7 +8,7 @@ node_modules/
 dist/
 web-build/
 expo-env.d.ts
-
+.task/
 # Native
 .kotlin/
 *.orig.*
@@ -41,3 +41,8 @@ app-example
 # generated native folders
 /ios
 /android
+
+# 本地 Expo Module 的 Android Gradle 产物（源码保留，编译输出不入 git）
+modules/*/android/build/
+modules/*/android/.gradle/
+modules/*/android/.cxx/

@@ -22,7 +22,7 @@ import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useVault } from "@/contexts/vault-context";
 import { IconSymbol } from "@/components/ui/icon-symbol";
-import { isWasmKDF } from "@/lib/crypto";
+import { isNativeKDF, isWasmKDF } from "@/lib/crypto";
 
 const MONO = Platform.select({ ios: "Menlo", default: "monospace" });
 
@@ -155,9 +155,11 @@ export function OnboardingOverlay() {
               )}
             </TouchableOpacity>
             <Text style={[styles.footerHint, { color: c.text4 }]}>
-              {isWasmKDF()
-                ? "WASM 加速 · 派生大约 0.5 秒"
-                : "纯 JS 派生 · 约 3-6 秒"}
+              {isNativeKDF()
+                ? "原生 Go 加速 · 派生约 0.3 秒"
+                : isWasmKDF()
+                  ? "WASM 加速 · 派生大约 0.5 秒"
+                  : "纯 JS 派生 · 约 3-6 秒"}
             </Text>
           </View>
         </KeyboardAvoidingView>

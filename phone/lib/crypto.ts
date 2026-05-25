@@ -14,10 +14,19 @@ import { xchacha20poly1305 } from "@noble/ciphers/chacha.js";
 import * as ExpoCrypto from "expo-crypto";
 import { argon2id as wasmArgon2id } from "hash-wasm";
 
+import {
+  isNativeCryptoAvailable,
+  nativeDeriveKEK,
+} from "../modules/zpass-crypto";
+
 /* hash-wasm 用 WebAssembly 实现 argon2id，比 noble 纯 JS 快 50-100×。
  * Hermes 默认不暴露 WebAssembly 全局；环境探测一次，缺失时回退 noble。
  * Web / JSC 等支持 WASM 的平台直接走原生 WASM 路径。 */
 const HAS_WASM = typeof globalThis.WebAssembly !== "undefined";
+
+/* gomobile bind 出来的 Go 加密原语；Android / iOS 真机上可用。
+ * 不可用时（Web、未编译 AAR、Hermes 无原生模块）回退到 hash-wasm / noble。 */
+const HAS_NATIVE = isNativeCryptoAvailable();
 
 /* ----------------------------------------------------------------------------
  * 常量（与 desktop 对齐）
@@ -55,6 +64,8 @@ export interface Argon2idParams {
 /**
  * 默认参数 —— 在 Initialize 时根据运行环境选择，写入 vault_meta 后永久绑定。
  *
+ *   - 原生 Go (mobilecrypto AAR/XCFramework)：64 MiB / 3 iter / 4 lanes
+ *     与 desktop cryptoutil.DefaultArgon2id 完全对齐；单次 ~200-400ms。
  *   - WASM 可用（web / JSC）：32 MiB / 3 iter / 2 lanes
  *     hash-wasm 实现 ~300-600ms。攻击者每核每秒仍只能尝试 ~2 次。
  *   - WASM 不可用（Hermes 默认）：8 MiB / 2 iter / 1 lane
@@ -64,6 +75,14 @@ export interface Argon2idParams {
  * 这是双层密钥设计的基本不变量，不能因为环境变化破坏旧 vault 的可解性。
  */
 export function defaultArgon2idParams(): Argon2idParams {
+  if (HAS_NATIVE) {
+    return {
+      memoryKiB: 64 * 1024,
+      iterations: 3,
+      parallelism: 4,
+      keyLen: KEY_SIZE,
+    };
+  }
   if (HAS_WASM) {
     return {
       memoryKiB: 32 * 1024,
@@ -143,8 +162,13 @@ export function deriveKEK(
 /**
  * 异步派生 —— UI 路径使用，避免阻塞主线程
  *
- * 优先走 hash-wasm（WebAssembly 实现，比 noble 纯 JS 快 50-100×）；
- * 仅在运行环境缺失 WebAssembly 时（如 Hermes 默认状态）回退到 noble。
+ * 派生路径优先级（高 → 低）：
+ *   1. 原生 Go (mobilecrypto)：Android/iOS 真机上的最优路径，约 200-400ms
+ *   2. hash-wasm：Web / JSC 上的 WASM 实现，约 300-600ms
+ *   3. noble 纯 JS：Hermes 无原生模块时兜底，约 3-6s
+ *
+ * 所有路径都严格使用传入的 params —— 不能根据当前环境 downscale 参数，
+ * 否则会派生出错误的 KEK 让旧 vault 解不开。
  */
 export async function deriveKEKAsync(
   password: string,
@@ -157,6 +181,17 @@ export async function deriveKEKAsync(
   }
   validateArgon2idParams(params);
 
+  if (HAS_NATIVE) {
+    const keyB64 = await nativeDeriveKEK(
+      password,
+      toB64(salt),
+      params.memoryKiB,
+      params.iterations,
+      params.parallelism,
+      params.keyLen,
+    );
+    return fromB64(keyB64);
+  }
   if (HAS_WASM) {
     return await wasmArgon2id({
       password,
@@ -168,16 +203,17 @@ export async function deriveKEKAsync(
       outputType: "binary",
     });
   }
-  // Hermes fallback —— 严格遵循 vault meta 中的参数（不能 downscale，
-  // 否则会派生出错误的 KEK 导致旧 vault 解不开）。
-  // Initialize 时若环境无 WASM，defaultArgon2idParams 已经选了轻量参数，
-  // 因此 noble 路径单次派生仍在可接受范围（约 3-6s）。
   return nobleArgon2id(password, salt, {
     m: params.memoryKiB,
     t: params.iterations,
     p: params.parallelism,
     dkLen: params.keyLen,
   });
+}
+
+/** 当前进程是否有原生 KDF 加速 */
+export function isNativeKDF(): boolean {
+  return HAS_NATIVE;
 }
 
 /** 当前进程是否走 WASM 加速路径（用于 UI 提示派生大致时长） */

@@ -1,0 +1,180 @@
+version: "3"
+
+# ZPass phone 端开发流程编排
+#
+# 典型用法：
+#   task              查看所有 task
+#   task aar          编译 mobilecrypto → AAR（gomobile bind）
+#   task emulator     启动 Android 模拟器（已开则跳过）
+#   task dev          一键：AAR + 模拟器 + expo run:android
+#   task metro        启动 metro dev server（脱离 run:android 单独开）
+#
+# 第一次使用需要的工具：
+#   - Task：              go install github.com/go-task/task/v3/cmd/task@latest
+#   - gomobile：          go install golang.org/x/mobile/cmd/gomobile@latest
+#                         go install golang.org/x/mobile/cmd/gobind@latest
+#   - JDK 17：            pacman / apt 装 openjdk-17（系统默认 Java 26 与 RN 0.81 不兼容）
+#   - Android SDK + NDK： Android Studio 安装；NDK 推荐 27.x
+
+vars:
+  REPO_ROOT:
+    sh: git rev-parse --show-toplevel
+  MOBILECRYPTO_DIR: "{{.REPO_ROOT}}/mobilecrypto"
+
+  # 允许 env override；否则用 Arch/常见 Linux 默认路径
+  JAVA_HOME_DEFAULT: /usr/lib/jvm/java-17-openjdk
+  ANDROID_HOME_DEFAULT: "{{.HOME}}/Android/Sdk"
+
+env:
+  # 优先沿用 user env；缺失时回落默认。RN 0.81 必须 Java 17，
+  # 系统默认 Java 26 会让 Kotlin Gradle Plugin 解析版本号崩溃。
+  # gradle 通过 JAVA_HOME 选 JDK，所以只要这里设对，PATH 不必动。
+  JAVA_HOME:
+    sh: echo "${JAVA_HOME:-{{.JAVA_HOME_DEFAULT}}}"
+  ANDROID_HOME:
+    sh: echo "${ANDROID_HOME:-{{.ANDROID_HOME_DEFAULT}}}"
+  # gomobile bind 需要 NDK；未指定时从 SDK 下选最新版
+  ANDROID_NDK_HOME:
+    sh: |
+      if [ -n "$ANDROID_NDK_HOME" ]; then
+        echo "$ANDROID_NDK_HOME"
+      else
+        SDK="${ANDROID_HOME:-{{.ANDROID_HOME_DEFAULT}}}"
+        if [ -d "$SDK/ndk" ]; then
+          ls -1 "$SDK/ndk" | sort -V | tail -1 | awk -v sdk="$SDK" '{print sdk"/ndk/"$0}'
+        fi
+      fi
+
+tasks:
+  default:
+    desc: 列出可用 task
+    cmds:
+      - task --list
+
+  # ---- mobilecrypto AAR ----
+
+  aar:
+    desc: 编译 mobilecrypto 为 Android AAR（gomobile bind）
+    dir: "{{.MOBILECRYPTO_DIR}}"
+    cmds:
+      # gomobile / gobind 装在 $HOME/go/bin，但 task 不可靠地覆盖 PATH，
+      # 这里 inline 加上以确保 build-android.sh 能找到 gomobile。
+      - PATH="$HOME/go/bin:$PATH" ./scripts/build-android.sh
+    sources:
+      - "*.go"
+      - "go.mod"
+      - "go.sum"
+    generates:
+      - "build/mobilecrypto.aar"
+
+  aar:fast:
+    desc: 同 aar，只编 arm64（调试时省时间）
+    dir: "{{.MOBILECRYPTO_DIR}}"
+    env:
+      MOBILECRYPTO_TARGETS: "android/arm64"
+    cmds:
+      - PATH="$HOME/go/bin:$PATH" ./scripts/build-android.sh
+
+  aar:test:
+    desc: 跑 mobilecrypto Go 单测
+    dir: "{{.MOBILECRYPTO_DIR}}"
+    cmds:
+      - go test ./...
+
+  aar:clean:
+    desc: 删除 AAR 产物（强制下次重新编）
+    cmds:
+      - rm -rf {{.MOBILECRYPTO_DIR}}/build
+      - rm -f android/app/libs/mobilecrypto.aar modules/zpass-crypto/android/libs/mobilecrypto.aar
+
+  # ---- 模拟器 ----
+
+  emulator:list:
+    desc: 列出本机所有 AVD
+    cmds:
+      - "$ANDROID_HOME/emulator/emulator -list-avds"
+    silent: true
+
+  emulator:running:
+    desc: 列出当前已经在跑的设备/模拟器
+    cmds:
+      - "$ANDROID_HOME/platform-tools/adb devices"
+    silent: true
+
+  emulator:
+    desc: 启动模拟器；若已有设备在跑则跳过
+    silent: true
+    cmds:
+      - |
+        ADB="$ANDROID_HOME/platform-tools/adb"
+        EMU="$ANDROID_HOME/emulator/emulator"
+        if "$ADB" devices | awk 'NR>1 && $2=="device" {found=1} END{exit !found}'; then
+          echo "[skip] 已有设备在跑：$("$ADB" devices | awk 'NR>1 && $2=="device" {print $1}' | head -1)"
+          exit 0
+        fi
+        AVD="${ZPASS_AVD:-$($EMU -list-avds | head -1)}"
+        if [ -z "$AVD" ]; then
+          echo "[error] 找不到 AVD —— 用 Android Studio 创建一个，或 export ZPASS_AVD=<name>" >&2
+          exit 1
+        fi
+        echo "[start] 启动 $AVD ..."
+        nohup "$EMU" -avd "$AVD" -no-snapshot-save >/tmp/zpass-emulator.log 2>&1 &
+        echo "[wait] 等待 boot complete (日志: /tmp/zpass-emulator.log) ..."
+        "$ADB" wait-for-device
+        until [ "$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do
+          sleep 1
+        done
+        echo "[ok] 模拟器已启动"
+
+  # ---- expo / metro ----
+
+  metro:
+    desc: 启动 metro dev server（带 cache clear）
+    cmds:
+      - bunx expo start -c
+
+  prebuild:
+    desc: 执行 expo prebuild（plugin 会复制 AAR + 改 gradle）
+    deps: [aar]
+    cmds:
+      - bunx expo prebuild --platform android
+
+  android:
+    desc: 在已就绪的模拟器上 expo run:android（不重 build AAR/不启动模拟器）
+    cmds:
+      - bunx expo run:android
+
+  # ---- 一键开发流程 ----
+
+  dev:
+    desc: 一键：AAR + 启动模拟器 + expo run:android
+    deps: [aar, emulator]
+    cmds:
+      - bunx expo run:android
+
+  dev:fast:
+    desc: dev 但只编 arm64 AAR
+    deps: [aar:fast, emulator]
+    cmds:
+      - bunx expo run:android
+
+  # ---- 排错 ----
+
+  doctor:
+    desc: 检查环境（Java/NDK/gomobile/AVD）
+    silent: true
+    cmds:
+      - 'echo "JAVA_HOME       = $JAVA_HOME"'
+      - 'echo "ANDROID_HOME    = $ANDROID_HOME"'
+      - 'echo "ANDROID_NDK_HOME= $ANDROID_NDK_HOME"'
+      - 'echo ""'
+      # 直接调用 $JAVA_HOME/bin/java，绕开 task 不可靠的 PATH 覆盖
+      - 'echo "[java]"; "$JAVA_HOME/bin/java" -version 2>&1 | head -1'
+      - 'echo "[gomobile]"; "$HOME/go/bin/gomobile" version 2>/dev/null | head -1 || echo "  (not installed: go install golang.org/x/mobile/cmd/gomobile@latest)"'
+      - 'echo "[adb]"; $ANDROID_HOME/platform-tools/adb version 2>&1 | head -1'
+      - 'echo "[avd]"; $ANDROID_HOME/emulator/emulator -list-avds 2>&1 | sed "s/^/  /"'
+
+  logcat:
+    desc: 跟随 zpass app 的 ReactNativeJS / Expo / FATAL 日志
+    cmds:
+      - $ANDROID_HOME/platform-tools/adb logcat -v color ReactNativeJS:V ExpoModulesCore:V AndroidRuntime:E "*:S"
