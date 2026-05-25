@@ -165,8 +165,13 @@ EOF
 
 # makepkg refuses to run as root by default (good); --noconfirm avoids the
 # "edit PKGBUILD?" prompt; --force overwrites any prior .pkg.tar.zst.
+# --nodeps skips the runtime-deps install check: depends=(gtk3 nss ...) are
+# needed on the *target* system, not the build host. Without this, CI's slim
+# archlinux:latest container (only base-devel + nodejs) aborts with
+# "Could not resolve all dependencies". Pacman still records the deps in
+# the .pkg.tar.zst metadata, so install-time resolution is unaffected.
 cd "$BUILD_DIR"
-makepkg --force --noconfirm --clean
+makepkg --force --noconfirm --clean --nodeps
 
 echo
 echo "==> built: $(ls "${BUILD_DIR}"/zpass-*.pkg.tar.zst)"
