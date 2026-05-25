@@ -1,23 +1,25 @@
 name: Build Desktop
 
-# ZPass Desktop 多平台打包 workflow
+# ZPass Desktop 多平台打包 workflow（Electron Forge + Vite 架构）
 # -----------------------------------------------------------------------------
-# 目标矩阵（当前 4 个组合，macOS 暂时注释掉等预算重置）:
-#   - Windows  amd64 / arm64  → NSIS .exe 安装器 + 原始 .exe
-#   - Linux    amd64 / arm64  → AppImage(best-effort) + .deb + .rpm + 裸 binary
-#   - [暂停] macOS amd64 / arm64  → 等账户 Actions 预算重置后恢复
+# 目标矩阵:
+#   - Windows x64           Squirrel Setup .exe  + 便携 .zip
+#   - Linux   x64           AppImage + .deb + .rpm + .pkg.tar.zst + 便携 .zip
 #
 # 触发方式:
-#   1. workflow_dispatch  手动触发（仅当 release=true + tag_name 时上传 release）
-#   2. push tags 'v*'     自动构建并上传到对应 tag 的 GitHub Release
+#   1. push tags 'v*'         自动构建并上传到对应 tag 的 GitHub Release
+#   2. workflow_dispatch      手动触发；release=true + tag_name 非空时上传
 #
 # 设计要点:
-#   - 直接把产物 push 到 GitHub Release，不走 actions/upload-artifact，
-#     避开 GitHub Actions 500 MB artifact 配额限制
-#   - 各 build job 独立调用 softprops/action-gh-release：第一个完成的 job
-#     会创建 release，后续 job append 自己的资产
-#   - 项目 Taskfile APP_NAME = "ZPassDesktop"，产物名按这个真名生成，
-#     最终通过重命名换成 ZPass-<os>-<arch> 的 release 资产名
+#   - Forge 通过 forge.config.ts 的 makers 配置在各 OS 上选用对应打包器
+#       linux  -> MakerAppImage / MakerDeb / MakerRpm (+ MakerZIP)
+#       win32  -> MakerSquirrel (+ MakerZIP)
+#   - Arch (.pkg.tar.zst) 没有 Forge maker, 用 desktop/scripts/make-arch.sh
+#     在 archlinux:latest 容器里调 makepkg 生成, 输入是 `task make` 已经产出
+#     的 out/zpass-linux-x64/ 目录, 避免重复构建.
+#   - 每个 job 直接 push 资产到 GitHub Release (softprops/action-gh-release),
+#     绕开 actions/upload-artifact 500MB 配额 (Forge Squirrel 单个 .exe 接近
+#     200MB). 同时也用 upload-artifact 留一份方便 workflow_dispatch 下载验证.
 # -----------------------------------------------------------------------------
 
 on:
@@ -29,102 +31,56 @@ on:
         default: false
         type: boolean
       tag_name:
-        description: "可选：Release 的 tag 名（如 v0.1.0），留空且 release=true 时也不会上传"
+        description: "Release 的 tag 名（如 v0.1.0），release=true 时必填"
         required: false
         type: string
   push:
     tags:
       - "v*"
 
-# 同一 ref 上的并发构建互相取消，避免连续提交浪费 runner
 concurrency:
   group: desktop-build-${{ github.ref }}
   cancel-in-progress: true
 
-jobs:
-  build:
-    name: build (${{ matrix.target }})
-    runs-on: ${{ matrix.runner }}
+env:
+  GO_VERSION: "1.26"
+  NODE_VERSION: "20"
+  PNPM_VERSION: "10.33.0"
 
-    # build job 自己要 push asset 到 release，需要写权限
+jobs:
+  # ===========================================================================
+  # Windows x64 - Squirrel Setup.exe + 便携 zip
+  # ===========================================================================
+  build-windows:
+    name: Windows x64 (Squirrel Setup)
+    runs-on: windows-latest
     permissions:
       contents: write
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: windows-amd64
-            runner: windows-latest
-            goos: windows
-            goarch: amd64
-            cgo: "0"
-          - target: windows-arm64
-            runner: windows-latest
-            goos: windows
-            goarch: arm64
-            cgo: "0"
-          # ⚠️ macOS 两个 target 临时注释掉，原因：
-          #   macos-13 / macos-14 runner 按 10× minutes 计费，多次重跑后
-          #   GitHub Actions 账户预算耗尽，所有 job 被系统层面拒绝启动:
-          #     "The job was not started because an Actions budget is preventing further use"
-          # 待账户预算重置（每月 1 号自动 reset，或在 GitHub Settings >
-          # Billing > Spending Limits 调高），再把下面两个 entry 取消注释
-          # 即可恢复完整 6 平台矩阵。
-          # - target: macos-amd64
-          #   runner: macos-13       # Intel 原生 runner，CGO 必须 native
-          #   goos: darwin
-          #   goarch: amd64
-          #   cgo: '1'
-          # - target: macos-arm64
-          #   runner: macos-14       # Apple Silicon 原生 runner
-          #   goos: darwin
-          #   goarch: arm64
-          #   cgo: '1'
-          - target: linux-amd64
-            runner: ubuntu-22.04
-            goos: linux
-            goarch: amd64
-            cgo: "1"
-          - target: linux-arm64
-            runner: ubuntu-22.04-arm # GitHub 公开仓库免费 ARM64 runner
-            goos: linux
-            goarch: arm64
-            cgo: "1"
-
-    env:
-      # nfpm.yaml 用 ${GIT_COMMITTER_NAME} / ${GIT_COMMITTER_EMAIL} 做模板替换，
-      # 在 CI 上必须显式设，否则生成的 .deb / .rpm 元数据里会出现空字符串
-      GIT_COMMITTER_NAME: github-actions
-      GIT_COMMITTER_EMAIL: github-actions@users.noreply.github.com
-      # ⚠️ 故意不在这里设 GOARCH。原因：wails3 install / npm 等步骤必须使用
-      # host 架构（windows-latest 是 AMD64，若 GOARCH=arm64 会编译出无法在
-      # host 上执行的 ARM64 wails3.exe）。GOARCH 只在 Build/Package step 内
-      # 设置，那时 Taskfile 已经收到了 ARCH=xxx 参数。
-
     defaults:
       run:
         shell: bash
         working-directory: desktop
 
     steps:
-      # ---------- 0. 检出 ----------
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ---------- 1. 工具链 ----------
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: desktop/go.sum
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: desktop/frontend/package-lock.json
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
 
       - name: Install Task
         uses: arduino/setup-task@v2
@@ -132,148 +88,58 @@ jobs:
           version: "3.x"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # ---------- 2. 平台特定依赖（必须在安装 wails3 CLI 之前） ----------
-      # wails3 alpha 的 internal/operatingsystem 包通过 CGO 链接 gtk+-3.0 和
-      # webkit2gtk-4.1，所以 Linux runner 上必须先装 -dev 包，否则连 wails3
-      # 自己都编译不出来
-      - name: Install Linux build deps (GTK3 + WebKit2GTK 4.1 + rpm)
-        if: matrix.goos == 'linux'
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config \
-            libgtk-3-dev \
-            libwebkit2gtk-4.1-dev \
-            rpm \
-            fuse libfuse2 \
-            file desktop-file-utils
+      - name: Install pnpm dependencies
+        run: pnpm install --frozen-lockfile
 
-      - name: Install NSIS (Windows installer 打包工具)
-        if: matrix.goos == 'windows'
-        shell: pwsh
+      # `task make` 依赖 `task icons`, 后者用 ImageMagick `magick` 命令重新
+      # 渲染 PNG. 仓库里所有尺寸的 PNG 已经 commit, 只需把 source 的 mtime
+      # 推到很旧, 再 touch generates, task 的 sources/generates 比较就判定
+      # 为 up-to-date, 直接跳过 magick 调用 - Windows runner 上不再需要装
+      # ImageMagick.
+      - name: Mark generated icons as up-to-date
         run: |
-          choco install nsis -y --no-progress
-          # NSIS 装到 C:\Program Files (x86)\NSIS，但 GitHub Actions 不会自动
-          # 把这个目录加到 PATH，需要显式写入 $GITHUB_PATH 才能让后续 step 中
-          # 的 Task 调用 makensis
-          echo "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          touch -d '2020-01-01' ../assets/logo.png
+          touch assets/logo/png/*.png
 
-      # ---------- 3. Wails3 CLI ----------
-      # 必须用 host 架构编译，否则 cross-compile 出来的 wails3.exe 在 host
-      # 上无法执行。显式 unset GOARCH（让 go 用默认 host arch）。
-      - name: Install Wails3 CLI
+      # 显式设 GOOS/GOARCH 防止 task build:go 在跨架构 runner 上猜错;
+      # CGO_ENABLED=0 因为 Go 端依赖 modernc.org/sqlite (pure Go), 不需要
+      # 链接 system libsqlite, 避免 Windows 上找不到 gcc 的麻烦.
+      - name: Build (task make → Squirrel installer + zip)
         env:
-          GOARCH: "" # 用 host 架构编译 wails3 binary
-          CGO_ENABLED: "1" # Linux 上 wails3 自身需要 CGO（链接 GTK）
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@latest
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: task make
 
-      # ---------- 4. 前端依赖（显式触发，让 setup-node 的 npm cache 生效） ----------
-      - name: Install frontend dependencies
-        working-directory: desktop/frontend
-        run: npm ci
-
-      # ---------- 5. 构建二进制 ----------
-      # task build 会按链路自动跑：
-      #   common:go:mod:tidy → common:build:frontend → common:generate:icons
-      #   → {windows|darwin|linux}:build:native → go build
-      - name: Build binary
-        env:
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: ${{ matrix.cgo }}
-        run: task build ARCH=${{ matrix.goarch }}
-
-      # ---------- 6. 打包（Windows / macOS 走完整 package） ----------
-      - name: Package (Windows / macOS)
-        if: matrix.goos != 'linux'
-        env:
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: ${{ matrix.cgo }}
-        run: task package ARCH=${{ matrix.goarch }}
-
-      # ---------- 6'. 打包（Linux 拆分，每个格式 best-effort） ----------
-      # wails3 alpha 在 ARM64 runner 上 AppImage 生成会卡 2 分钟然后 rename 失败，
-      # 但 deb / rpm 是稳定的。改成分别调用、各自容错，确保至少能产出 deb + rpm
-      - name: Package (Linux, per-format best-effort)
-        if: matrix.goos == 'linux'
-        env:
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: "1"
+      # Forge 输出布局:
+      #   out/make/squirrel.windows/x64/<name>-<version> Setup.exe
+      #   out/make/squirrel.windows/x64/<name>-<version>-full.nupkg
+      #   out/make/squirrel.windows/x64/RELEASES
+      #   out/make/zip/win32/x64/<name>-win32-x64-<version>.zip
+      # 重命名成稳定的 release 资产名 (无版本号), 方便用户直接下载.
+      - name: Stage release assets
         run: |
-          set +e
-          # generate:dotdesktop 是 appimage / deb / rpm 共用前置
-          task linux:generate:dotdesktop
-          DOTDESKTOP_RC=$?
-          echo "linux:generate:dotdesktop -> $DOTDESKTOP_RC"
+          mkdir -p release
+          shopt -s nullglob
 
-          task linux:create:deb
-          DEB_RC=$?
-          echo "linux:create:deb -> $DEB_RC"
-
-          task linux:create:rpm
-          RPM_RC=$?
-          echo "linux:create:rpm -> $RPM_RC"
-
-          # AppImage 在 ARM64 已知不稳定，失败仅警告
-          task linux:create:appimage
-          APPIMAGE_RC=$?
-          if [ $APPIMAGE_RC -ne 0 ]; then
-            echo "::warning title=AppImage failed::wails3 generate appimage 在 ${{ matrix.goarch }} 上失败，已跳过"
-          fi
-
-          # 只要 deb 或 rpm 至少一个产出就算成功
-          if [ $DEB_RC -ne 0 ] && [ $RPM_RC -ne 0 ]; then
-            echo "::error::deb 和 rpm 都失败了"
-            exit 1
-          fi
-          exit 0
-
-      # ---------- 7. 整理产物 ----------
-      # macOS: .app 是目录，必须用 ditto 打 zip，普通 zip 会破坏 bundle 的
-      # 符号链接和扩展属性
-      - name: Repack macOS .app to .zip (with ditto)
-        if: matrix.goos == 'darwin'
-        run: |
-          cd bin
-          ditto -c -k --sequesterRsrc --keepParent "ZPassDesktop.app" "ZPass-macos-${{ matrix.goarch }}.zip"
-          echo "--- bin/ contents ---"
-          ls -lah
-
-      - name: Rename Windows binary / installer
-        if: matrix.goos == 'windows'
-        run: |
-          if [ -f "bin/ZPassDesktop.exe" ]; then
-            cp "bin/ZPassDesktop.exe" "bin/ZPass-windows-${{ matrix.goarch }}.exe"
-          fi
-          # NSIS 默认输出 ZPassDesktop-<arch>-installer.exe（INFO_PROJECTNAME 默认 = APP_NAME）
-          if [ -f "bin/ZPassDesktop-${{ matrix.goarch }}-installer.exe" ]; then
-            cp "bin/ZPassDesktop-${{ matrix.goarch }}-installer.exe" \
-               "bin/ZPass-windows-${{ matrix.goarch }}-installer.exe"
-          fi
-          echo "--- bin/ contents ---"
-          ls -lah bin/
-
-      - name: Rename Linux binary and rpm/deb
-        if: matrix.goos == 'linux'
-        run: |
-          # 裸 binary
-          if [ -f "bin/ZPassDesktop" ]; then
-            cp "bin/ZPassDesktop" "bin/ZPass-linux-${{ matrix.goarch }}"
-          fi
-          # nfpm 默认产物名是 zpassdesktop.exe_*.{deb,rpm}（项目模板 typo，
-          # nfpm.yaml 里 name 写成了 zpassdesktop.exe），转成更清晰的命名
-          for f in bin/*.deb bin/*.rpm bin/*.AppImage; do
-            [ -e "$f" ] || continue
-            ext="${f##*.}"
-            cp "$f" "bin/ZPass-linux-${{ matrix.goarch }}.${ext}" || true
+          for f in out/make/squirrel.windows/x64/*Setup*.exe; do
+            cp "$f" "release/ZPass-windows-x64-Setup.exe"
           done
-          echo "--- bin/ contents ---"
-          ls -lah bin/
+          # 兜底: 如果 Squirrel 命名约定变了, 抓任意 .exe (排除 nupkg 等)
+          if [ ! -f release/ZPass-windows-x64-Setup.exe ]; then
+            for f in out/make/squirrel.windows/x64/*.exe; do
+              cp "$f" "release/ZPass-windows-x64-Setup.exe"
+              break
+            done
+          fi
 
-      # ---------- 8. 决定本次 run 的 release tag ----------
-      # push tag 触发 → 用 github.ref_name
-      # workflow_dispatch + release=true + tag_name 非空 → 用 inputs.tag_name
-      # 其他情况（仅手动验证编译）→ 不发 release
+          for f in out/make/zip/win32/x64/*.zip; do
+            cp "$f" "release/ZPass-windows-x64.zip"
+          done
+
+          echo "--- release/ contents ---"
+          ls -lah release/
+
       - name: Resolve release context
         id: release_ctx
         run: |
@@ -290,12 +156,14 @@ jobs:
             echo "tag=" >> "$GITHUB_OUTPUT"
           fi
 
-      # ---------- 9. 直接上传到 GitHub Release（绕过 artifact 配额） ----------
-      # softprops/action-gh-release@v2 行为:
-      #   - tag 对应的 release 不存在 → 创建（带 generate_release_notes）
-      #   - 已存在 → append 当前 job 的 files 到该 release
-      # 6 个 build job 各自 push 自己的资产，第一个到达的创建 release，其他 append
-      - name: Publish assets to GitHub Release
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zpass-windows-x64
+          path: desktop/release/*
+          if-no-files-found: error
+
+      - name: Publish to GitHub Release
         if: steps.release_ctx.outputs.publish == 'true'
         uses: softprops/action-gh-release@v2
         with:
@@ -303,11 +171,154 @@ jobs:
           name: ZPass Desktop ${{ steps.release_ctx.outputs.tag }}
           generate_release_notes: true
           fail_on_unmatched_files: false
-          files: |
-            desktop/bin/ZPass-windows-${{ matrix.goarch }}.exe
-            desktop/bin/ZPass-windows-${{ matrix.goarch }}-installer.exe
-            desktop/bin/ZPass-macos-${{ matrix.goarch }}.zip
-            desktop/bin/ZPass-linux-${{ matrix.goarch }}
-            desktop/bin/ZPass-linux-${{ matrix.goarch }}.AppImage
-            desktop/bin/ZPass-linux-${{ matrix.goarch }}.deb
-            desktop/bin/ZPass-linux-${{ matrix.goarch }}.rpm
+          files: desktop/release/*
+
+  # ===========================================================================
+  # Linux x64 - AppImage + .deb + .rpm + .pkg.tar.zst + 便携 zip
+  # ===========================================================================
+  build-linux:
+    name: Linux x64 (AppImage / deb / rpm / pacman)
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+        working-directory: desktop
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: desktop/go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - name: Install Task
+        uses: arduino/setup-task@v2
+        with:
+          version: "3.x"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Forge maker 的系统依赖:
+      #   fakeroot + dpkg      MakerDeb (electron-installer-debian)
+      #   rpm + rpm-build      MakerRpm (electron-installer-redhat)
+      #   libfuse2             AppImage runtime (生成 + 测试时 mount)
+      #   desktop-file-utils   .desktop 文件校验
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            fakeroot dpkg \
+            rpm \
+            libfuse2 \
+            file desktop-file-utils
+
+      - name: Install pnpm dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Mark generated icons as up-to-date
+        run: |
+          touch -d '2020-01-01' ../assets/logo.png
+          touch assets/logo/png/*.png
+
+      - name: Build (task make → AppImage + deb + rpm + zip)
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: task make
+
+      # makepkg 只能在 Arch 上跑, 起 archlinux:latest 容器, mount desktop/
+      # 到 /work 并以非 root 的 builder 用户跑 scripts/make-arch.sh.
+      # 上一步 `task make` 已经顺带产出 out/zpass-linux-x64/, 正好是
+      # make-arch.sh 需要的输入, 不会重复打包.
+      - name: Build Arch pacman package (docker archlinux + makepkg)
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}/desktop:/work" \
+            -w /work \
+            archlinux:latest \
+            bash -c '
+              set -euxo pipefail
+              pacman -Syu --noconfirm --needed base-devel nodejs sudo
+              useradd -m -d /home/builder builder
+              chown -R builder:builder /work
+              sudo -u builder env HOME=/home/builder bash scripts/make-arch.sh
+            '
+
+      # Forge 输出布局:
+      #   out/make/AppImage/x64/<name>-<version>-<arch>.AppImage
+      #   out/make/deb/x64/<name>_<version>_amd64.deb
+      #   out/make/rpm/x64/<name>-<version>-<rel>.x86_64.rpm
+      #   out/make/arch/<name>-<version>-1-x86_64.pkg.tar.zst
+      #   out/make/zip/linux/x64/<name>-linux-x64-<version>.zip
+      - name: Stage release assets
+        run: |
+          mkdir -p release
+          shopt -s nullglob
+
+          for f in out/make/AppImage/x64/*.AppImage; do
+            cp "$f" "release/ZPass-linux-x64.AppImage"
+          done
+          for f in out/make/deb/x64/*.deb; do
+            cp "$f" "release/ZPass-linux-x64.deb"
+          done
+          for f in out/make/rpm/x64/*.rpm; do
+            cp "$f" "release/ZPass-linux-x64.rpm"
+          done
+          for f in out/make/arch/*.pkg.tar.zst; do
+            cp "$f" "release/ZPass-linux-x64.pkg.tar.zst"
+          done
+          for f in out/make/zip/linux/x64/*.zip; do
+            cp "$f" "release/ZPass-linux-x64.zip"
+          done
+
+          echo "--- release/ contents ---"
+          ls -lah release/
+
+      - name: Resolve release context
+        id: release_ctx
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" \
+               && "${{ inputs.release }}" == "true" \
+               && -n "${{ inputs.tag_name }}" ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ inputs.tag_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zpass-linux-x64
+          path: desktop/release/*
+          if-no-files-found: error
+
+      - name: Publish to GitHub Release
+        if: steps.release_ctx.outputs.publish == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_ctx.outputs.tag }}
+          name: ZPass Desktop ${{ steps.release_ctx.outputs.tag }}
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          files: desktop/release/*

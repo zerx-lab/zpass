@@ -1,6 +1,8 @@
 import type { ForgeConfig } from "@electron-forge/shared-types";
 import { MakerZIP } from "@electron-forge/maker-zip";
 import { MakerSquirrel } from "@electron-forge/maker-squirrel";
+import { MakerDeb } from "@electron-forge/maker-deb";
+import { MakerRpm } from "@electron-forge/maker-rpm";
 import { MakerAppImage } from "@reforged/maker-appimage";
 import { VitePlugin } from "@electron-forge/plugin-vite";
 import { AutoUnpackNativesPlugin } from "@electron-forge/plugin-auto-unpack-natives";
@@ -108,7 +110,8 @@ const config: ForgeConfig = {
   // declared platforms, so a single `task make` run on a given OS produces
   // exactly the artifacts that OS can build.
   //
-  //   linux   -> AppImage (single self-contained executable)
+  //   linux   -> AppImage + .deb + .rpm (.pkg.tar.zst is produced separately
+  //              by scripts/make-arch.sh; no Forge maker for pacman exists)
   //   win32   -> Squirrel.Windows (RELEASES + .nupkg + Setup.exe; auto-update capable)
   //   darwin  -> ZIP (no signing identity wired in yet)
   //
@@ -120,6 +123,32 @@ const config: ForgeConfig = {
         // but being explicit avoids surprises across maker versions.
         icon: "./assets/logo/png/zpass-512.png",
         categories: ["Utility"],
+      },
+    }),
+    new MakerDeb({
+      options: {
+        name: "zpass",
+        productName: "ZPass",
+        genericName: "Password Manager",
+        description: "Zero-knowledge desktop password manager",
+        homepage: "https://github.com/zerx-lab/zpass",
+        maintainer: "zerx-lab",
+        icon: "./assets/logo/png/zpass-512.png",
+        categories: ["Utility"],
+        section: "utils",
+        priority: "optional",
+      },
+    }),
+    new MakerRpm({
+      options: {
+        name: "zpass",
+        productName: "ZPass",
+        genericName: "Password Manager",
+        description: "Zero-knowledge desktop password manager",
+        homepage: "https://github.com/zerx-lab/zpass",
+        icon: "./assets/logo/png/zpass-512.png",
+        categories: ["Utility"],
+        license: "MIT",
       },
     }),
     new MakerSquirrel({
