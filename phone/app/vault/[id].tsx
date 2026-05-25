@@ -611,6 +611,17 @@ function DetailBody({
           <FieldRow label="凭据 ID" value={item.credentialId} mono masked c={c} isLast />
         </Section>
       );
+    case "totp":
+      return (
+        <>
+          <Section title="验证器" c={c}>
+            <FieldRow label="发行者" value={item.issuer ?? ""} c={c} />
+            <FieldRow label="账户" value={item.account ?? ""} c={c} />
+            <FieldRow label="TOTP 密钥" value={item.secret} mono masked c={c} isLast />
+          </Section>
+          {item.secret ? <TotpSection secret={item.secret} c={c} /> : null}
+        </>
+      );
   }
 }
 

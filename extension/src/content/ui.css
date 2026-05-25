@@ -143,8 +143,32 @@
   font-family: var(--zp-font);
   font-size: 13px;
   line-height: 1.4;
-  overflow: hidden;
   animation: zp-pop-in 0.14s ease;
+}
+
+/*
+ * 菜单：纵向超出时滚动；横向隐藏避免文本溢出抢占空间。
+ * max-height 由 positionFloating 按 anchor 上/下可用空间动态注入。
+ */
+.zpass-menu {
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.zpass-menu::-webkit-scrollbar {
+  width: 8px;
+}
+.zpass-menu::-webkit-scrollbar-thumb {
+  background: var(--zp-line);
+  border-radius: 4px;
+}
+.zpass-menu::-webkit-scrollbar-thumb:hover {
+  background: var(--zp-text-3);
+}
+
+.zpass-notice {
+  overflow: hidden;
 }
 
 @keyframes zp-pop-in {

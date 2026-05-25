@@ -45,6 +45,11 @@ const TYPE_FIELDS: Record<VaultItemType, FieldDef[]> = {
     { key: "url", label: "网址", placeholder: "example.com" },
     { key: "totp", label: "TOTP 密钥", placeholder: "base32 密钥（可选）", mono: true },
   ],
+  totp: [
+    { key: "issuer", label: "发行者", placeholder: "GitHub / Google" },
+    { key: "account", label: "账户", placeholder: "邮箱 / 用户名" },
+    { key: "secret", label: "TOTP 密钥", placeholder: "base32 密钥", mono: true, secret: true },
+  ],
   card: [
     { key: "cardholder", label: "持卡人" },
     { key: "number", label: "卡号", mono: true, keyboard: "numeric" },
@@ -79,6 +84,7 @@ const TYPE_FIELDS: Record<VaultItemType, FieldDef[]> = {
 
 const ALL_TYPES: VaultItemType[] = [
   "login",
+  "totp",
   "card",
   "note",
   "identity",
@@ -121,7 +127,7 @@ export default function ItemEditorScreen() {
     setValues((prev) => ({ ...prev, [k]: val }));
   }, []);
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
     const name = (values.name ?? "").trim();
     if (!name) {
       Alert.alert("缺少名称", "请填写条目名称");
@@ -152,6 +158,9 @@ export default function ItemEditorScreen() {
       draftFields.rpId = (values.rpId ?? "").trim();
       draftFields.credentialId = (values.credentialId ?? "").trim();
     }
+    if (type === "totp") {
+      draftFields.secret = (values.secret ?? "").trim();
+    }
 
     const tags = (values.tags ?? "")
       .split(",")
@@ -169,12 +178,16 @@ export default function ItemEditorScreen() {
       ...draftFields,
     } as unknown as ItemDraft;
 
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     if (isNew) {
-      addItem(draft);
+      const created = await addItem(draft);
+      if (!created) {
+        Alert.alert("保存失败", "无法写入加密保险库，请重试");
+        return;
+      }
     } else if (existing) {
-      updateItem(existing.id, draft as unknown as ItemPatch);
+      await updateItem(existing.id, draft as unknown as ItemPatch);
     }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     router.back();
   }, [values, fields, type, favorite, isNew, existing, addItem, updateItem]);
 

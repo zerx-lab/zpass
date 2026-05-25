@@ -36,22 +36,13 @@ export default function TabLayout() {
         },
       }}
     >
-      {/* ── 主要 5 个 Tab ── */}
+      {/* ── 4 个一级 Tab ── */}
       <Tabs.Screen
         name="vault"
         options={{
           title: "密码库",
           tabBarIcon: ({ color, size }) => (
             <IconSymbol name="key.fill" size={size ?? 22} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="totp"
-        options={{
-          title: "验证码",
-          tabBarIcon: ({ color, size }) => (
-            <IconSymbol name="clock.fill" size={size ?? 22} color={color} />
           ),
         }}
       />
@@ -83,9 +74,10 @@ export default function TabLayout() {
         }}
       />
 
-      {/* ── 隐藏残留路由，不出现在 TabBar ── */}
+      {/* ── 隐藏路由（验证码并入密码库分类） ── */}
       <Tabs.Screen name="index" options={{ href: null }} />
       <Tabs.Screen name="explore" options={{ href: null }} />
+      <Tabs.Screen name="totp" options={{ href: null }} />
     </Tabs>
   );
 }

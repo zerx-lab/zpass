@@ -1,4 +1,7 @@
-// 锁定遮罩 —— 锁定状态下覆盖整个 app，对齐 desktop 的 UnlockPage。
+// 锁定遮罩 —— 用户已设置主密码但 vault 处于锁定态时显示
+//
+// 走真实 Argon2id KDF + XChaCha20-Poly1305 校验：解锁失败时统一报"主密码错误"，
+// 不区分 KDF 失败 / verifier 不匹配等内部原因（与 desktop 一致，防止侧信道）。
 
 import React, { useState } from "react";
 import {
@@ -8,6 +11,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   Platform,
+  ActivityIndicator,
 } from "react-native";
 import * as Haptics from "expo-haptics";
 
@@ -24,19 +28,26 @@ export function LockOverlay() {
   const { unlock } = useVault();
 
   const [pw, setPw] = useState("");
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  // 演示用主密码：任意非空输入即可解锁（真实后端接入后改为校验）
-  const handleUnlock = () => {
-    if (!pw.trim()) {
-      setError(true);
+  const handleUnlock = async () => {
+    if (!pw) {
+      setError("请输入主密码");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       return;
     }
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    setPw("");
-    setError(false);
-    unlock();
+    setBusy(true);
+    setError(null);
+    const res = await unlock(pw);
+    setBusy(false);
+    if (res.ok) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setPw("");
+    } else {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setError(res.message || "主密码错误");
+    }
   };
 
   return (
@@ -66,21 +77,31 @@ export function LockOverlay() {
           value={pw}
           onChangeText={(t) => {
             setPw(t);
-            setError(false);
+            setError(null);
           }}
           secureTextEntry
           autoFocus
           onSubmitEditing={handleUnlock}
           returnKeyType="go"
+          editable={!busy}
         />
       </View>
 
+      {error ? (
+        <Text style={[styles.error, { color: c.danger }]}>{error}</Text>
+      ) : null}
+
       <TouchableOpacity
-        style={[styles.btn, { backgroundColor: c.text }]}
+        style={[styles.btn, { backgroundColor: c.text, opacity: busy ? 0.7 : 1 }]}
         onPress={handleUnlock}
         activeOpacity={0.8}
+        disabled={busy}
       >
-        <Text style={[styles.btnText, { color: c.bg }]}>解锁</Text>
+        {busy ? (
+          <ActivityIndicator color={c.bg} />
+        ) : (
+          <Text style={[styles.btnText, { color: c.bg }]}>解锁</Text>
+        )}
       </TouchableOpacity>
 
       <Text style={[styles.hint, { color: c.text4 }]}>
@@ -106,20 +127,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: 20,
   },
-  logoText: {
-    fontSize: 28,
-    fontWeight: "700",
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: "700",
-    letterSpacing: -0.3,
-  },
-  sub: {
-    fontSize: 12,
-    marginTop: 6,
-    marginBottom: 28,
-  },
+  logoText: { fontSize: 28, fontWeight: "700" },
+  title: { fontSize: 20, fontWeight: "700", letterSpacing: -0.3 },
+  sub: { fontSize: 12, marginTop: 6, marginBottom: 28 },
   inputBox: {
     flexDirection: "row",
     alignItems: "center",
@@ -129,27 +139,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 12,
     paddingHorizontal: 14,
-    marginBottom: 12,
+    marginBottom: 8,
   },
-  input: {
-    flex: 1,
-    fontSize: 15,
-    padding: 0,
-  },
+  input: { flex: 1, fontSize: 15, padding: 0 },
+  error: { fontSize: 12, alignSelf: "flex-start", marginBottom: 8 },
   btn: {
     width: "100%",
     height: 48,
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
+    marginTop: 4,
   },
-  btnText: {
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  hint: {
-    fontSize: 11,
-    marginTop: 24,
-    textAlign: "center",
-  },
+  btnText: { fontSize: 15, fontWeight: "600" },
+  hint: { fontSize: 11, marginTop: 24, textAlign: "center" },
 });

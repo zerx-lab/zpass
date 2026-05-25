@@ -1,9 +1,10 @@
 /**
- * Badge ——在浏览器工具栏图标右上角标注当前页面匹配的 ZPass 条目数量。
+ * Badge ——在浏览器工具栏图标右上角标注当前页面状态。
  *
  * 行为与 Bitwarden 插件对齐：
- *   - 当前 tab 是 http(s)，保险库已解锁，origin 有匹配 → 显示数字（>99 显示 "99+"）
- *   - 未解锁 / 桌面端离线 / 无匹配 / 非 http(s) → 清空 badge
+ *   - 当前 tab 是 http(s)，保险库已解锁，origin 有匹配 → 绿底数字（>99 显示 "99+"）
+ *   - 桌面端离线 / vault 锁定 → 红底圆点（替代以前的「光标聚焦时弹气泡」侵入式提示）
+ *   - 已解锁但 origin 无匹配 / 非 http(s) → 清空 badge
  *
  * 数据来源复用现有的 native queryLogins 调用，per-tab 缓存避免抖动。
  * popup 打开时也会触发 queryLogins，handler 会顺手把结果灌回这里更新 badge。
@@ -14,6 +15,12 @@ import type { NativeBridge } from "./native-bridge";
 /** badge 颜色：深绿底 + 白字，深浅主题下都能读清；与品牌 accent 同色系。 */
 const BADGE_BG = "#5a8a0c";
 const BADGE_FG = "#ffffff";
+/**
+ * desktop 未启动 / vault 锁定时的红色 alert 徽章。用一个 ASCII 圆点而非
+ * unicode 装饰符或 emoji，避免被 OS/字体 fallback 渲染成意外字形。
+ */
+const BADGE_ALERT_BG = "#c73a3a";
+const BADGE_ALERT_TEXT = ".";
 
 /** per-tab 最近一次成功查询的缓存，避免短时间内重复打 native。 */
 interface TabEntry {
@@ -99,7 +106,7 @@ export async function refreshTab(
       }
 
       if (!bridge) {
-        await clearBadge(tabId);
+        await setAlertBadge(tabId);
         return;
       }
       // 先用 ping 探活，避免 desktop 离线时 queryLogins 走 nativehost 的
@@ -110,24 +117,25 @@ export async function refreshTab(
       try {
         await bridge.ping();
       } catch {
+        // desktop 未启动 → 红色 alert，提示用户「需要处理」而不弹气泡打扰输入
         cache.delete(tabId);
-        await clearBadge(tabId);
+        await setAlertBadge(tabId);
         return;
       }
       try {
         const result = await bridge.queryLogins({ origin, url: url! });
         if (!result.unlocked) {
           cache.delete(tabId);
-          await clearBadge(tabId);
+          await setAlertBadge(tabId);
           return;
         }
         const count = result.items.length;
         cache.set(tabId, { origin, count, at: Date.now() });
         await applyCount(tabId, count);
       } catch {
-        // native 不可达 / 桌面端未启动 —— 静默清空，不刷错。
+        // native 不可达 / 桌面端中途崩溃 —— 同样给红 alert。
         cache.delete(tabId);
-        await clearBadge(tabId);
+        await setAlertBadge(tabId);
       }
     } finally {
       inflight.delete(tabId);
@@ -151,7 +159,7 @@ export async function updateBadgeFromQueryResult(
 ): Promise<void> {
   if (!unlocked) {
     cache.delete(tabId);
-    await clearBadge(tabId);
+    await setAlertBadge(tabId);
     return;
   }
   cache.set(tabId, { origin, count, at: Date.now() });
@@ -193,7 +201,25 @@ async function clearBadge(tabId: number): Promise<void> {
 }
 
 /**
- * 清空当前所有已知 tab 的 badge。在收到全局锁定信号时调用。
+ * 设置红色 alert 徽章。用于 desktop 未启动 / vault 锁定的场景——比
+ * 单纯清空更显眼，又不会像 content-script 弹气泡那样打扰用户输入。
+ */
+async function setAlertBadge(tabId: number): Promise<void> {
+  const action = getAction();
+  if (!action) return;
+  try {
+    await action.setBadgeBackgroundColor({ color: BADGE_ALERT_BG, tabId });
+    if (typeof action.setBadgeTextColor === "function") {
+      await action.setBadgeTextColor({ color: BADGE_FG, tabId });
+    }
+    await action.setBadgeText({ text: BADGE_ALERT_TEXT, tabId });
+  } catch {
+    // tab 已关 / 切换太快导致 tabId 失效——忽略即可。
+  }
+}
+
+/**
+ * 清空当前所有已知 tab 的 badge。
  */
 export async function clearAllBadges(): Promise<void> {
   const tabs = await browser.tabs.query({});
@@ -201,6 +227,20 @@ export async function clearAllBadges(): Promise<void> {
   await Promise.all(
     tabs.map(async (tab) => {
       if (tab.id !== undefined) await clearBadge(tab.id);
+    }),
+  );
+}
+
+/**
+ * 把所有已知 tab 都置成红色 alert 徽章。收到全局锁定 / desktop 离线
+ * 信号时调用，替代 clearAllBadges 的「悄悄消失」语义。
+ */
+export async function setAlertOnAllTabs(): Promise<void> {
+  const tabs = await browser.tabs.query({});
+  cache.clear();
+  await Promise.all(
+    tabs.map(async (tab) => {
+      if (tab.id !== undefined) await setAlertBadge(tab.id);
     }),
   );
 }

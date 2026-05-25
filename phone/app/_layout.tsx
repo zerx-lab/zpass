@@ -6,6 +6,7 @@ import {
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useMemo } from "react";
+import { View } from "react-native";
 import "react-native-reanimated";
 
 import { Colors } from "@/constants/theme";
@@ -19,11 +20,15 @@ export const unstable_settings = {
 };
 
 /**
- * 内层组件：消费 ThemeContext，把 ZPass 调色板桥接到 react-navigation 的主题系统
+ * 内层组件：消费 ThemeContext / VaultContext，
+ *   - 首次状态探测未完成 → 黑屏占位避免闪烁
+ *   - 未初始化 → Onboarding（创建主密码）
+ *   - 已初始化未解锁 → LockOverlay
+ *   - 已解锁 → 正常路由树
  */
 function RootLayoutNav() {
   const { scheme } = useTheme();
-  const { locked, mode } = useVault();
+  const { locked, initialized, hydrated } = useVault();
 
   const navTheme = useMemo(() => {
     const base = scheme === "dark" ? DarkTheme : DefaultTheme;
@@ -43,6 +48,18 @@ function RootLayoutNav() {
     };
   }, [scheme]);
 
+  if (!hydrated) {
+    // 探测期间稳定背景；下面的 overlay 在 hydrated 后才挂载
+    return (
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: Colors[scheme].bg,
+        }}
+      />
+    );
+  }
+
   return (
     <NavThemeProvider value={navTheme}>
       <Stack screenOptions={{ contentStyle: { backgroundColor: Colors[scheme].bg } }}>
@@ -54,8 +71,11 @@ function RootLayoutNav() {
           options={{ headerShown: false, presentation: "modal" }}
         />
       </Stack>
-      {locked && <LockOverlay />}
-      {!mode && <OnboardingOverlay />}
+      {!initialized ? (
+        <OnboardingOverlay />
+      ) : locked ? (
+        <LockOverlay />
+      ) : null}
       <StatusBar style={scheme === "dark" ? "light" : "dark"} />
     </NavThemeProvider>
   );

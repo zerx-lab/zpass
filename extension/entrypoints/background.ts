@@ -1,8 +1,8 @@
 import { NativeBridge } from "../src/background/native-bridge";
 import {
   initBadge,
-  clearAllBadges,
   refreshActiveTabBadge,
+  setAlertOnAllTabs,
   updateBadgeFromQueryResult,
 } from "../src/background/badge";
 import {
@@ -380,8 +380,8 @@ async function handleMessage(
       const status = await bridge.status();
       // 解锁状态可能在 popup 打开时刚刚变化——主动刷新当前 tab 的 badge。
       if (!status.unlocked) {
-        // 全局锁定：清掉所有已知 tab 的 badge。
-        void clearAllBadges();
+        // 全局锁定：所有已知 tab 显示红 alert，提示用户解锁。
+        void setAlertOnAllTabs();
       } else {
         void refreshActiveTabBadge();
       }

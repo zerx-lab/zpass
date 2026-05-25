@@ -489,7 +489,8 @@ class AutofillController {
         this.suppressAutoMenuOnce = false;
         return;
       }
-      void this.openTotpInlineForTarget(input);
+      // focusin 自动触发 → silent：desktop 未启动 / 锁定时不弹气泡。
+      void this.openTotpInlineForTarget(input, { silent: true });
       return;
     }
 
@@ -505,7 +506,8 @@ class AutofillController {
         this.suppressAutoMenuOnce = false;
         return;
       }
-      void this.openInlineForTarget(input);
+      // 同上：focusin 自动触发不该打扰用户输入。
+      void this.openInlineForTarget(input, { silent: true });
       return;
     }
 
@@ -525,12 +527,20 @@ class AutofillController {
     }
   }
 
-  async openInlineForTarget(target: EventTarget | null): Promise<void> {
+  /**
+   * silent=true：调用方（focusin 自动触发）希望 desktop 未启动 / 锁定时
+   * 完全静默，不弹气泡也不弹菜单。状态提示由工具栏红 alert 徽章承担。
+   * silent=false：用户主动行为（ArrowDown 等），失败时仍弹气泡解释。
+   */
+  async openInlineForTarget(
+    target: EventTarget | null,
+    options: { silent?: boolean } = {},
+  ): Promise<void> {
     if (this.filling) return;
     if (!isLoginCandidate(target)) return;
     const form = findLoginFormForInput(target);
     if (!form) return;
-    const result = await this.queryLogins(target);
+    const result = await this.queryLogins(target, options);
     if (!result || result.items.length === 0) return;
     showCredentialMenu(target, result.items, async (item) => {
       const secret = await reveal(item);
@@ -548,10 +558,13 @@ class AutofillController {
    *   - 点击没 hasTotp 的 → 提示“该凭据未存 TOTP”（不报错、不填）
    *   - 空列表时不会弹（避免遮担用户输入）
    */
-  async openTotpInlineForTarget(target: EventTarget | null): Promise<void> {
+  async openTotpInlineForTarget(
+    target: EventTarget | null,
+    options: { silent?: boolean } = {},
+  ): Promise<void> {
     if (this.filling) return;
     if (!isTotpCandidate(target)) return;
-    const result = await this.queryLogins(target);
+    const result = await this.queryLogins(target, options);
     if (!result) return;
     if (result.items.length === 0) return;
     showCredentialMenu(
@@ -688,8 +701,15 @@ class AutofillController {
     );
   }
 
+  /**
+   * silent=true：desktop 未启动 / vault 锁定时不再 showTransientNotice，仅
+   * 返回 null 让调用方静默退出。focusin 自动触发的路径必须用 silent，避免
+   * 在用户聚焦输入框就弹气泡——状态提示由工具栏红 alert 徽章承担。
+   * silent=false：用户主动点 Z 按钮 / 走 ArrowDown 等动作，仍弹气泡解释。
+   */
   private async queryLogins(
     anchor: HTMLElement,
+    options: { silent?: boolean } = {},
   ): Promise<QueryLoginsResult | null> {
     if (this.cachedLogins && Date.now() - this.cachedAt < 5000) {
       return this.cachedLogins;
@@ -698,12 +718,16 @@ class AutofillController {
       type: "zpass.queryLogins",
     });
     if (!response?.ok) {
-      showTransientNotice(anchor, response?.error ?? "ZPass 当前不可用。");
+      if (!options.silent) {
+        showTransientNotice(anchor, response?.error ?? "ZPass 当前不可用。");
+      }
       return null;
     }
     const result = response.result as QueryLoginsResult;
     if (!result.unlocked) {
-      showTransientNotice(anchor, "请先解锁 ZPass Desktop，再使用自动填充。");
+      if (!options.silent) {
+        showTransientNotice(anchor, "请先解锁 ZPass Desktop，再使用自动填充。");
+      }
       return null;
     }
     this.cachedLogins = result;

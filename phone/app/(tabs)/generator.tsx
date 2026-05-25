@@ -16,6 +16,18 @@ import { useColorScheme } from "@/hooks/use-color-scheme";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useVault } from "@/contexts/vault-context";
 import { copyText } from "@/lib/clipboard";
+import { randomBytes } from "@/lib/crypto";
+
+/** 安全随机：用 CSPRNG 取均匀分布的 [0, max)，拒绝偏倚区间 */
+function secureRandomInt(max: number): number {
+  if (max <= 0) return 0;
+  const limit = 256 - (256 % max);
+  // 一次取一字节循环拒绝采样；max ≤ 128 时极少重试
+  while (true) {
+    const b = randomBytes(1)[0];
+    if (b < limit) return b % max;
+  }
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -52,7 +64,7 @@ function generatePassword(len: number, opts: Options): string {
 
   return Array.from(
     { length: len },
-    () => charset[Math.floor(Math.random() * charset.length)],
+    () => charset[secureRandomInt(charset.length)],
   ).join("");
 }
 
@@ -122,15 +134,15 @@ const WORDLIST = [
 function generatePassphrase(wordCount: number): string {
   const words = Array.from(
     { length: wordCount },
-    () => WORDLIST[Math.floor(Math.random() * WORDLIST.length)],
+    () => WORDLIST[secureRandomInt(WORDLIST.length)],
   );
   return words.join("-");
 }
 
 function generatePin(len: number): string {
-  return Array.from({ length: len }, () =>
-    Math.floor(Math.random() * 10).toString(),
-  ).join("");
+  return Array.from({ length: len }, () => secureRandomInt(10).toString()).join(
+    "",
+  );
 }
 
 // ─── Strength Calculation ───────────────────────────────────────────────────────
@@ -311,15 +323,15 @@ export default function GeneratorScreen() {
   };
 
   // 把生成的密码作为新登录条目存入保险库，并跳转到编辑页补全信息
-  const handleSave = () => {
+  const handleSave = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    const created = addItem({
+    const created = await addItem({
       type: "login",
       name: "新登录条目",
       username: "",
       password,
     });
-    router.push(`/item/${created.id}` as any);
+    if (created) router.push(`/item/${created.id}` as any);
   };
 
   const toggleOpt = (key: keyof Options) => {

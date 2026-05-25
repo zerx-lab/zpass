@@ -40,8 +40,19 @@ export default function TotpDetailScreen() {
   const { getItem } = useVault();
 
   const item = getItem(id);
-  const isLogin = item?.type === "login";
-  const secret = isLogin ? item.totp : undefined;
+  // 支持两类来源：login 条目的 totp 字段，或独立 totp 条目的 secret 字段
+  const secret =
+    item?.type === "login"
+      ? item.totp
+      : item?.type === "totp"
+        ? item.secret
+        : undefined;
+  const usernameDisplay =
+    item?.type === "login"
+      ? item.username
+      : item?.type === "totp"
+        ? item.account ?? item.issuer ?? ""
+        : "";
 
   const [remaining, setRemaining] = useState(totpRemaining());
   const [periodKey, setPeriodKey] = useState(() =>
@@ -96,7 +107,7 @@ export default function TotpDetailScreen() {
     outputRange: ["0%", "100%"],
   });
 
-  if (!item || !isLogin || !secret) {
+  if (!item || !secret) {
     return (
       <SafeAreaView style={[styles.safe, { backgroundColor: C.bg }]} edges={["top"]}>
         <View style={[styles.navBar, { borderBottomColor: C.lineSoft }]}>
@@ -152,10 +163,17 @@ export default function TotpDetailScreen() {
             <Text style={styles.chipFaviconText}>{faviconInitials(item.name)}</Text>
           </View>
           <Text style={[styles.chipName, { color: C.text }]}>{item.name}</Text>
-          <Text style={[styles.chipDot, { color: C.text3 }]}> · </Text>
-          <Text style={[styles.chipUsername, { color: C.text3 }]} numberOfLines={1}>
-            {item.username}
-          </Text>
+          {usernameDisplay ? (
+            <>
+              <Text style={[styles.chipDot, { color: C.text3 }]}> · </Text>
+              <Text
+                style={[styles.chipUsername, { color: C.text3 }]}
+                numberOfLines={1}
+              >
+                {usernameDisplay}
+              </Text>
+            </>
+          ) : null}
         </View>
 
         <Text style={[styles.codeText, { color: codeColor }]}>
@@ -186,8 +204,12 @@ export default function TotpDetailScreen() {
 
         <View style={[styles.metaCard, { borderColor: C.line, backgroundColor: C.bgElev }]}>
           <MetaRow label="服务" value={item.name} c={C} />
-          <View style={[styles.metaDivider, { backgroundColor: C.lineSoft }]} />
-          <MetaRow label="账号" value={item.username} c={C} />
+          {usernameDisplay ? (
+            <>
+              <View style={[styles.metaDivider, { backgroundColor: C.lineSoft }]} />
+              <MetaRow label="账号" value={usernameDisplay} c={C} />
+            </>
+          ) : null}
           <View style={[styles.metaDivider, { backgroundColor: C.lineSoft }]} />
           <MetaRow label="算法" value="SHA-1 · 6 位 · 30s" c={C} mono />
         </View>

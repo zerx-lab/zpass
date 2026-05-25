@@ -1,4 +1,17 @@
 // 密码生成与强度评估 —— 生成器与详情页共用的单一实现。
+//
+// 随机来源走 expo-crypto（原生 CSPRNG），不再使用 Math.random。
+
+import { randomBytes } from "./crypto";
+
+function secureRandomInt(max: number): number {
+  if (max <= 0) return 0;
+  const limit = 256 - (256 % max);
+  while (true) {
+    const b = randomBytes(1)[0];
+    if (b < limit) return b % max;
+  }
+}
 
 export type GenMode = "password" | "passphrase" | "pin";
 
@@ -35,20 +48,20 @@ export function generatePassword(len: number, opts: GenOptions): string {
 
   return Array.from(
     { length: len },
-    () => charset[Math.floor(Math.random() * charset.length)],
+    () => charset[secureRandomInt(charset.length)],
   ).join("");
 }
 
 export function generatePassphrase(wordCount: number): string {
   return Array.from(
     { length: wordCount },
-    () => WORDLIST[Math.floor(Math.random() * WORDLIST.length)],
+    () => WORDLIST[secureRandomInt(WORDLIST.length)],
   ).join("-");
 }
 
 export function generatePin(len: number): string {
   return Array.from({ length: len }, () =>
-    Math.floor(Math.random() * 10).toString(),
+    secureRandomInt(10).toString(),
   ).join("");
 }
 

@@ -74,6 +74,7 @@ export const TYPE_LABELS: Record<VaultItemType, string> = {
   identity: "身份信息",
   ssh: "SSH 密钥",
   passkey: "通行密钥",
+  totp: "验证码",
 };
 
 /** 条目类型 → SF Symbol 图标名 */
@@ -84,6 +85,7 @@ export const TYPE_ICONS: Record<VaultItemType, string> = {
   identity: "person.fill",
   ssh: "terminal.fill",
   passkey: "lock.fill",
+  totp: "clock.fill",
 };
 
 /** 取条目的副标题（列表第二行） */
@@ -94,13 +96,15 @@ export function itemSubtitle(item: VaultItem): string {
     case "card":
       return "•••• " + item.number.replace(/\s/g, "").slice(-4);
     case "note":
-      return item.note.split("\n")[0] || "安全笔记";
+      return item.note ? item.note.split("\n")[0] : "安全笔记";
     case "identity":
       return item.email;
     case "ssh":
       return item.apiKey ? "API Token" : item.username || item.keyType || "SSH";
     case "passkey":
       return item.rpId;
+    case "totp":
+      return item.account || item.issuer || "TOTP";
   }
 }
 
@@ -111,5 +115,7 @@ export function itemSearchText(item: VaultItem): string {
   if (item.type === "identity") parts.push(item.email, item.first, item.last);
   if (item.type === "passkey") parts.push(item.rpId);
   if (item.type === "ssh" && item.username) parts.push(item.username);
+  if (item.type === "totp")
+    parts.push(item.issuer ?? "", item.account ?? "");
   return parts.join(" ").toLowerCase();
 }

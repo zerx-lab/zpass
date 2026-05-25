@@ -33,6 +33,7 @@ const FILTER_CHIPS: { key: FilterKey; label: string }[] = [
   { key: "all", label: "全部" },
   { key: "fav", label: "收藏" },
   { key: "login", label: "登录" },
+  { key: "totp", label: "验证码" },
   { key: "card", label: "卡片" },
   { key: "note", label: "笔记" },
   { key: "identity", label: "身份" },
@@ -180,7 +181,15 @@ export default function VaultScreen() {
       all: items.length,
       fav: items.filter((i) => i.favorite).length,
     };
-    for (const t of ["login", "card", "note", "identity", "ssh", "passkey"]) {
+    for (const t of [
+      "login",
+      "totp",
+      "card",
+      "note",
+      "identity",
+      "ssh",
+      "passkey",
+    ]) {
       result[t] = items.filter((i) => i.type === t).length;
     }
     return result;

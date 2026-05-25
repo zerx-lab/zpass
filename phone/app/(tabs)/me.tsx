@@ -1,4 +1,9 @@
-import React from "react";
+// 我的 —— 账户 / 偏好 / 数据 / 关于
+//
+// 与 desktop SettingsPage 对齐：所有偏好均在本地，云端模式占位。
+// 主密码修改、清空保险库、明文导入导出都直接走加密 vault。
+
+import React, { useState } from "react";
 import {
   StyleSheet,
   View,
@@ -6,22 +11,22 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
-  Switch,
   Platform,
+  Modal,
+  TextInput,
+  KeyboardAvoidingView,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-
-import { router } from "expo-router";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useTheme, type ThemeMode } from "@/contexts/theme-context";
 import { useVault } from "@/contexts/vault-context";
+import type { VaultItem, VaultItemType } from "@/data/vault";
 import { exportVault, pickAndParseImport } from "@/lib/transfer";
 
 const MONO = Platform.select({ ios: "ui-monospace", default: "monospace" });
-
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface MenuRowConfig {
   key: string;
@@ -29,12 +34,10 @@ interface MenuRowConfig {
   value?: string;
   badge?: { text: string; color: "danger" | "warn" | "ok" | "text3" };
   showChevron?: boolean;
-  toggle?: boolean;
-  toggleValue?: boolean;
   onPress?: () => void;
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+/* ----- 子组件 ----- */
 
 function SectionLabel({ title, c }: { title: string; c: typeof Colors.dark }) {
   return (
@@ -56,11 +59,8 @@ function MenuRow({
   c: typeof Colors.dark;
 }) {
   const handlePress = () => {
-    if (config.onPress) {
-      config.onPress();
-    } else {
-      Alert.alert("功能开发中", config.label + " 功能尚未实现");
-    }
+    if (config.onPress) config.onPress();
+    else Alert.alert("功能开发中", config.label + " 暂未实现");
   };
 
   const badgeColor = config.badge
@@ -88,10 +88,7 @@ function MenuRow({
           },
         ]}
       >
-        <Text style={[styles.menuRowLabel, { color: c.text }]}>
-          {config.label}
-        </Text>
-
+        <Text style={[styles.menuRowLabel, { color: c.text }]}>{config.label}</Text>
         <View style={styles.menuRowRight}>
           {config.badge ? (
             <View
@@ -104,41 +101,24 @@ function MenuRow({
               ]}
             >
               <Text
-                style={[
-                  styles.badgeText,
-                  { color: badgeColor, fontFamily: MONO },
-                ]}
+                style={[styles.badgeText, { color: badgeColor, fontFamily: MONO }]}
               >
                 {config.badge.text}
               </Text>
             </View>
           ) : null}
-
           {config.value ? (
             <Text
-              style={[
-                styles.menuRowValue,
-                { color: c.text3, fontFamily: MONO },
-              ]}
+              style={[styles.menuRowValue, { color: c.text3, fontFamily: MONO }]}
             >
               {config.value}
             </Text>
           ) : null}
-
-          {config.toggle ? (
-            <Switch
-              value={config.toggleValue ?? false}
-              onValueChange={handlePress}
-              trackColor={{ false: c.line, true: c.ok }}
-              thumbColor={c.bgElev}
-              style={styles.toggle}
-            />
-          ) : config.showChevron ? (
+          {config.showChevron ? (
             <Text style={[styles.chevron, { color: c.text3 }]}>{"›"}</Text>
           ) : null}
         </View>
       </TouchableOpacity>
-
       {!isLast && (
         <View style={[styles.separator, { backgroundColor: c.lineSoft }]} />
       )}
@@ -178,150 +158,46 @@ function MenuSection({
   );
 }
 
-// ─── User Card ────────────────────────────────────────────────────────────────
-
-function UserCard({ c }: { c: typeof Colors.dark }) {
+function UserCard({ c, count }: { c: typeof Colors.dark; count: number }) {
   return (
-    <TouchableOpacity
-      activeOpacity={0.75}
-      onPress={() => Alert.alert("功能开发中", "账户管理功能尚未实现")}
+    <View
       style={[
         styles.userCard,
         { backgroundColor: c.bgElev, borderColor: c.line },
       ]}
     >
-      {/* 头像 */}
       <View style={styles.avatar}>
         <Text style={styles.avatarText}>Z</Text>
       </View>
-
-      {/* 用户信息 */}
       <View style={styles.userInfo}>
-        <Text style={[styles.userName, { color: c.text }]}>zero@zpass.app</Text>
+        <Text style={[styles.userName, { color: c.text }]}>本地保险库</Text>
         <Text style={[styles.userPlan, { color: c.text3, fontFamily: MONO }]}>
-          ZPass 个人版
+          {count} 条加密条目 · 零知识
         </Text>
-      </View>
-
-      {/* 箭头 */}
-      <Text style={[styles.userChevron, { color: c.text3 }]}>{"›"}</Text>
-    </TouchableOpacity>
-  );
-}
-
-// ─── Space Switcher ───────────────────────────────────────────────────────────
-
-interface SpaceItem {
-  key: string;
-  label: string;
-  active?: boolean;
-  muted?: boolean;
-}
-
-const SPACES: SpaceItem[] = [
-  { key: "personal", label: "私人空间", active: true },
-  { key: "work", label: "工作空间" },
-  { key: "new", label: "+ 新建空间", muted: true },
-];
-
-function SpaceSwitcher({ c }: { c: typeof Colors.dark }) {
-  return (
-    <View style={styles.menuSection}>
-      <SectionLabel title="SPACES · 空间" c={c} />
-      <View
-        style={[
-          styles.menuCard,
-          { backgroundColor: c.bgElev, borderColor: c.line },
-        ]}
-      >
-        {SPACES.map((space, index) => {
-          const isFirst = index === 0;
-          const isLast = index === SPACES.length - 1;
-
-          return (
-            <React.Fragment key={space.key}>
-              <TouchableOpacity
-                activeOpacity={0.65}
-                onPress={() =>
-                  Alert.alert(
-                    "功能开发中",
-                    space.key === "new"
-                      ? "新建空间功能尚未实现"
-                      : `切换到：${space.label}`,
-                  )
-                }
-                style={[
-                  styles.menuRow,
-                  {
-                    borderTopLeftRadius: isFirst ? 10 : 0,
-                    borderTopRightRadius: isFirst ? 10 : 0,
-                    borderBottomLeftRadius: isLast ? 10 : 0,
-                    borderBottomRightRadius: isLast ? 10 : 0,
-                  },
-                ]}
-              >
-                <View style={styles.spaceRowLeft}>
-                  {space.active ? (
-                    <View
-                      style={[styles.spaceIndicator, { backgroundColor: c.ok }]}
-                    />
-                  ) : (
-                    <View
-                      style={[
-                        styles.spaceIndicator,
-                        styles.spaceIndicatorEmpty,
-                        { borderColor: c.line },
-                      ]}
-                    />
-                  )}
-                  <Text
-                    style={[
-                      styles.menuRowLabel,
-                      {
-                        color: space.muted
-                          ? c.text3
-                          : space.active
-                            ? c.text
-                            : c.text2,
-                      },
-                    ]}
-                  >
-                    {space.label}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-
-              {!isLast && (
-                <View
-                  style={[styles.separator, { backgroundColor: c.lineSoft }]}
-                />
-              )}
-            </React.Fragment>
-          );
-        })}
       </View>
     </View>
   );
 }
 
-// ─── Main Screen ──────────────────────────────────────────────────────────────
+/* ----- 主屏 ----- */
 
 export default function MeScreen() {
   const scheme = useColorScheme() ?? "dark";
   const c = Colors[scheme];
 
-  // 主题切换上下文（system / dark / light）
   const { mode: themeMode, setMode: setThemeMode } = useTheme();
-  const { lock, items, breaches, mode, setMode, importItems, clearAll } =
-    useVault();
+  const {
+    lock,
+    items,
+    importItems,
+    clearAll,
+    reset,
+    changeMasterPassword,
+  } = useVault();
 
-  const [bioEnabled, setBioEnabled] = React.useState(false);
+  const [pwModal, setPwModal] = useState(false);
 
-  const activeBreaches = breaches.filter(
-    (b) => b.status === "new" || b.status === "open",
-  ).length;
-
-  // ── 导出：明文备份 → 系统分享 ──
+  /* ── 导出：明文备份 ── */
   const handleExport = React.useCallback(() => {
     if (items.length === 0) {
       Alert.alert("保险库为空", "暂无可导出的条目");
@@ -338,9 +214,8 @@ export default function MeScreen() {
           onPress: async () => {
             try {
               const r = await exportVault(items);
-              if (!r.shared) {
+              if (!r.shared)
                 Alert.alert("已生成备份", `已写入：${r.path}`);
-              }
             } catch (e) {
               Alert.alert("导出失败", e instanceof Error ? e.message : String(e));
             }
@@ -350,7 +225,7 @@ export default function MeScreen() {
     );
   }, [items]);
 
-  // ── 导入：选择 ZPass 导出 JSON → 追加入库 ──
+  /* ── 导入：选择 JSON ── */
   const handleImport = React.useCallback(async () => {
     const res = await pickAndParseImport();
     if (!res.ok) {
@@ -365,13 +240,13 @@ export default function MeScreen() {
     }
     Alert.alert(
       "确认导入",
-      `已从「${res.fileName}」解析到 ${res.items.length} 个条目，全部追加到本地保险库？`,
+      `已从「${res.fileName}」解析到 ${res.items.length} 个条目，全部追加到加密保险库？`,
       [
         { text: "取消", style: "cancel" },
         {
           text: "导入",
-          onPress: () => {
-            const n = importItems(res.items);
+          onPress: async () => {
+            const n = await importItems(res.items as VaultItem[]);
             Alert.alert("导入完成", `已导入 ${n} 个条目`);
           },
         },
@@ -379,7 +254,7 @@ export default function MeScreen() {
     );
   }, [importItems]);
 
-  // ── 清空保险库（移除演示数据 / 重置） ──
+  /* ── 清空 ── */
   const handleClearAll = React.useCallback(() => {
     if (items.length === 0) {
       Alert.alert("保险库已为空");
@@ -387,7 +262,7 @@ export default function MeScreen() {
     }
     Alert.alert(
       "清空保险库",
-      `将永久删除全部 ${items.length} 个条目，此操作不可撤销。建议先导出备份。`,
+      `将永久删除全部 ${items.length} 个条目，主密码与加密元数据保留，此操作不可撤销。建议先导出备份。`,
       [
         { text: "取消", style: "cancel" },
         { text: "清空", style: "destructive", onPress: () => clearAll() },
@@ -395,37 +270,37 @@ export default function MeScreen() {
     );
   }, [items.length, clearAll]);
 
-  // ── 切换运行模式 ──
-  const handleSwitchMode = React.useCallback(() => {
-    const next = mode === "local" ? "cloud" : "local";
+  /* ── 完全重置 ── */
+  const handleReset = React.useCallback(() => {
     Alert.alert(
-      "切换存储模式",
-      next === "local"
-        ? "切换到本地模式：数据仅保存在本设备。"
-        : "切换到云端模式：跨设备同步即将推出，当前仍以本地存储运行。",
+      "重置 ZPass",
+      "将永久删除主密码与所有条目，应用回到初始状态。此操作不可撤销。",
       [
         { text: "取消", style: "cancel" },
-        { text: "切换", onPress: () => setMode(next) },
+        {
+          text: "重置",
+          style: "destructive",
+          onPress: async () => {
+            await reset();
+          },
+        },
       ],
     );
-  }, [mode, setMode]);
+  }, [reset]);
 
-  // 当前主题在「主题」行右侧显示的文案
+  /* ── 主题切换 ── */
   const themeValueLabel = React.useMemo(() => {
-    if (themeMode === "system") {
+    if (themeMode === "system")
       return `跟随系统（${scheme === "dark" ? "深色" : "浅色"}）`;
-    }
     return themeMode === "dark" ? "深色" : "浅色";
   }, [themeMode, scheme]);
 
-  // 弹出 ActionSheet 让用户选择主题模式
   const handleThemePress = React.useCallback(() => {
     const options: { label: string; value: ThemeMode }[] = [
       { label: "跟随系统", value: "system" },
       { label: "深色", value: "dark" },
       { label: "浅色", value: "light" },
     ];
-
     Alert.alert(
       "选择主题",
       "切换 ZPass 的外观主题",
@@ -440,24 +315,24 @@ export default function MeScreen() {
     );
   }, [themeMode, setThemeMode]);
 
+  const typeCounts = React.useMemo(() => countByType(items), [items]);
+
   const securityRows: MenuRowConfig[] = [
     {
-      key: "autolock",
-      label: "自动锁定",
-      value: "5分钟",
+      key: "change-pwd",
+      label: "修改主密码",
       showChevron: true,
+      onPress: () => setPwModal(true),
     },
     {
-      key: "biometric",
-      label: "生物识别",
-      toggle: true,
-      toggleValue: bioEnabled,
-      onPress: () => setBioEnabled((v) => !v),
-    },
-    {
-      key: "trust",
-      label: "信任此设备",
+      key: "lock-now",
+      label: "立即锁定",
       showChevron: true,
+      onPress: () =>
+        Alert.alert("锁定 ZPass", "确认要锁定保险库吗？", [
+          { text: "取消", style: "cancel" },
+          { text: "锁定", style: "destructive", onPress: () => lock() },
+        ]),
     },
   ];
 
@@ -469,22 +344,10 @@ export default function MeScreen() {
       showChevron: true,
       onPress: handleThemePress,
     },
-    {
-      key: "language",
-      label: "语言",
-      value: "中文",
-      showChevron: true,
-    },
+    { key: "language", label: "语言", value: "中文" },
   ];
 
   const dataRows: MenuRowConfig[] = [
-    {
-      key: "mode",
-      label: "存储模式",
-      value: mode === "cloud" ? "云端模式" : "本地模式",
-      showChevron: true,
-      onPress: handleSwitchMode,
-    },
     {
       key: "import",
       label: "导入数据",
@@ -494,41 +357,48 @@ export default function MeScreen() {
     },
     {
       key: "export",
-      label: "导出备份",
+      label: "导出明文备份",
       value: `${items.length} 项`,
       showChevron: true,
       onPress: handleExport,
     },
     {
       key: "clear",
-      label: "清空保险库",
+      label: "清空所有条目",
       showChevron: true,
       onPress: handleClearAll,
     },
     {
-      key: "scan",
-      label: "扫描泄露",
+      key: "reset",
+      label: "重置 ZPass",
       showChevron: true,
-      value: `${items.length} 项`,
-      badge:
-        activeBreaches > 0
-          ? { text: String(activeBreaches), color: "danger" }
-          : undefined,
-      onPress: () => router.push("/(tabs)/security" as any),
+      onPress: handleReset,
     },
   ];
+
+  const statsRows: MenuRowConfig[] = (
+    [
+      ["登录凭据", "login"],
+      ["验证码", "totp"],
+      ["支付卡", "card"],
+      ["安全笔记", "note"],
+      ["身份信息", "identity"],
+      ["SSH 密钥", "ssh"],
+      ["通行密钥", "passkey"],
+    ] as [string, VaultItemType][]
+  ).map(([label, t]) => ({
+    key: `stat-${t}`,
+    label,
+    value: `${typeCounts[t] ?? 0} 项`,
+  }));
 
   const aboutRows: MenuRowConfig[] = [
     {
       key: "about",
       label: "关于 ZPass",
-      showChevron: true,
+      value: "零知识本地密码管理器",
     },
-    {
-      key: "version",
-      label: "版本",
-      value: "1.0.0 (build 42)",
-    },
+    { key: "version", label: "版本", value: "1.0.0" },
   ];
 
   return (
@@ -541,74 +411,178 @@ export default function MeScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Page Header ── */}
         <View style={styles.pageHeader}>
           <Text style={[styles.pageTitle, { color: c.text }]}>我的</Text>
         </View>
 
-        {/* ── 用户卡 ── */}
-        <UserCard c={c} />
+        <UserCard c={c} count={items.length} />
 
-        {/* ── 空间切换 ── */}
-        <SpaceSwitcher c={c} />
-
-        {/* ── 安全与隐私 ── */}
+        <MenuSection label="STATS · 条目统计" rows={statsRows} c={c} />
         <MenuSection label="SECURITY · 安全与隐私" rows={securityRows} c={c} />
-
-        {/* ── 外观 ── */}
         <MenuSection label="APPEARANCE · 外观" rows={appearanceRows} c={c} />
-
-        {/* ── 数据 ── */}
         <MenuSection label="DATA · 数据" rows={dataRows} c={c} />
-
-        {/* ── 关于 ── */}
         <MenuSection label="ABOUT · 关于" rows={aboutRows} c={c} />
-
-        {/* ── 锁定按钮 ── */}
-        <TouchableOpacity
-          activeOpacity={0.75}
-          onPress={() =>
-            Alert.alert("锁定 ZPass", "确认要锁定 ZPass 吗？", [
-              { text: "取消", style: "cancel" },
-              { text: "锁定", style: "destructive", onPress: () => lock() },
-            ])
-          }
-          style={[styles.lockButton, { borderColor: c.danger + "88" }]}
-        >
-          <Text style={[styles.lockButtonText, { color: c.danger }]}>
-            锁定 ZPass
-          </Text>
-        </TouchableOpacity>
 
         <View style={{ height: 16 }} />
       </ScrollView>
+
+      <ChangePasswordModal
+        visible={pwModal}
+        onClose={() => setPwModal(false)}
+        onSubmit={changeMasterPassword}
+      />
     </SafeAreaView>
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
+function countByType(items: VaultItem[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const i of items) out[i.type] = (out[i.type] ?? 0) + 1;
+  return out;
+}
+
+/* ----- 修改主密码 modal ----- */
+
+function ChangePasswordModal({
+  visible,
+  onClose,
+  onSubmit,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onSubmit: (
+    oldPwd: string,
+    newPwd: string,
+  ) => Promise<{ ok: true } | { ok: false; code: string; message: string }>;
+}) {
+  const scheme = useColorScheme() ?? "dark";
+  const c = Colors[scheme];
+
+  const [oldPwd, setOldPwd] = useState("");
+  const [newPwd, setNewPwd] = useState("");
+  const [confirmPwd, setConfirmPwd] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const reset = () => {
+    setOldPwd("");
+    setNewPwd("");
+    setConfirmPwd("");
+    setError(null);
+  };
+  const close = () => {
+    reset();
+    onClose();
+  };
+
+  const handleSubmit = async () => {
+    setError(null);
+    if (newPwd.length < 8) {
+      setError("新密码至少 8 位");
+      return;
+    }
+    if (newPwd !== confirmPwd) {
+      setError("两次输入不一致");
+      return;
+    }
+    setBusy(true);
+    const r = await onSubmit(oldPwd, newPwd);
+    setBusy(false);
+    if (r.ok) {
+      reset();
+      onClose();
+      Alert.alert("已更新", "主密码已修改");
+    } else {
+      setError(r.message);
+    }
+  };
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={close}
+    >
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={modalStyles.backdrop}
+      >
+        <View style={[modalStyles.card, { backgroundColor: c.bgElev, borderColor: c.line }]}>
+          <Text style={[modalStyles.title, { color: c.text }]}>修改主密码</Text>
+
+          <ModalField label="当前主密码" value={oldPwd} onChange={setOldPwd} c={c} />
+          <ModalField label="新主密码（≥ 8 位）" value={newPwd} onChange={setNewPwd} c={c} />
+          <ModalField label="确认新主密码" value={confirmPwd} onChange={setConfirmPwd} c={c} />
+
+          {error ? (
+            <Text style={[modalStyles.error, { color: c.danger }]}>{error}</Text>
+          ) : null}
+
+          <View style={modalStyles.actions}>
+            <TouchableOpacity
+              onPress={close}
+              style={[modalStyles.btn, modalStyles.btnGhost, { borderColor: c.line }]}
+              disabled={busy}
+            >
+              <Text style={[modalStyles.btnGhostText, { color: c.text2 }]}>取消</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleSubmit}
+              style={[modalStyles.btn, { backgroundColor: c.text }]}
+              disabled={busy}
+            >
+              {busy ? (
+                <ActivityIndicator color={c.bg} />
+              ) : (
+                <Text style={[modalStyles.btnText, { color: c.bg }]}>确认</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+function ModalField({
+  label,
+  value,
+  onChange,
+  c,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  c: typeof Colors.dark;
+}) {
+  return (
+    <View style={modalStyles.field}>
+      <Text style={[modalStyles.fieldLabel, { color: c.text3 }]}>{label}</Text>
+      <TextInput
+        style={[
+          modalStyles.fieldInput,
+          { color: c.text, backgroundColor: c.bg, borderColor: c.line },
+        ]}
+        value={value}
+        onChangeText={onChange}
+        secureTextEntry
+        autoCapitalize="none"
+        autoCorrect={false}
+      />
+    </View>
+  );
+}
+
+/* ----- styles ----- */
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-  },
+  safe: { flex: 1 },
+  scrollContent: { paddingHorizontal: 16, paddingBottom: 16 },
 
-  // Page header
-  pageHeader: {
-    paddingTop: 16,
-    paddingBottom: 16,
-  },
-  pageTitle: {
-    fontSize: 22,
-    fontWeight: "700",
-    letterSpacing: -0.3,
-  },
+  pageHeader: { paddingTop: 16, paddingBottom: 16 },
+  pageTitle: { fontSize: 22, fontWeight: "700", letterSpacing: -0.3 },
 
-  // User card
   userCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -625,52 +599,13 @@ const styles = StyleSheet.create({
     backgroundColor: "#000",
     alignItems: "center",
     justifyContent: "center",
-    flexShrink: 0,
   },
-  avatarText: {
-    color: "#fff",
-    fontSize: 22,
-    fontWeight: "700",
-    lineHeight: 28,
-  },
-  userInfo: {
-    flex: 1,
-    gap: 3,
-  },
-  userName: {
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  userPlan: {
-    fontSize: 11,
-  },
-  userChevron: {
-    fontSize: 22,
-    lineHeight: 26,
-    marginLeft: 4,
-  },
+  avatarText: { color: "#fff", fontSize: 22, fontWeight: "700", lineHeight: 28 },
+  userInfo: { flex: 1, gap: 3 },
+  userName: { fontSize: 15, fontWeight: "600" },
+  userPlan: { fontSize: 11 },
 
-  // Space switcher
-  spaceRowLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    flex: 1,
-  },
-  spaceIndicator: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  spaceIndicatorEmpty: {
-    backgroundColor: "transparent",
-    borderWidth: 1.5,
-  },
-
-  // Section
-  menuSection: {
-    marginBottom: 16,
-  },
+  menuSection: { marginBottom: 16 },
   sectionLabel: {
     fontSize: 9,
     fontWeight: "600",
@@ -679,13 +614,8 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     marginLeft: 2,
   },
-  menuCard: {
-    borderWidth: 1,
-    borderRadius: 10,
-    overflow: "hidden",
-  },
+  menuCard: { borderWidth: 1, borderRadius: 10, overflow: "hidden" },
 
-  // Menu row
   menuRow: {
     height: 48,
     flexDirection: "row",
@@ -693,32 +623,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     gap: 8,
   },
-  menuRowLabel: {
-    flex: 1,
-    fontSize: 15,
-  },
-  menuRowRight: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  menuRowValue: {
-    fontSize: 13,
-  },
-  chevron: {
-    fontSize: 20,
-    lineHeight: 24,
-    marginLeft: 2,
-  },
-  toggle: {
-    transform: [{ scaleX: 0.85 }, { scaleY: 0.85 }],
-  },
-  separator: {
-    height: 1,
-    marginLeft: 16,
-  },
+  menuRowLabel: { flex: 1, fontSize: 15 },
+  menuRowRight: { flexDirection: "row", alignItems: "center", gap: 6 },
+  menuRowValue: { fontSize: 13 },
+  chevron: { fontSize: 20, lineHeight: 24, marginLeft: 2 },
 
-  // Badge
+  separator: { height: 1, marginLeft: 16 },
+
   badgeWrap: {
     borderWidth: 1,
     borderRadius: 5,
@@ -728,24 +639,42 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  badgeText: {
-    fontSize: 10,
-    fontWeight: "700",
-    letterSpacing: 0.2,
-  },
+  badgeText: { fontSize: 10, fontWeight: "700", letterSpacing: 0.2 },
+});
 
-  // Lock button
-  lockButton: {
-    height: 44,
+const modalStyles = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+  },
+  card: {
     borderWidth: 1,
+    borderRadius: 14,
+    padding: 18,
+  },
+  title: { fontSize: 17, fontWeight: "700", marginBottom: 14 },
+  field: { marginBottom: 12 },
+  fieldLabel: { fontSize: 11, fontWeight: "600", marginBottom: 5 },
+  fieldInput: {
+    height: 42,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    fontSize: 14,
+  },
+  error: { fontSize: 12, marginTop: 4, marginBottom: 4 },
+  actions: { flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 6 },
+  btn: {
+    minWidth: 80,
+    height: 42,
     borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 8,
+    paddingHorizontal: 16,
   },
-  lockButtonText: {
-    fontSize: 15,
-    fontWeight: "600",
-    letterSpacing: 0.1,
-  },
+  btnText: { fontSize: 14, fontWeight: "700" },
+  btnGhost: { borderWidth: 1, backgroundColor: "transparent" },
+  btnGhostText: { fontSize: 14, fontWeight: "500" },
 });

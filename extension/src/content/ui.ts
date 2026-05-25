@@ -407,6 +407,9 @@ function closeMenus(): void {
 /**
  * 智能定位：优先放在 anchor 下方；下方空间不足且上方更宽时翻转到上方；
  * 水平方向若超出视口右边则左移贴边。
+ *
+ * 同时按可用空间动态限制 max-height，并写回 node.style，让
+ * 条目过多的菜单能在视口内滚动（而不是被裁掉无法选择）。
  */
 function positionFloating(
   node: HTMLElement,
@@ -417,6 +420,7 @@ function positionFloating(
   const vpW = window.innerWidth;
   const vpH = window.innerHeight;
   const margin = 8;
+  const gap = 6; // anchor 与浮层之间的留白
 
   // 水平
   let left = rect.left;
@@ -425,14 +429,21 @@ function positionFloating(
   }
   if (left < margin) left = margin;
 
-  // 垂直翻转
-  const nodeH = node.offsetHeight || 200;
-  const spaceBelow = vpH - rect.bottom;
-  const spaceAbove = rect.top;
-  const flipUp =
-    spaceBelow < Math.min(160, nodeH + 12) && spaceAbove > spaceBelow;
-  const top = flipUp ? rect.top - nodeH - 6 : rect.bottom + 6;
+  // 先按当前内容测一次自然高度（max-height 还未限制）
+  node.style.maxHeight = "";
+  const naturalH = node.offsetHeight || 200;
 
+  const spaceBelow = vpH - rect.bottom - gap - margin;
+  const spaceAbove = rect.top - gap - margin;
+  // 翻转条件：下方放不下整个菜单，且上方比下方更宽裕
+  const flipUp = naturalH > spaceBelow && spaceAbove > spaceBelow;
+  const avail = Math.max(120, flipUp ? spaceAbove : spaceBelow);
+
+  // 限制高度：取 min(实际所需, 可用空间, 上限 480)
+  const limited = Math.min(naturalH, avail, 480);
+  node.style.maxHeight = `${limited}px`;
+
+  const top = flipUp ? rect.top - limited - gap : rect.bottom + gap;
   node.style.left = `${window.scrollX + left}px`;
   node.style.top = `${window.scrollY + Math.max(margin, top)}px`;
 }
