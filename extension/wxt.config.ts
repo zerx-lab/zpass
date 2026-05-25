@@ -7,15 +7,9 @@ export default defineConfig({
     key: "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArlMje6Tpk7iDCihHmujNEAnNQd3X3eRlwmyOC3jcfY3OTR6o1x0uAOoLGKvilu71hOjwnVLXvekvpQvO/i5cg0NUkqJpgdBOZgGcb9Bd7VUxCiouG5STqJUkzT+0UxYwhUkcxTXcjaeEQ00i1PDlrnISzZVxM2YQQvTtrx4qhOYgsuVA2JlwfQ8Zf0bbSFlreyPwEBUjRd4LFCn2y9qO8MNI3PjoW5WQHXRKJeyg8QBSK+wcNQDChWSlymIYzgRVK5KdCKccGf33i5Q0t9Wy1l2ywQ1PVhST5OYN1FOjoyZf9DrzCnAbBTe4w5sQQJnfxiDyZ5k52A9LzvBKfL85/QIDAQAB",
     permissions: ["nativeMessaging", "activeTab", "tabs", "storage"],
     host_permissions: ["http://*/*", "https://*/*"],
-    web_accessible_resources: [
-      {
-        // notification-bar.html 是 content-script 注入的 iframe 源，
-        // 需要授权能被任何 http/https 页面加载。同时限定 matches
-        // 避免被不受躲躲 origin 代加载。
-        resources: ["notification-bar.html"],
-        matches: ["http://*/*", "https://*/*"],
-      },
-    ],
+    // save-popup.html 走 browser.windows.create({ type: "popup" })，
+    // 不需要 web_accessible_resources 授权（仅扩展上下文加载，宿主页面不访问）。
+    web_accessible_resources: [],
     browser_specific_settings: {
       gecko: {
         id: "zpass-extension@zerx-lab.local",

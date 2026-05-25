@@ -1,11 +1,11 @@
 /* ============================================================================
- * ZPass Notification Bar — iframe 内部样式
+ * ZPass Save Popup — 独立 OS 窗口内部样式
  * ----------------------------------------------------------------------------
- * 该样式表只在扩展 origin 的 iframe 文档内生效，不会污染宿主页面，
- * 也不会被宿主页面 CSS 干扰。无需 !important 防御。
+ * 该样式表只在扩展 origin 的独立 popup 窗口内生效，不会污染宿主页面，
+ * 也不会被宿主页面跳转影响。
  *
- * 变量与 src/styles/tokens.css 对齐，但因 iframe 没有 Geist webfont
- * 引入（避免每次弹保存条都打外网），fallback 到 system-ui。
+ * 变量与 src/styles/tokens.css 对齐，但因独立窗口没有 Geist webfont
+ * 引入（避免每次弹保存窗都打外网），fallback 到 system-ui。
  * ========================================================================== */
 
 :root {
@@ -45,28 +45,30 @@ html,
 body {
   margin: 0;
   padding: 0;
-  background: transparent;
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
   font-family: var(--font);
   color: var(--text);
 }
 
-/* iframe 内整体根容器：靠右下角对齐，给 outer iframe 留 padding 制造投影空间。 */
+/* 独立窗口里整体根容器：撑满，padding 给阴影 / 视觉边距留空间。 */
 #root {
   box-sizing: border-box;
   width: 100%;
   height: 100%;
-  padding: 8px;
+  padding: 14px;
   display: flex;
-  align-items: flex-end;
-  justify-content: flex-end;
+  flex-direction: column;
 }
 
 .bar {
   box-sizing: border-box;
-  width: 100%;
+  flex: 1;
   display: grid;
-  gap: 10px;
-  padding: 14px;
+  grid-template-rows: auto 1fr auto;
+  gap: 14px;
+  padding: 16px;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--bg-elev);
@@ -84,8 +86,8 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   color: var(--text-2);
@@ -93,13 +95,13 @@ body {
 
 .bar-text {
   display: grid;
-  gap: 2px;
+  gap: 4px;
   min-width: 0;
 }
 
 .bar-text strong {
   font-weight: 600;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text);
 }
 
@@ -116,15 +118,15 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   margin: 0;
   padding: 0;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-2);
-  font-size: 16px;
+  font-size: 18px;
   line-height: 1;
   cursor: pointer;
 }
@@ -132,6 +134,11 @@ body {
 .bar-close:hover {
   background: var(--bg-hover);
   color: var(--text);
+}
+
+.bar-body {
+  display: grid;
+  align-content: center;
 }
 
 .bar-actions {
@@ -144,11 +151,11 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 70px;
-  padding: 6px 14px;
+  min-width: 80px;
+  padding: 8px 18px;
   border-radius: var(--radius);
   font-family: var(--font);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   cursor: pointer;
 }

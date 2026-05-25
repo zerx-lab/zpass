@@ -21,6 +21,7 @@
 import "../styles/tokens.css";
 import "../styles/global.css";
 import { ClientRouter } from "astro:transitions";
+import { OpenPanelComponent } from "@openpanel/astro";
 import type { Locale } from "../i18n/strings";
 
 export interface Props {
@@ -261,6 +262,20 @@ const metaColorScheme =
 		 - 默认会拦截所有同源 <a>，含语言切换链接
 		 ==================================================================== -->
 		<ClientRouter fallback="animate" />
+
+		<!-- ====================================================================
+		 OpenPanel 分析（自托管实例）
+		 - 仅注入一次：op1.js 全局初始化后，window.op() 在后续 SPA 导航中持续可用
+		 - trackScreenViews：监听 history.pushState/popstate，自动捕获
+		   ClientRouter 的视图过渡
+		 - 自托管 apiUrl：https://openpanel-api.zerx.dev
+		 ==================================================================== -->
+		<OpenPanelComponent
+			apiUrl="https://openpanel-api.zerx.dev"
+			clientId="4fce5f43-6fdf-4b7f-8116-61bc435460e5"
+			trackScreenViews={true}
+			trackOutgoingLinks={true}
+		/>
 
 		<meta name="color-scheme" content={metaColorScheme} />
 		<meta

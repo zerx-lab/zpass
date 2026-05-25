@@ -16,6 +16,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -33,6 +34,11 @@ import {
   type CustomField,
 } from "@/lib/custom-fields";
 import { DEFAULT_SPACE_ID, type Space } from "@/lib/spaces";
+import {
+  batchCheckBreaches,
+  clearBreachCache,
+  type BreachResult,
+} from "@/lib/breach";
 
 /* ----------------------------------------------------------------------------
  * 类型
@@ -98,6 +104,15 @@ interface VaultContextValue {
     oldPwd: string,
     newPwd: string,
   ) => Promise<ActionResult>;
+
+  /** 上次 HIBP 泄露扫描结果；null = 从未扫描 */
+  breachResults: BreachResult[] | null;
+  /** 当前是否正在扫描 */
+  breachScanning: boolean;
+  /** 上次全量扫描完成时间（Unix 毫秒），null = 从未扫描 */
+  breachLastScanAt: number | null;
+  /** 触发一次全量泄露扫描；force=true 时先清缓存再扫 */
+  runBreachScan: (force?: boolean) => Promise<void>;
 }
 
 const VaultContext = createContext<VaultContextValue | null>(null);
@@ -113,6 +128,13 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [activeSpaceId, setActiveSpaceIdState] = useState<string | null>(null);
+
+  // HIBP 泄露扫描状态：null = 从未扫描
+  const [breachResults, setBreachResults] = useState<BreachResult[] | null>(
+    null,
+  );
+  const [breachScanning, setBreachScanning] = useState(false);
+  const [breachLastScanAt, setBreachLastScanAt] = useState<number | null>(null);
 
   // 启动时探测一次 vault 状态；若已 initialized，顺便把 plaintext 的 spaces
   // 拉一遍 —— 锁屏页 / 我的页头像要展示"当前空间名首字符"，spaces 是
@@ -239,6 +261,10 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     try {
       await vaultService.deleteItem(id);
       setAllItems((prev) => prev.filter((i) => i.id !== id));
+      // 删除条目时把对应 breach 结果一并移除，避免列表里出现幽灵条目
+      setBreachResults((prev) =>
+        prev ? prev.filter((r) => r.itemId !== id) : prev,
+      );
     } catch (e) {
       console.warn("deleteItem failed", e);
     }
@@ -289,6 +315,10 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     setActiveSpaceIdState(null);
     setLocked(true);
     setInitialized(false);
+    clearBreachCache();
+    setBreachResults(null);
+    setBreachLastScanAt(null);
+    setBreachScanning(false);
   }, []);
 
   /* ---------------------- 初始化 / 锁定 / 改密 ---------------------- */
@@ -324,6 +354,12 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     vaultService.lock();
     setLocked(true);
     setAllItems([]);
+    // 锁定即清空 breach 状态：保留扫描结果会让锁屏后仍能看到条目名，违反
+    // "锁定即清空内存视图" 约定。下次解锁需要手动重新扫描。
+    clearBreachCache();
+    setBreachResults(null);
+    setBreachLastScanAt(null);
+    setBreachScanning(false);
     // 不清 spaces / activeSpaceId：plaintext 数据，锁屏页头像要用
   }, []);
 
@@ -396,6 +432,36 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  /* ---------------------- HIBP 泄露扫描 ---------------------- */
+
+  // 用 ref 防重入：同时多次点扫描按钮时只有第一次会真正发请求
+  const breachScanInflightRef = useRef(false);
+
+  const runBreachScan = useCallback(
+    async (force = false): Promise<void> => {
+      if (breachScanInflightRef.current) return;
+      // 跨空间扫描整个 vault 的 login 条目 —— 与 desktop 行为一致
+      // （breach 风险与空间分组无关，整库一次性出报告更直观）
+      const loginsToScan = allItems
+        .filter((i): i is Extract<VaultItem, { type: "login" }> => i.type === "login")
+        .map((i) => ({ id: i.id, name: i.name, password: i.password }));
+
+      breachScanInflightRef.current = true;
+      setBreachScanning(true);
+      try {
+        const results = await batchCheckBreaches(loginsToScan, { force });
+        setBreachResults(results);
+        setBreachLastScanAt(Date.now());
+      } catch (e) {
+        console.warn("runBreachScan failed", e);
+      } finally {
+        setBreachScanning(false);
+        breachScanInflightRef.current = false;
+      }
+    },
+    [allItems],
+  );
+
   const value = useMemo<VaultContextValue>(
     () => ({
       items,
@@ -422,6 +488,10 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       unlock,
       lock,
       changeMasterPassword,
+      breachResults,
+      breachScanning,
+      breachLastScanAt,
+      runBreachScan,
     }),
     [
       items,
@@ -448,6 +518,10 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       unlock,
       lock,
       changeMasterPassword,
+      breachResults,
+      breachScanning,
+      breachLastScanAt,
+      runBreachScan,
     ],
   );
 

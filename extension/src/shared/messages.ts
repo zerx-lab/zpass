@@ -21,21 +21,23 @@ export interface ExtensionRequest {
     | "zpass.captureLogin"
     | "zpass.saveLogin"
     | "zpass.ignoreSaveOrigin"
-    | "zpass.checkSaveQueue";
+    | "zpass.savePopupFetch";
   itemId?: string;
   payload?: unknown;
 }
 
 /**
- * background → content-script 主动推送的「显示保存 toast」消息。
+ * background → save-popup 独立窗口推送的「显示保存 toast」消息。
  *
  * 触发场景：
- *   1. captureLogin 时 vault 处于 locked，用户解锁后回放（既有路径）。
- *   2. 表单提交后页面发生导航跳转，新页面 content-script ready 时从队列拉回。
- *   3. background tabs.onUpdated 检测到该 tab 的目标 origin 加载完成，主动 push。
+ *   1. popup 启动后通过 zpass.savePopupFetch 主动请求一次（同步返回此 payload）。
+ *   2. captureLogin 时 vault 处于 locked、popup 先以「锁定中」状态打开；
+ *      用户解锁后 background 检测到 unlocked 重评 decision，并通过
+ *      runtime.sendMessage 把升级后的 payload 推给 popup（popup 内 onMessage
+ *      监听 zpass.showSaveToast 替换内容）。
  *
  * 关键：decision + capture 必须由 background 校验过 sender tab + origin 才下发，
- * content-script 这边不再做合法性判断（信任 background 单一裁决点）。
+ * popup 这边不再做合法性判断（信任 background 单一裁决点）。
  */
 export interface ShowSaveToastMessage {
   type: "zpass.showSaveToast";

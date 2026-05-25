@@ -68,6 +68,10 @@ const MAPPING = {
   "photo.fill": "photo",
   "doc.on.clipboard": "content-paste",
   "checkmark.shield.fill": "verified-user",
+  // 安全中心：泄露盾（红色 X）/ 扫描镜 / 直方图
+  "shield.slash.fill": "gpp-bad",
+  "magnifyingglass.circle": "manage-search",
+  "chart.bar.fill": "bar-chart",
   // ── 自定义字段相关 ──────────────────────────────────────────
   "text.alignleft": "text-fields",
   "switch.2": "toggle-on",

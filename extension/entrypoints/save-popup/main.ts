@@ -1,65 +1,78 @@
 // ============================================================================
-// ZPass Notification Bar — iframe 内部脚本
+// ZPass Save Popup — 独立 OS 窗口内部脚本
 // ----------------------------------------------------------------------------
-// 该脚本运行在 iframe 文档中，origin = chrome-extension://<id>。
-// 与外层 content-script 通过 window.postMessage 通信；与 background 通过
-// browser.runtime.sendMessage 直连（iframe 本身就是扩展上下文，权限齐全）。
+// 该脚本运行在 chrome.windows.create({ type: "popup" }) 打开的独立窗口里，
+// origin = chrome-extension://<id>。脱离宿主页面 DOM 生命周期，无论登录页
+// 如何跳转 / SPA 重绘都不会被销毁，用户有足够时间确认保存。
 //
-// 与 content-script DOM toast 方案相比的关键差异：
-//   - 完全隔离于宿主页面 CSS / JS / CSP，对任何站点（包括有 transform 祖先
-//     破坏 fixed 定位的站点）都能稳定呈现。
-//   - 因为是独立 frame，宿主 SPA 路由切换不会清掉它（清掉的是外层 iframe
-//     元素，由 content-script 的 NotificationBarManager 控制）。
+// 与已废弃的 in-page notification-bar iframe 方案相比：
+//   - 不再受宿主页面跳转 / unload 影响——独立 OS 窗口、独立进程视图。
+//   - 与 background 通信走 browser.runtime.sendMessage（自身就在扩展上下文）。
+//   - 启动后通过 zpass.savePopupFetch 主动拉 capture；background 把 capture
+//     绑定到 popup 的 windowId 上（不能通过 URL 传明文密码）。
 // ============================================================================
 
-import type { SaveLoginDecision, ShowSaveToastMessage } from "../../src/shared/messages";
+import type {
+  SaveLoginDecision,
+  ShowSaveToastMessage,
+} from "../../src/shared/messages";
 import { zMatrixIcon } from "../../src/shared/icons";
 import "./style.css";
 
-/** parent ↔ iframe 通信协议。parent 是 content-script，origin 是宿主页面。 */
-type InboundMessage =
-  | {
-      type: "zpass.bar.init";
-      payload: ShowSaveToastMessage;
-    }
-  | { type: "zpass.bar.locked" };
+/** 当前 popup 窗口的 id，启动时由 browser.windows.getCurrent() 拿到。 */
+let currentWindowId: number | null = null;
 
-type OutboundMessage =
-  | { type: "zpass.bar.ready" }
-  | { type: "zpass.bar.close" }
-  | { type: "zpass.bar.resize"; height: number };
+bootstrap();
 
-/**
- * iframe 启动 → 通知 parent「我 ready 了，把数据 postMessage 过来」。
- * 之所以不用 query string 传数据：URL 会被记录到浏览器 history / referrer，
- * 明文密码不能走 URL。
- */
-function postToParent(message: OutboundMessage): void {
-  // 不指定 targetOrigin = "*" —— parent.origin 是宿主页（哪个站都可能）。
-  // 这里传出去的内容不包含敏感数据，只有「ready / close / resize」三种控制消息。
-  window.parent.postMessage(message, "*");
-}
-
-/**
- * 监听 parent 推过来的初始化数据。
- *
- * 安全：仅接收来自 window.parent 的消息；event.source !== window.parent 一律丢。
- * 不校验 event.origin —— iframe 处在宿主页 origin 之外，parent.origin 多种多样。
- * 数据本身就在 background→content→iframe 这条链上由 background 单点裁决，
- * 这里只是 UI 渲染层，无独立信任决策。
- */
-window.addEventListener("message", (event) => {
-  if (event.source !== window.parent) return;
-  const msg = event.data as InboundMessage;
-  if (!msg || typeof msg !== "object") return;
-  if (msg.type === "zpass.bar.init") {
-    renderSaveBar(msg.payload);
-  } else if (msg.type === "zpass.bar.locked") {
-    renderLockedBar();
+async function bootstrap(): Promise<void> {
+  try {
+    const win = await browser.windows.getCurrent();
+    if (typeof win.id === "number") currentWindowId = win.id;
+  } catch {
+    // 取不到 windowId 也继续——background 也可以从 sender.tab.windowId 推断。
   }
-});
 
-postToParent({ type: "zpass.bar.ready" });
+  // 监听 background 主动推升级 payload（locked → save 的解锁回放路径）。
+  browser.runtime.onMessage.addListener((message: unknown) => {
+    const msg = message as { type?: string };
+    if (!msg || typeof msg !== "object") return undefined;
+    if (msg.type === "zpass.showSaveToast") {
+      renderSaveBar(message as ShowSaveToastMessage);
+    } else if (msg.type === "zpass.showLocked") {
+      renderLockedBar();
+    }
+    return undefined;
+  });
+
+  // 主动 fetch 一次：刚启动时 background 已经持有 capture，直接拿来渲染。
+  try {
+    const response = (await browser.runtime.sendMessage({
+      type: "zpass.savePopupFetch",
+      payload: { windowId: currentWindowId },
+    })) as
+      | {
+          ok: boolean;
+          result?: {
+            decision: SaveLoginDecision;
+            capture: ShowSaveToastMessage["capture"];
+          };
+          error?: string;
+        }
+      | undefined;
+    if (response?.ok && response.result) {
+      const { decision, capture } = response.result;
+      if (decision.status === "locked") {
+        renderLockedBar();
+      } else {
+        renderSaveBar({ type: "zpass.showSaveToast", decision, capture });
+      }
+    } else {
+      renderError(response?.error ?? "未能加载保存信息。");
+    }
+  } catch (error) {
+    renderError(error instanceof Error ? error.message : String(error));
+  }
+}
 
 /* ============================================================================
  * 渲染：保存 / 更新登录条
@@ -70,7 +83,7 @@ function renderSaveBar(payload: ShowSaveToastMessage): void {
   const isUpdate = decision.status === "update";
   const title = isUpdate ? "更新 ZPass 中的密码？" : "保存登录到 ZPass？";
   const subtitle = isUpdate
-    ? `${decision.itemName || decision.origin} 的密码变了。`
+    ? `${decision.itemName || decision.origin} 的密码已变更。`
     : `保存 ${capture.username} 到 ${decision.origin}。`;
 
   const root = document.getElementById("root");
@@ -95,7 +108,10 @@ function renderSaveBar(payload: ShowSaveToastMessage): void {
       return;
     }
     if (action === "never") {
-      void browser.runtime.sendMessage({ type: "zpass.ignoreSaveOrigin" });
+      void browser.runtime.sendMessage({
+        type: "zpass.ignoreSaveOrigin",
+        payload: { origin: capture.origin, url: capture.url },
+      });
       close();
       return;
     }
@@ -105,7 +121,6 @@ function renderSaveBar(payload: ShowSaveToastMessage): void {
   });
 
   root.append(bar);
-  reportHeight();
 }
 
 async function handleSave(
@@ -120,6 +135,8 @@ async function handleSave(
   const saveLoginPayload: Record<string, unknown> = {
     username: capture.username,
     password: capture.password,
+    origin: capture.origin,
+    url: capture.url,
   };
   if (decision.itemId) saveLoginPayload.itemId = decision.itemId;
   if (capture.suggestedName) saveLoginPayload.name = capture.suggestedName;
@@ -134,7 +151,7 @@ async function handleSave(
       return;
     }
     renderSuccess(isUpdate ? "密码已更新" : "已保存到 ZPass", decision.origin);
-    window.setTimeout(close, 2200);
+    window.setTimeout(close, 2000);
   } catch (error) {
     renderError(error instanceof Error ? error.message : String(error));
   }
@@ -149,7 +166,7 @@ function renderLockedBar(): void {
   if (!root) return;
   root.innerHTML = "";
 
-  const bar = createBarSkeleton("ZPass 已锁定", "解锁后可保存这条登录。");
+  const bar = createBarSkeleton("ZPass 已锁定", "解锁桌面端后将自动继续保存。");
 
   const laterBtn = button("稍后", "btn-secondary", "dismiss");
   const unlockBtn = button("打开 ZPass", "btn-primary", "unlock");
@@ -163,19 +180,18 @@ function renderLockedBar(): void {
     if (!btn) return;
     if (btn.dataset.action === "unlock") {
       void browser.runtime.sendMessage({ type: "zpass.launchDesktop" });
-      // 不主动 close：让用户继续看到「锁定中」直到 background 主推升级
-      // 后的 zpass.showSaveToast 把 init 数据 postMessage 过来。
+      // 不关窗：让用户继续看到「锁定中」直到 background 主推升级后的
+      // zpass.showSaveToast 把内容替换为 save bar。
       return;
     }
     close();
   });
 
   root.append(bar);
-  reportHeight();
 }
 
 /* ============================================================================
- * 渲染：完成态 / 错误态（轻量替换内容，仍占同一个 bar）
+ * 渲染：完成态 / 错误态
  * ========================================================================== */
 
 function renderSuccess(title: string, subtitle: string): void {
@@ -183,13 +199,11 @@ function renderSuccess(title: string, subtitle: string): void {
   if (!root) return;
   root.innerHTML = "";
   root.append(createBarSkeleton(title, subtitle));
-  reportHeight();
 }
 
 function renderError(message: string): void {
   const root = document.getElementById("root");
   if (!root) return;
-  // 错误态仍保留按钮：让用户能关闭。复用 dismiss action。
   root.innerHTML = "";
   const bar = createBarSkeleton("保存失败", message);
   const closeBtn = button("关闭", "btn-secondary", "dismiss");
@@ -201,7 +215,6 @@ function renderError(message: string): void {
     }
   });
   root.append(bar);
-  reportHeight();
 }
 
 /* ============================================================================
@@ -219,7 +232,7 @@ function createBarSkeleton(title: string, subtitle: string): HTMLElement {
 
   const icon = document.createElement("span");
   icon.className = "bar-icon";
-  icon.innerHTML = zMatrixIcon({ size: 18 });
+  icon.innerHTML = zMatrixIcon({ size: 22 });
 
   const text = document.createElement("div");
   text.className = "bar-text";
@@ -238,10 +251,13 @@ function createBarSkeleton(title: string, subtitle: string): HTMLElement {
 
   head.append(icon, text, closeBtn);
 
+  const body = document.createElement("div");
+  body.className = "bar-body";
+
   const actions = document.createElement("div");
   actions.className = "bar-actions";
 
-  bar.append(head, actions);
+  bar.append(head, body, actions);
   return bar;
 }
 
@@ -259,24 +275,7 @@ function button(
 }
 
 function close(): void {
-  postToParent({ type: "zpass.bar.close" });
+  // 独立 OS 窗口直接 window.close()；background 的 windows.onRemoved 监听
+  // 会负责清理 windowId ↔ pendingKey 映射。
+  window.close();
 }
-
-/**
- * 把当前内容实际高度报给 parent，让 outer iframe 元素跟着收缩 / 扩展。
- * 用 requestAnimationFrame 等一帧、保证布局已稳定。
- */
-function reportHeight(): void {
-  requestAnimationFrame(() => {
-    const root = document.getElementById("root");
-    if (!root) return;
-    const bar = root.querySelector<HTMLElement>(".bar");
-    if (!bar) return;
-    // padding 8 上下都给阴影留空间。
-    const total = bar.getBoundingClientRect().height + 16;
-    postToParent({ type: "zpass.bar.resize", height: Math.ceil(total) });
-  });
-}
-
-// 兜底：iframe 内任意状态都把 SaveLoginDecision 类型暴露给 TS 检查。
-export type { SaveLoginDecision };

@@ -51,18 +51,21 @@ Manual test matrix:
 
 ### Save-login prompt
 
-After the user submits a login form, the extension shows a bottom-right
-toast asking whether to save the new credentials to ZPass (or update the
-password on an existing match), mirroring the Bitwarden
-`notification.background` flow:
+After the user submits a login form, the extension opens a **standalone
+OS-level popup window** (`browser.windows.create({ type: "popup" })`,
+420×220, anchored to the top-right of the active browser window) asking
+whether to save the new credentials to ZPass (or update the password on
+an existing match). Because the popup lives outside the host page DOM,
+it survives the post-submit navigation that immediately destroys an
+in-page toast — the user has unlimited time to click 保存.
 
-| Page state                                                    | Toast shown                                                                                                                |
+| Page state                                                    | Popup shown                                                                                                                |
 |---------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------|
 | Submit form, vault has no matching username for the origin    | 「保存登录到 ZPass？」 with `[保存] [永不] [×]`                                                                                    |
 | Submit form, same username exists with a different password   | 「更新 ZPass 中的密码？」 with `[更新密码] [永不] [×]`                                                                             |
 | Account + password match an existing entry                    | (silent)                                                                                                                   |
 | Desktop offline                                               | (silent — the extension is inert without a connected desktop)                                                               |
-| Desktop online but vault locked                               | 「ZPass 已锁定」 with `[打开 ZPass] [稍后] [×]`; capture is queued in background and replayed after unlock                          |
+| Desktop online but vault locked                               | 「ZPass 已锁定」 with `[打开 ZPass] [稍后] [×]`; capture is queued in background and the popup is upgraded to a save bar after unlock |
 | Origin previously dismissed with 「永不」                            | (silent)                                                                                                                   |
 
 Detection signals (any of):

@@ -20,13 +20,13 @@
 //     在登录失败的页面也弹一次保存提示——用户点取消就行。
 //   - SPA 路由切换通过 URL 变化检测兜底，不 patch history（避免污染
 //     页面全局），轮询频率低（200ms）足以捕获正常导航。
+//
+// 保存提示的展示：content-script 把 capture 上报给 background 后即结束本职
+// 工作。是否弹「保存登录」**不在这里展示**——背景脚本通过
+// browser.windows.create({ type: "popup" }) 在独立 OS 窗口里渲染，这样
+// 即使宿主页面跳转 / DOM 重绘也不影响用户决策。
 
 import { isTotpField } from "./totp-fields";
-import { showSaveBar, showLockedBar } from "./notification-bar";
-import type {
-  SaveLoginDecision,
-  ShowSaveToastMessage,
-} from "../shared/messages";
 
 interface CredentialSnapshot {
   username: string;
@@ -61,41 +61,8 @@ export function installLoginCapture(): void {
     lastUrl = location.href;
   }
 
-  // 必须在发 checkSaveQueue 之前先装 onMessage 监听器——background 可能立即
-  // pushSaveToast 推回来，晚一步就漏接。
-  browser.runtime.onMessage.addListener((message: unknown) => {
-    const msg = message as Partial<ShowSaveToastMessage>;
-    if (msg?.type !== "zpass.showSaveToast" || !msg.decision || !msg.capture) {
-      return undefined;
-    }
-    if (msg.decision.status === "new" || msg.decision.status === "update") {
-      // 优先用 capture 带的 suggestedName——提交那一刻原页面的 title，比
-      // 「跳转后页面」的 title 更准。
-      const payload: ShowSaveToastMessage = {
-        type: "zpass.showSaveToast",
-        decision: msg.decision,
-        capture: {
-          origin: msg.capture.origin,
-          url: msg.capture.url,
-          username: msg.capture.username,
-          password: msg.capture.password,
-          suggestedName: msg.capture.suggestedName || deriveSuggestedName(),
-        },
-      };
-      showSaveBar(payload);
-    }
-    return { ok: true };
-  });
-
-  // 启动时主动 pull 一次：处理「上一页提交后页面跳转到本页」场景。
-  // background 会查当前 tab+origin 队列，有 new/update capture 就回推。
-  // 避免轮询：只发一次，后续靠 background 的 tabs.onUpdated 主推补。
-  void browser.runtime
-    .sendMessage({ type: "zpass.checkSaveQueue" })
-    .catch(() => {
-      // service worker 刚启动 / desktop 离线都可能失败——静默。
-      // tabs.onUpdated push 是决定性路径、不依赖这里成功。
-    });
+  // content-script 不再处理「保存提示」UI——背景脚本直接开独立 popup 窗口。
+  // 因此这里没有 zpass.showSaveToast 监听 / checkSaveQueue 主动 pull。
 
   // 在已有 password input 上 attach
   rescanDocument();
@@ -257,47 +224,19 @@ async function reportCapture(
   console.log("[ZPass] report capture", reason, snapshot.username);
 
   try {
-    const response = await browser.runtime.sendMessage({
+    await browser.runtime.sendMessage({
       type: "zpass.captureLogin",
       payload: {
         username: snapshot.username,
         password: snapshot.password,
-        // 页面 title 上报作建议名称——入 background 队列后，跨页面跳转重推
-        // toast 时还能拿到当初页面的名字。新页面的 title 并不能代表“登录
-        // 成功后的那个服务”（往往变成 Dashboard 或 Home）。
+        // 页面 title 作为建议名称——跳转后页面 title 往往变成 Dashboard / Home，
+        // 不能代表“登录成功后的那个服务”，所以这里把提交那一刻的 title 一并上报。
         suggestedName: snapshot.pageTitle || undefined,
       },
     });
-    if (!response || response.ok !== true || !response.result) {
-      // background 没把 decision 返回（desktop 不在线 / 别的错误）——
-      // 静默：用户的登录不应该被插件错误打扰。debug 时可以解开 console。
-      void reason;
-      return;
-    }
-    const decision = response.result as SaveLoginDecision;
-    console.log("[ZPass] received decision", decision.status, decision.origin);
-    if (decision.status === "new" || decision.status === "update") {
-      // 本地「即时弹」分支：在原页还在时立即弹 iframe。如果后续页面跳转，
-      // iframe 随原页 DOM 卸载是预期之内的——background 队列里同一份 capture
-      // 会被新页面 content-script 的 checkSaveQueue / tabs.onUpdated push 重拉。
-      const payload: ShowSaveToastMessage = {
-        type: "zpass.showSaveToast",
-        decision,
-        capture: {
-          origin: decision.origin,
-          url: location.href,
-          username: snapshot.username,
-          password: snapshot.password,
-          suggestedName: snapshot.pageTitle || deriveSuggestedName(),
-        },
-      };
-      showSaveBar(payload);
-    } else if (decision.status === "locked") {
-      // 用户未解锁 —— 弹「解锁并保存」。background 已记下 capture，解锁后会
-      // 主动 push 升级后的 zpass.showSaveToast、iframe 会被重新 init 为 save bar。
-      showLockedBar();
-    }
-    // status=none 静默
+    // 不再处理 decision——保存提示由 background 直接开独立 popup 窗口展示。
+    // content-script 上报完即收工，登录页面再如何跳转都不影响用户能否完成保存。
+    void reason;
   } catch {
     // 通信失败（service worker 短暂 unload / desktop 离线）——静默。
   }
@@ -389,15 +328,4 @@ function describeButton(button: HTMLElement): string {
 
 function isLoginLikeForm(form: HTMLFormElement): boolean {
   return form.querySelector('input[type="password"]') !== null;
-}
-
-function deriveSuggestedName(): string {
-  // 优先取 document.title（去掉 "- 登录"、" | Login" 这种后缀效果不显著，留给后端处理）。
-  const title = (document.title || "").trim();
-  if (title) return title;
-  try {
-    return new URL(location.href).hostname;
-  } catch {
-    return location.host || "";
-  }
 }
