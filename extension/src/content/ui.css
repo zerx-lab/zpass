@@ -130,9 +130,18 @@
 }
 
 /* ============ Menu / Notice ============ */
+/*
+ * 关键：使用原生 popover API 把浮层提升到 top-layer，
+ * 避免被宿主 <dialog showModal()> 之类的元素遮挡。
+ * 所以 position 必须用 fixed（top-layer 元素以视口为参考），
+ * 并 reset popover 默认的 inset/margin/border/padding。
+ */
 .zpass-menu,
 .zpass-notice {
-  position: absolute;
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 0;
   z-index: 2147483647;
   width: 280px;
   border: 1px solid var(--zp-line);

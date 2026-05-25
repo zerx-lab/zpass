@@ -61,6 +61,13 @@ const MAPPING = {
   "person.crop.circle.fill": "account-circle",
   "key.horizontal.fill": "key",
   keyboard: "keyboard",
+  // ── 扫码 / 二维码 ─────────────────────────────────────────────
+  "qrcode.viewfinder": "qr-code-scanner",
+  qrcode: "qr-code-2",
+  "camera.fill": "camera-alt",
+  "photo.fill": "photo",
+  "doc.on.clipboard": "content-paste",
+  "checkmark.shield.fill": "verified-user",
 } as IconMapping;
 
 /**

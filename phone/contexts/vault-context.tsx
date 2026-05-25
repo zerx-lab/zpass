@@ -431,6 +431,13 @@ function fromDraft(draft: ItemDraft): {
   for (const [k, v] of Object.entries(rest)) {
     if (k === "id" || k === "modified") continue;
     if (v === undefined || v === null || v === "") continue;
+    // 独立 totp 条目把 secret 持久化到 fields["totp"] —— 与 desktop
+    // ItemTypeTOTP 字段约定一致（fields["totp"] 同时覆盖 login.totp 与
+    // 独立 totp 两类来源），保证两端 JSON 导出可直接互导。
+    if (type === "totp" && k === "secret") {
+      fields["totp"] = v;
+      continue;
+    }
     fields[k] = v;
   }
   return { type, name, fields };

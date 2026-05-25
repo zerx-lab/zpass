@@ -19,11 +19,12 @@ import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useVault } from "@/contexts/vault-context";
 import { faviconColor, faviconInitials } from "@/lib/format";
 import {
-  generateTotp,
+  computeOtp,
   formatTotpCode,
-  totpElapsed,
-  totpRemaining,
-  TOTP_PERIOD,
+  otpElapsed,
+  otpRemaining,
+  resolveOtpMeta,
+  type OtpMeta,
 } from "@/lib/totp";
 import { copyEphemeral } from "@/lib/clipboard";
 
@@ -47,33 +48,56 @@ export default function TotpDetailScreen() {
       : item?.type === "totp"
         ? item.secret
         : undefined;
+
+  // 把 secret（可能是 otpauth:// URI 或裸 base32）解析成完整元信息
+  // —— 顺带从 URI 中拿到 issuer / account / 算法 / 位数 / 周期。
+  const meta: OtpMeta | null = useMemo(
+    () => (secret ? resolveOtpMeta(secret) : null),
+    [secret],
+  );
+
+  // 优先展示 URI 中的 issuer / account；其次退回到条目本身字段。
   const usernameDisplay =
     item?.type === "login"
       ? item.username
       : item?.type === "totp"
-        ? item.account ?? item.issuer ?? ""
+        ? meta?.account ||
+          item.account ||
+          meta?.issuer ||
+          item.issuer ||
+          ""
         : "";
 
-  const [remaining, setRemaining] = useState(totpRemaining());
-  const [periodKey, setPeriodKey] = useState(() =>
-    Math.floor(Date.now() / 1000 / TOTP_PERIOD),
+  const period = meta?.period && meta.type !== "hotp" ? meta.period : 30;
+  const digits = meta?.digits ?? 6;
+
+  const [remaining, setRemaining] = useState(() =>
+    meta && meta.type !== "hotp" ? otpRemaining(meta) : period,
   );
-  const isUrgent = remaining <= 5;
+  const [periodKey, setPeriodKey] = useState(() =>
+    meta && meta.type !== "hotp"
+      ? Math.floor(Date.now() / 1000 / period)
+      : 0,
+  );
+  const isUrgent = meta?.type !== "hotp" && remaining <= 5;
 
   const progressAnim = useRef(
-    new Animated.Value(totpElapsed() / TOTP_PERIOD),
+    new Animated.Value(
+      meta && meta.type !== "hotp" ? otpElapsed(meta) / period : 0,
+    ),
   ).current;
   const progressAnimRef = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {
+    if (!meta || meta.type === "hotp") return;
     function tick() {
-      const rem = totpRemaining();
-      const elapsed = totpElapsed();
+      const rem = otpRemaining(meta!);
+      const elapsed = otpElapsed(meta!);
       setRemaining(rem);
-      setPeriodKey(Math.floor(Date.now() / 1000 / TOTP_PERIOD));
+      setPeriodKey(Math.floor(Date.now() / 1000 / period));
 
       progressAnimRef.current?.stop();
-      progressAnim.setValue(elapsed === 0 ? 0 : elapsed / TOTP_PERIOD);
+      progressAnim.setValue(elapsed === 0 ? 0 : elapsed / period);
       const anim = Animated.timing(progressAnim, {
         toValue: 1,
         duration: rem * 1000,
@@ -89,13 +113,21 @@ export default function TotpDetailScreen() {
       clearInterval(t);
       progressAnimRef.current?.stop();
     };
-  }, [progressAnim]);
+  }, [progressAnim, meta, period]);
 
   const code = useMemo(
-    () => (secret ? generateTotp(secret) : "------"),
+    () => (meta ? computeOtp(meta) : "-".repeat(digits)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [secret, periodKey],
+    [meta, periodKey],
   );
+
+  const algoLine = meta
+    ? meta.type === "hotp"
+      ? `${meta.algorithm} · ${meta.digits} 位 · 计数器 ${meta.counter}`
+      : meta.type === "steam"
+        ? `Steam Guard · ${meta.algorithm} · ${meta.digits} 位 · ${meta.period}s`
+        : `${meta.algorithm} · ${meta.digits} 位 · ${meta.period}s`
+    : "SHA-1 · 6 位 · 30s";
 
   const handleCopy = useCallback(async () => {
     await copyEphemeral(code);
@@ -180,18 +212,28 @@ export default function TotpDetailScreen() {
           {formatTotpCode(code)}
         </Text>
 
-        <Text style={[styles.expiresText, { color: C.text3 }]}>
-          {isUrgent ? "即将刷新 · " : "有效期 · "}
-          {remaining}s
-        </Text>
-
-        <View style={styles.progressOuter}>
-          <View style={[styles.progressTrack, { backgroundColor: C.bgElev2 }]}>
-            <Animated.View
-              style={[styles.progressBar, { width: barWidth, backgroundColor: barColor }]}
-            />
-          </View>
-        </View>
+        {meta?.type === "hotp" ? (
+          <Text style={[styles.expiresText, { color: C.text3 }]}>
+            HOTP · 计数器 {meta.counter}
+          </Text>
+        ) : (
+          <>
+            <Text style={[styles.expiresText, { color: C.text3 }]}>
+              {isUrgent ? "即将刷新 · " : "有效期 · "}
+              {remaining}s
+            </Text>
+            <View style={styles.progressOuter}>
+              <View style={[styles.progressTrack, { backgroundColor: C.bgElev2 }]}>
+                <Animated.View
+                  style={[
+                    styles.progressBar,
+                    { width: barWidth, backgroundColor: barColor },
+                  ]}
+                />
+              </View>
+            </View>
+          </>
+        )}
 
         <TouchableOpacity
           style={[styles.copyBtn, { borderColor: C.line, backgroundColor: C.bgElev }]}
@@ -211,11 +253,13 @@ export default function TotpDetailScreen() {
             </>
           ) : null}
           <View style={[styles.metaDivider, { backgroundColor: C.lineSoft }]} />
-          <MetaRow label="算法" value="SHA-1 · 6 位 · 30s" c={C} mono />
+          <MetaRow label="算法" value={algoLine} c={C} mono />
         </View>
 
         <Text style={[styles.hint, { color: C.text3 }]}>
-          验证码每 30 秒自动刷新 · 复制后 30 秒自动清空剪贴板
+          {meta?.type === "hotp"
+            ? "HOTP 按计数器递增 · 复制后 30 秒自动清空剪贴板"
+            : `验证码每 ${period} 秒自动刷新 · 复制后 30 秒自动清空剪贴板`}
         </Text>
       </ScrollView>
     </SafeAreaView>

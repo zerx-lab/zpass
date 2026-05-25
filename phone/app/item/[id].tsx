@@ -21,6 +21,8 @@ import { useVault, type ItemDraft, type ItemPatch } from "@/contexts/vault-conte
 import type { VaultItem, VaultItemType } from "@/data/vault";
 import { TYPE_LABELS } from "@/lib/format";
 import { generatePassword } from "@/lib/password";
+import { QrScanner } from "@/components/qr-scanner";
+import type { OtpMeta } from "@/lib/totp";
 
 const MONO = Platform.select({ ios: "Menlo", default: "monospace" });
 
@@ -35,6 +37,8 @@ interface FieldDef {
   mono?: boolean;
   /** 仅 login.password 启用「生成」 */
   generate?: boolean;
+  /** 启用「扫描二维码」入口（仅 TOTP 密钥字段） */
+  scan?: boolean;
   keyboard?: "default" | "email-address" | "numeric";
 }
 
@@ -43,12 +47,25 @@ const TYPE_FIELDS: Record<VaultItemType, FieldDef[]> = {
     { key: "username", label: "用户名", placeholder: "邮箱或账号", keyboard: "email-address" },
     { key: "password", label: "密码", secret: true, mono: true, generate: true },
     { key: "url", label: "网址", placeholder: "example.com" },
-    { key: "totp", label: "TOTP 密钥", placeholder: "base32 密钥（可选）", mono: true },
+    {
+      key: "totp",
+      label: "TOTP 密钥",
+      placeholder: "base32 / otpauth:// 或点扫码",
+      mono: true,
+      scan: true,
+    },
   ],
   totp: [
     { key: "issuer", label: "发行者", placeholder: "GitHub / Google" },
     { key: "account", label: "账户", placeholder: "邮箱 / 用户名" },
-    { key: "secret", label: "TOTP 密钥", placeholder: "base32 密钥", mono: true, secret: true },
+    {
+      key: "secret",
+      label: "TOTP 密钥",
+      placeholder: "base32 / otpauth:// 或点扫码",
+      mono: true,
+      secret: true,
+      scan: true,
+    },
   ],
   card: [
     { key: "cardholder", label: "持卡人" },
@@ -126,6 +143,27 @@ export default function ItemEditorScreen() {
   const set = useCallback((k: string, val: string) => {
     setValues((prev) => ({ ...prev, [k]: val }));
   }, []);
+
+  /* ── 扫码：哪个字段触发扫描 / 弹窗是否打开 ──────────────────── */
+  const [scanTarget, setScanTarget] = useState<string | null>(null);
+  const handleScanResult = useCallback(
+    (uri: string, meta: OtpMeta) => {
+      if (!scanTarget) return;
+      setValues((prev) => {
+        const next: Record<string, string> = { ...prev, [scanTarget]: uri };
+        // 独立 totp 条目：尊重用户已有输入，仅在 issuer / account 为空时回填
+        if (type === "totp") {
+          if (!next.issuer && meta.issuer) next.issuer = meta.issuer;
+          if (!next.account && meta.account) next.account = meta.account;
+          // 名称为空时也用 issuer 兜底，让列表更可读
+          if (!next.name && meta.issuer) next.name = meta.issuer;
+        }
+        return next;
+      });
+      setScanTarget(null);
+    },
+    [scanTarget, type],
+  );
 
   const handleSave = useCallback(async () => {
     const name = (values.name ?? "").trim();
@@ -293,6 +331,14 @@ export default function ItemEditorScreen() {
                     }
                   : undefined
               }
+              onScan={
+                f.scan
+                  ? () => {
+                      Haptics.selectionAsync();
+                      setScanTarget(f.key);
+                    }
+                  : undefined
+              }
             />
           ))}
 
@@ -350,6 +396,12 @@ export default function ItemEditorScreen() {
           <View style={{ height: 32 }} />
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <QrScanner
+        visible={scanTarget !== null}
+        onClose={() => setScanTarget(null)}
+        onApply={handleScanResult}
+      />
     </SafeAreaView>
   );
 }
@@ -362,12 +414,14 @@ function Field({
   onChange,
   c,
   onGenerate,
+  onScan,
 }: {
   def: FieldDef;
   value: string;
   onChange: (v: string) => void;
   c: (typeof Colors)["dark"];
   onGenerate?: () => void;
+  onScan?: () => void;
 }) {
   const [revealed, setRevealed] = useState(false);
   const hide = def.secret && !revealed;
@@ -425,6 +479,15 @@ function Field({
             style={styles.fieldIcon}
           >
             <IconSymbol name="arrow.clockwise" size={16} color={c.text3} />
+          </TouchableOpacity>
+        )}
+        {onScan && (
+          <TouchableOpacity
+            onPress={onScan}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            style={styles.fieldIcon}
+          >
+            <IconSymbol name="qrcode.viewfinder" size={18} color={c.text2} />
           </TouchableOpacity>
         )}
       </View>

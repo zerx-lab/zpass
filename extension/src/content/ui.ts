@@ -36,6 +36,40 @@ interface CleanupHost extends HTMLElement {
   __cleanup?: () => void;
 }
 
+/**
+ * 把元素挂载到 top-layer。宿主页面如果用 <dialog showModal()> /
+ * 原生 popover，会绕过 z-index 把我们盖住；唯一可靠的反制是
+ * 让我们的浮层也进入 top-layer。Popover API 在 Chrome 114+ 可用，
+ * 不支持时降级为普通 fixed 元素（z-index 已是 i32 上限）。
+ */
+function mountInTopLayer(node: HTMLElement): void {
+  document.documentElement.append(node);
+  const supportsPopover =
+    typeof (node as HTMLElement & { showPopover?: () => void }).showPopover ===
+    "function";
+  if (!supportsPopover) return;
+  node.setAttribute("popover", "manual");
+  try {
+    (node as HTMLElement & { showPopover: () => void }).showPopover();
+  } catch {
+    // 已 connected / 重复调用 / 浏览器拒绝 — 静默降级
+    node.removeAttribute("popover");
+  }
+}
+
+function unmountTopLayer(node: HTMLElement): void {
+  const hide = (node as HTMLElement & { hidePopover?: () => void })
+    .hidePopover;
+  if (typeof hide === "function" && node.hasAttribute("popover")) {
+    try {
+      hide.call(node);
+    } catch {
+      // 已隐藏 — 忽略
+    }
+  }
+  node.remove();
+}
+
 /** 创建浮动填充按钮（点阵 Z 图标） */
 export function createAutofillButton(): HTMLButtonElement {
   const button = el("button", {
@@ -113,7 +147,7 @@ export function showCredentialMenu(
     menu.append(option);
   });
 
-  document.documentElement.append(menu);
+  mountInTopLayer(menu);
   positionFloating(menu, anchor, 280);
 
   // ====== 键盘导航 ======
@@ -185,9 +219,9 @@ export function showTransientNotice(
     attrs: { role: "status", "aria-live": "polite" },
     text: message,
   });
-  document.documentElement.append(notice);
+  mountInTopLayer(notice);
   positionFloating(notice, anchor, 280);
-  window.setTimeout(() => notice.remove(), 2600);
+  window.setTimeout(() => unmountTopLayer(notice), 2600);
 }
 
 /** 右上角持久通知（4.2s） */
@@ -400,7 +434,7 @@ function closeMenus(): void {
     .querySelectorAll<CleanupHost>(".zpass-menu, .zpass-notice")
     .forEach((node) => {
       node.__cleanup?.();
-      node.remove();
+      unmountTopLayer(node);
     });
 }
 
@@ -444,8 +478,9 @@ function positionFloating(
   node.style.maxHeight = `${limited}px`;
 
   const top = flipUp ? rect.top - limited - gap : rect.bottom + gap;
-  node.style.left = `${window.scrollX + left}px`;
-  node.style.top = `${window.scrollY + Math.max(margin, top)}px`;
+  // position: fixed —— 直接以视口坐标定位，不再叠加 scrollX/Y。
+  node.style.left = `${left}px`;
+  node.style.top = `${Math.max(margin, top)}px`;
 }
 
 function passkeyTitle(item: PasskeyDescriptor): string {

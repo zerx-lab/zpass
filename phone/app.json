@@ -38,6 +38,21 @@
             "backgroundColor": "#000000"
           }
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "需要相机以扫描身份验证器二维码（otpauth://）。图像不会离开本机，不会上传到任何服务器。",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "需要访问相册以从图片中识别身份验证器二维码（otpauth://）。",
+          "cameraPermission": false
+        }
       ]
     ],
     "experiments": {
