@@ -91,15 +91,11 @@ jobs:
       - name: Install pnpm dependencies
         run: pnpm install --frozen-lockfile
 
-      # `task make` 依赖 `task icons`, 后者用 ImageMagick `magick` 命令重新
-      # 渲染 PNG. 仓库里所有尺寸的 PNG 已经 commit, 只需把 source 的 mtime
-      # 推到很旧, 再 touch generates, task 的 sources/generates 比较就判定
-      # 为 up-to-date, 直接跳过 magick 调用 - Windows runner 上不再需要装
-      # ImageMagick.
-      - name: Mark generated icons as up-to-date
-        run: |
-          touch -d '2020-01-01' ../assets/logo.png
-          touch assets/logo/png/*.png
+      # `task make` 链路里 `task icons` 调 ImageMagick 的 `magick` 命令.
+      # Chocolatey 的 imagemagick.app 包含 IM7, 自带 `magick`, 装好后直接在 PATH.
+      - name: Install ImageMagick
+        shell: pwsh
+        run: choco install imagemagick.app -y --no-progress
 
       # 显式设 GOOS/GOARCH 防止 task build:go 在跨架构 runner 上猜错;
       # CGO_ENABLED=0 因为 Go 端依赖 modernc.org/sqlite (pure Go), 不需要
@@ -218,6 +214,9 @@ jobs:
       #   rpm + rpm-build      MakerRpm (electron-installer-redhat)
       #   libfuse2             AppImage runtime (生成 + 测试时 mount)
       #   desktop-file-utils   .desktop 文件校验
+      #   imagemagick          `task icons` 调用 magick 重新生成 PNG (ubuntu
+      #                        默认装的是 IM6, 提供 convert 但没有 magick
+      #                        二进制 - 下一步写 wrapper 桥接)
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
@@ -225,15 +224,22 @@ jobs:
             fakeroot dpkg \
             rpm \
             libfuse2 \
-            file desktop-file-utils
+            file desktop-file-utils \
+            imagemagick
+
+      # IM6 没有 `magick` 命令, Taskfile 的 icons task 又硬调 `magick ... -resize`.
+      # 写个 thin wrapper 转发到 IM6 的 convert, 语法兼容. 避免改 Taskfile.
+      - name: Provide `magick` shim → convert (IM6 兼容)
+        run: |
+          sudo tee /usr/local/bin/magick > /dev/null <<'EOF'
+          #!/usr/bin/env bash
+          exec convert "$@"
+          EOF
+          sudo chmod +x /usr/local/bin/magick
+          magick -version | head -n1
 
       - name: Install pnpm dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Mark generated icons as up-to-date
-        run: |
-          touch -d '2020-01-01' ../assets/logo.png
-          touch assets/logo/png/*.png
 
       - name: Build (task make → AppImage + deb + rpm + zip)
         env:
