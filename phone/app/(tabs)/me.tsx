@@ -27,6 +27,7 @@ import type { VaultItem, VaultItemType } from "@/data/vault";
 import { exportVault, pickAndParseImport } from "@/lib/transfer";
 import { sortSpaces, type Space } from "@/lib/spaces";
 import { IconSymbol } from "@/components/ui/icon-symbol";
+import { SpaceAvatar } from "@/components/space-avatar";
 
 const MONO = Platform.select({ ios: "ui-monospace", default: "monospace" });
 
@@ -160,24 +161,47 @@ function MenuSection({
   );
 }
 
-function UserCard({ c, count }: { c: typeof Colors.dark; count: number }) {
+function UserCard({
+  c,
+  count,
+  space,
+  onPress,
+}: {
+  c: typeof Colors.dark;
+  count: number;
+  space: Space | null;
+  onPress?: () => void;
+}) {
+  // 头像与标题都跟随当前空间；点击整个卡片打开空间管理面板。
+  // 用 TouchableOpacity 包裹整张卡：用户感知"头像可以改" → 进入空间管理
+  // 后通过长按行做重命名（保留原有交互入口，避免新增二级 modal）。
   return (
-    <View
+    <TouchableOpacity
+      activeOpacity={0.85}
+      onPress={onPress}
       style={[
         styles.userCard,
         { backgroundColor: c.bgElev, borderColor: c.line },
       ]}
     >
-      <View style={styles.avatar}>
-        <Text style={styles.avatarText}>Z</Text>
-      </View>
+      <SpaceAvatar
+        space={space}
+        size={56}
+        background={c.text}
+        foreground={c.bg}
+        fontSize={22}
+        borderRadius={28}
+      />
       <View style={styles.userInfo}>
-        <Text style={[styles.userName, { color: c.text }]}>本地保险库</Text>
+        <Text style={[styles.userName, { color: c.text }]} numberOfLines={1}>
+          {space?.name ?? "本地保险库"}
+        </Text>
         <Text style={[styles.userPlan, { color: c.text3, fontFamily: MONO }]}>
           {count} 条加密条目 · 零知识
         </Text>
       </View>
-    </View>
+      <Text style={[styles.chevron, { color: c.text3 }]}>{"›"}</Text>
+    </TouchableOpacity>
   );
 }
 
@@ -197,6 +221,7 @@ export default function MeScreen() {
     changeMasterPassword,
     spaces,
     activeSpaceId,
+    activeSpace,
     setActiveSpace,
     createSpace,
     renameSpace,
@@ -439,7 +464,12 @@ export default function MeScreen() {
           <Text style={[styles.pageTitle, { color: c.text }]}>我的</Text>
         </View>
 
-        <UserCard c={c} count={items.length} />
+        <UserCard
+          c={c}
+          count={items.length}
+          space={activeSpace}
+          onPress={() => setSpacesModal(true)}
+        />
 
         <MenuSection label="SPACES · 空间" rows={spacesRows} c={c} />
         <MenuSection label="STATS · 条目统计" rows={statsRows} c={c} />
@@ -1070,15 +1100,6 @@ const styles = StyleSheet.create({
     gap: 14,
     marginBottom: 16,
   },
-  avatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: "#000",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  avatarText: { color: "#fff", fontSize: 22, fontWeight: "700", lineHeight: 28 },
   userInfo: { flex: 1, gap: 3 },
   userName: { fontSize: 15, fontWeight: "600" },
   userPlan: { fontSize: 11 },

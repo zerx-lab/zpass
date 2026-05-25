@@ -67,8 +67,13 @@ interface VaultContextValue {
 
   /** 空间列表（按 order 升序） */
   spaces: Space[];
-  /** 当前激活空间 id；锁定时为 null */
+  /** 当前激活空间 id；首次启动尚未创建任何空间时为 null */
   activeSpaceId: string | null;
+  /**
+   * 当前激活空间对象（便捷 selector）。未初始化 / 找不到时为 null。
+   * 头像 / 标题等纯展示场景用它比每次自己 find 更省事。
+   */
+  activeSpace: Space | null;
   setActiveSpace: (id: string) => Promise<void>;
   createSpace: (name: string) => Promise<Space | null>;
   renameSpace: (id: string, name: string) => Promise<ActionResult>;
@@ -109,7 +114,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [activeSpaceId, setActiveSpaceIdState] = useState<string | null>(null);
 
-  // 启动时探测一次 vault 状态
+  // 启动时探测一次 vault 状态；若已 initialized，顺便把 plaintext 的 spaces
+  // 拉一遍 —— 锁屏页 / 我的页头像要展示"当前空间名首字符"，spaces 是
+  // plaintext，不需要解锁就能读（参见 vault-service.listSpaces 的注释）。
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -118,6 +125,16 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         if (!alive) return;
         setInitialized(st.initialized);
         setLocked(!st.unlocked);
+        if (st.initialized) {
+          try {
+            const snap = await vaultService.listSpaces();
+            if (!alive) return;
+            setSpaces(snap.spaces);
+            setActiveSpaceIdState(snap.activeSpaceId);
+          } catch {
+            // plaintext 读取失败不致命 —— 头像走 fallback "Z"
+          }
+        }
       } catch {
         // 文件不存在 / 解析失败：当作未初始化
         if (!alive) return;
@@ -132,12 +149,11 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // 解锁后自动加载 items + spaces；锁定后清空
+  // 解锁后加载 items + 刷新 spaces；锁定后只清 items，spaces 保留
+  // （plaintext，锁屏头像依赖）
   const refresh = useCallback(async () => {
     if (!vaultService.isUnlocked()) {
       setAllItems([]);
-      setSpaces([]);
-      setActiveSpaceIdState(null);
       return;
     }
     const [payloads, spaceSnap] = await Promise.all([
@@ -153,9 +169,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     if (!locked) {
       refresh();
     } else {
+      // 锁定时只清 items；spaces / activeSpaceId 是 plaintext，保留下来
+      // 给锁屏页与"我的"页的空间头像使用
       setAllItems([]);
-      setSpaces([]);
-      setActiveSpaceIdState(null);
     }
   }, [locked, refresh]);
 
@@ -167,6 +183,12 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       return sid === activeSpaceId;
     });
   }, [allItems, activeSpaceId]);
+
+  // 当前激活空间对象（便捷 selector）—— 头像 / 标题展示用
+  const activeSpace = useMemo<Space | null>(() => {
+    if (!activeSpaceId) return null;
+    return spaces.find((s) => s.id === activeSpaceId) ?? null;
+  }, [spaces, activeSpaceId]);
 
   /* ---------------------------- CRUD ---------------------------- */
 
@@ -302,8 +324,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     vaultService.lock();
     setLocked(true);
     setAllItems([]);
-    setSpaces([]);
-    setActiveSpaceIdState(null);
+    // 不清 spaces / activeSpaceId：plaintext 数据，锁屏页头像要用
   }, []);
 
   /* ---------------------- 空间操作 ---------------------- */
@@ -384,6 +405,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       hydrated,
       spaces,
       activeSpaceId,
+      activeSpace,
       setActiveSpace,
       createSpace,
       renameSpace,
@@ -409,6 +431,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       hydrated,
       spaces,
       activeSpaceId,
+      activeSpace,
       setActiveSpace,
       createSpace,
       renameSpace,

@@ -5,6 +5,7 @@ import {
   ipcMain,
   Menu,
   nativeImage,
+  shell,
   Tray,
 } from "electron";
 import { type FSWatcher, watch as fsWatch } from "node:fs";
@@ -211,6 +212,20 @@ ipcMain.handle(
     return result.filePath;
   },
 );
+
+// Reveal a file in the OS file manager (Finder / Explorer / Nautilus). Used by
+// the export-success toast's "open folder" action so users don't have to copy
+// the long backup path by hand. shell.showItemInFolder selects the file as
+// well — we open the parent dir and highlight the freshly-written backup.
+//
+// `path` must be an absolute path the renderer just received from a trusted
+// backend call (e.g. ExportService.ExportAllToFile). We do NOT take arbitrary
+// renderer-supplied paths to navigate to; the renderer is sandboxed but this
+// IPC still touches the user's shell so we keep the contract narrow.
+ipcMain.handle("desktop:shell:show-in-folder", (_ev, path: string) => {
+  if (typeof path !== "string" || path === "") return;
+  shell.showItemInFolder(path);
+});
 
 /**
  * Dev-only hot restart triggered when scripts/dev-watcher.mjs touches the

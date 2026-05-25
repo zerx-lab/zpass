@@ -19,13 +19,14 @@ import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useVault } from "@/contexts/vault-context";
 import { IconSymbol } from "@/components/ui/icon-symbol";
+import { SpaceAvatar } from "@/components/space-avatar";
 
 const MONO = Platform.select({ ios: "Menlo", default: "monospace" });
 
 export function LockOverlay() {
   const scheme = useColorScheme() ?? "dark";
   const c = Colors[scheme];
-  const { unlock } = useVault();
+  const { unlock, activeSpace } = useVault();
 
   const [pw, setPw] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -52,10 +53,19 @@ export function LockOverlay() {
 
   return (
     <View style={[styles.root, { backgroundColor: c.bg }]}>
-      <View style={[styles.logo, { backgroundColor: c.text }]}>
-        <Text style={[styles.logoText, { color: c.bg }]}>Z</Text>
+      <View style={styles.logoWrap}>
+        <SpaceAvatar
+          space={activeSpace}
+          size={56}
+          background={c.text}
+          foreground={c.bg}
+          fontSize={28}
+          borderRadius={14}
+        />
       </View>
-      <Text style={[styles.title, { color: c.text }]}>ZPass 已锁定</Text>
+      <Text style={[styles.title, { color: c.text }]}>
+        {activeSpace ? `「${activeSpace.name}」已锁定` : "ZPass 已锁定"}
+      </Text>
       <Text style={[styles.sub, { color: c.text3, fontFamily: MONO }]}>
         输入主密码以解锁保险库
       </Text>
@@ -119,15 +129,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 36,
     zIndex: 1000,
   },
-  logo: {
-    width: 56,
-    height: 56,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 20,
-  },
-  logoText: { fontSize: 28, fontWeight: "700" },
+  logoWrap: { marginBottom: 20 },
   title: { fontSize: 20, fontWeight: "700", letterSpacing: -0.3 },
   sub: { fontSize: 12, marginTop: 6, marginBottom: 28 },
   inputBox: {

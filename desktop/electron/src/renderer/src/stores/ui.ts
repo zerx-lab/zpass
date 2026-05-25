@@ -16,6 +16,18 @@ export interface ToastItem {
 	icon?: string;
 	/** 持续毫秒，默认 1600 */
 	duration?: number;
+	/**
+	 * 可选操作按钮 —— 渲染在文本右侧。常用于「打开目录 / 撤销 / 复制」
+	 * 等需要让用户立刻接续操作的反馈。
+	 *
+	 * 点击 onClick 后会自动 dismiss 当前 toast（默认行为，便于让"按钮已
+	 * 用完"的状态立即消失）；如果业务需要保留 toast，可在 onClick 内
+	 * 自己再 pushToast 一条新的。
+	 */
+	action?: {
+		label: string;
+		onClick: () => void;
+	};
 }
 
 export interface UIState {

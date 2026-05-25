@@ -5,6 +5,7 @@ name: Build Desktop
 # 目标矩阵:
 #   - Windows x64           Squirrel Setup .exe  + 便携 .zip
 #   - Linux   x64           AppImage + .deb + .rpm + .pkg.tar.zst + 便携 .zip
+#   - Browser Extension     Chrome (MV3) zip + Firefox (MV2) zip + sources.zip
 #
 # 触发方式:
 #   1. push tags 'v*'         自动构建并上传到对应 tag 的 GitHub Release
@@ -17,6 +18,9 @@ name: Build Desktop
 #   - Arch (.pkg.tar.zst) 没有 Forge maker, 用 desktop/scripts/make-arch.sh
 #     在 archlinux:latest 容器里调 makepkg 生成, 输入是 `task make` 已经产出
 #     的 out/zpass-linux-x64/ 目录, 避免重复构建.
+#   - 浏览器扩展用 WXT (extension/wxt.config.ts), 跨浏览器同源构建.
+#     `wxt zip` 产出 chrome/firefox 的发布 zip, firefox 还会附带
+#     sources.zip 用于 AMO 审核 (扩展用了 minify, 必须提交源码).
 #   - 每个 job 直接 push 资产到 GitHub Release (softprops/action-gh-release),
 #     绕开 actions/upload-artifact 500MB 配额 (Forge Squirrel 单个 .exe 接近
 #     200MB). 同时也用 upload-artifact 留一份方便 workflow_dispatch 下载验证.
@@ -168,6 +172,97 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: false
           files: desktop/release/*
+
+  # ===========================================================================
+  # Browser Extension - Chrome MV3 + Firefox MV2 (+ sources.zip for AMO)
+  # ===========================================================================
+  build-extension:
+    name: Browser Extension (Chrome + Firefox)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+        working-directory: extension
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # extension/ 同时存在 bun.lock 和 package-lock.json, README 写的是 npm,
+      # 这里跟 README 走, 用 npm ci 确保锁文件一致.
+      - name: Install dependencies
+        run: npm ci
+
+      # `wxt zip` 默认目标是 chrome, 加 -b firefox 切到 firefox MV2.
+      # firefox 包额外生成 *-sources.zip (AMO 审核要求, 因为构建用了 minify).
+      - name: Build Chrome MV3 zip
+        run: npx wxt zip
+
+      - name: Build Firefox MV2 zip
+        run: npx wxt zip -b firefox
+
+      # WXT 默认命名:
+      #   .output/<pkg-name>-<version>-chrome.zip
+      #   .output/<pkg-name>-<version>-firefox.zip
+      #   .output/<pkg-name>-<version>-sources.zip
+      # 重命名为无版本号的稳定资产名, 与 desktop 资产风格一致.
+      - name: Stage release assets
+        run: |
+          mkdir -p release
+          shopt -s nullglob
+
+          for f in .output/*-chrome.zip; do
+            cp "$f" "release/ZPass-extension-chrome.zip"
+          done
+          for f in .output/*-firefox.zip; do
+            cp "$f" "release/ZPass-extension-firefox.zip"
+          done
+          for f in .output/*-sources.zip; do
+            cp "$f" "release/ZPass-extension-sources.zip"
+          done
+
+          echo "--- release/ contents ---"
+          ls -lah release/
+
+      - name: Resolve release context
+        id: release_ctx
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" \
+               && "${{ inputs.release }}" == "true" \
+               && -n "${{ inputs.tag_name }}" ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ inputs.tag_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zpass-extension
+          path: extension/release/*
+          if-no-files-found: error
+
+      - name: Publish to GitHub Release
+        if: steps.release_ctx.outputs.publish == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_ctx.outputs.tag }}
+          name: ZPass Desktop ${{ steps.release_ctx.outputs.tag }}
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          files: extension/release/*
 
   # ===========================================================================
   # Linux x64 - AppImage + .deb + .rpm + .pkg.tar.zst + 便携 zip

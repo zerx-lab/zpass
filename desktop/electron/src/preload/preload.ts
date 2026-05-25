@@ -108,6 +108,18 @@ const api = {
         string | null
       >,
   },
+
+  shell: {
+    /**
+     * Reveal a file in the OS file manager and select it. Used by the
+     * export-success toast's "open folder" action.
+     */
+    showInFolder: (path: string) =>
+      ipcRenderer.invoke(
+        "desktop:shell:show-in-folder",
+        path,
+      ) as Promise<void>,
+  },
 };
 
 contextBridge.exposeInMainWorld("desktop", api);

@@ -1665,11 +1665,13 @@ export interface ExportResult {
  * 导出整个 vault 为明文 JSON 文件。
  *
  * 流程：
- *   1. 后端解密所有条目 → 组装 schema="zpass-export-v1" 的 JSON
- *   2. 后端弹出系统 SaveFile dialog 让用户选保存路径
- *   3. 原子写入后返回 ExportResult
+ *   1. 前端通过 Electron 主进程弹原生 SaveFile dialog 让用户选保存路径
+ *      （Wails 时代由 Go 弹 dialog，迁到 Electron 后由 main 进程负责）
+ *   2. 后端解密所有条目 → 组装 schema="zpass-export-v1" 的 JSON
+ *   3. 后端原子写入用户选定的路径后返回 ExportResult
  *
- * 用户点「取消」按钮时：resolve 为 { cancelled: true, path: "", ... }，不抑错。
+ * 用户点「取消」按钮时：直接 resolve 为 { cancelled: true, path: "", ... }，
+ * 不再调后端 —— 保持「取消 = 零副作用」语义。
  *
  * 非 Wails 环境不提供导出 —— 模拟模式下本来就没有密文谈得上「备份」，
  * 直接招错让用户意识到处于调试梨。
@@ -1678,10 +1680,28 @@ export async function exportAllToFile(): Promise<ExportResult> {
 	if (!isWailsRuntime()) {
 		throw new Error("export requires the desktop runtime");
 	}
+	const defaultPath = await callWails(
+		"GenerateDefaultExportFilename",
+		() =>
+			$WailsCall.ByName("main.ExportService.GenerateDefaultFilename") as Promise<string>,
+	);
+	const chosenPath = await window.desktop.dialog.saveFile({
+		defaultPath,
+		filters: [
+			{ name: "ZPass Export", extensions: ["json"] },
+			{ name: "All Files", extensions: ["*"] },
+		],
+	});
+	if (!chosenPath) {
+		return { path: "", cancelled: true, itemCount: 0, sizeBytes: 0 };
+	}
 	const raw = await callWails(
 		"ExportAllToFile",
 		() =>
-			$WailsCall.ByName("main.ExportService.ExportAllToFile") as Promise<{
+			$WailsCall.ByName(
+				"main.ExportService.ExportAllToFile",
+				chosenPath,
+			) as Promise<{
 				path?: string;
 				cancelled?: boolean;
 				itemCount?: number;

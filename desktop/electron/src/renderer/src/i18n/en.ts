@@ -409,6 +409,7 @@ export const en = {
 	export_error_generic: "Export failed: {{message}}",
 	export_done: "Exported {{n}} item(s) to {{path}}",
 	export_cancelled: "Export cancelled",
+	export_open_folder: "Open folder",
 
 	// Workspace switcher —— 侧边栏顶部空间切换器
 	workspace_switch: "Switch workspace",

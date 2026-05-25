@@ -48,3 +48,22 @@ export function buildDefaultSpace(createdAt = Date.now()): Space {
 export function sortSpaces(arr: Space[]): Space[] {
   return [...arr].sort((a, b) => a.order - b.order);
 }
+
+/**
+ * 派生空间字形（头像里展示的单字符）。
+ *
+ * 与 desktop stores/spaces.ts 的 deriveGlyph 行为对齐：
+ *   - 取名称 trim 后第一个"可视字符"（用 Array.from 防止 emoji / 组合字符
+ *     被 substring(0,1) 截断成乱码）
+ *   - 转大写（中文 / 数字 / emoji 走 toUpperCase 是 no-op）
+ *   - 空串回落到 "·" 占位
+ *
+ * UI 层每次渲染从 name 派生即可，无需在 Space 模型上额外存字段；这样
+ * 重命名后头像首字符会自动跟随，避免出现"T 头像 + zerx 名字"的不一致。
+ */
+export function deriveGlyph(name: string | undefined | null): string {
+  const trimmed = (name ?? "").trim();
+  if (!trimmed) return "·";
+  const first = Array.from(trimmed)[0] ?? "·";
+  return first.toUpperCase();
+}

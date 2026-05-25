@@ -111,7 +111,15 @@ const DEFAULT_DURATION_MS = 1800;
  *     动画运行时多 ~30KB
  *   - Toast 仅有"出现"一次的瞬时动画，没有交互态，CSS transition 足够
  */
-function ToastItemView({ text, icon }: { text: string; icon?: string }) {
+function ToastItemView({
+	text,
+	icon,
+	action,
+}: {
+	text: string;
+	icon?: string;
+	action?: { label: string; onClick: () => void };
+}) {
 	const Icon = icon ? (ICON_MAP[icon] ?? Info) : null;
 
 	return (
@@ -147,6 +155,24 @@ function ToastItemView({ text, icon }: { text: string; icon?: string }) {
 			<span className="min-w-0 flex-1 leading-relaxed break-words">
 				{text}
 			</span>
+			{action && (
+				<button
+					type="button"
+					onClick={action.onClick}
+					className="
+						shrink-0 self-center
+						rounded-(--radius-sm)
+						border border-(--line) bg-(--bg-elev)
+						px-2 py-0.5
+						text-[11.5px] font-medium text-(--text)
+						transition-colors duration-100
+						hover:border-(--text-3) hover:bg-(--bg-active)
+						focus:outline-none focus:border-(--text-3)
+					"
+				>
+					{action.label}
+				</button>
+			)}
 		</div>
 	);
 }
@@ -218,7 +244,22 @@ export function Toast() {
 			"
 		>
 			{toasts.map((t) => (
-				<ToastItemView key={t.id} text={t.text} icon={t.icon} />
+				<ToastItemView
+					key={t.id}
+					text={t.text}
+					icon={t.icon}
+					action={
+						t.action
+							? {
+									label: t.action.label,
+									onClick: () => {
+										t.action?.onClick();
+										dismissToast(t.id);
+									},
+								}
+							: undefined
+					}
+				/>
 			))}
 		</section>
 	);

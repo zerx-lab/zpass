@@ -119,7 +119,15 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
 						path: result.path,
 					}),
 					icon: "check",
-					duration: 4000,
+					// 给「打开目录」按钮多留点时间被点到；4 秒在长路径 + 中文阅读
+					// 速度下偏紧，bumped 到 8 秒。
+					duration: 8000,
+					action: {
+						label: t("export_open_folder"),
+						onClick: () => {
+							void window.desktop.shell.showInFolder(result.path);
+						},
+					},
 				});
 			}
 			onOpenChange(false);

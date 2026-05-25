@@ -53,6 +53,9 @@ export interface DesktopBridgeShape {
 			filters?: { name: string; extensions: string[] }[];
 		}): Promise<string | null>;
 	};
+	shell: {
+		showInFolder(path: string): Promise<void>;
+	};
 }
 
 declare global {

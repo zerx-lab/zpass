@@ -413,6 +413,7 @@ export const zh: Strings = {
 	export_error_generic: "导出失败：{{message}}",
 	export_done: "已导出 {{n}} 个条目到 {{path}}",
 	export_cancelled: "导出已取消",
+	export_open_folder: "打开目录",
 
 	// Workspace switcher —— 侧边栏顶部空间切换器
 	workspace_switch: "切换空间",

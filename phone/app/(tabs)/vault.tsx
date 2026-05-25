@@ -17,6 +17,7 @@ import * as Haptics from "expo-haptics";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { IconSymbol } from "@/components/ui/icon-symbol";
+import { SpaceAvatar } from "@/components/space-avatar";
 import { useVault } from "@/contexts/vault-context";
 import type { VaultItem, VaultItemType } from "@/data/vault";
 import {
@@ -154,7 +155,7 @@ function VaultRow({
 export default function VaultScreen() {
   const scheme = useColorScheme() ?? "dark";
   const c = Colors[scheme];
-  const { items } = useVault();
+  const { items, activeSpace } = useVault();
 
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState<FilterKey>("all");
@@ -208,10 +209,17 @@ export default function VaultScreen() {
 
       <View style={[styles.header, { borderBottomColor: c.lineSoft }]}>
         <View style={styles.headerLeft}>
-          <View style={[styles.logo, { backgroundColor: c.text }]}>
-            <Text style={[styles.logoText, { color: c.bg }]}>Z</Text>
-          </View>
-          <Text style={[styles.appName, { color: c.text }]}>ZPass</Text>
+          <SpaceAvatar
+            space={activeSpace}
+            size={26}
+            background={c.text}
+            foreground={c.bg}
+            fontSize={13}
+            borderRadius={6}
+          />
+          <Text style={[styles.appName, { color: c.text }]} numberOfLines={1}>
+            {activeSpace?.name ?? "ZPass"}
+          </Text>
         </View>
         <View style={[styles.countBadge, { borderColor: c.line }]}>
           <Text style={[styles.countText, { color: c.text3, fontFamily: MONO }]}>
@@ -327,16 +335,8 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  headerLeft: { flexDirection: "row", alignItems: "center", gap: 8 },
-  logo: {
-    width: 26,
-    height: 26,
-    borderRadius: 6,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  logoText: { fontSize: 13, fontWeight: "700", lineHeight: 16 },
-  appName: { fontSize: 16, fontWeight: "600", letterSpacing: -0.3 },
+  headerLeft: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1 },
+  appName: { fontSize: 16, fontWeight: "600", letterSpacing: -0.3, flexShrink: 1 },
   countBadge: {
     borderWidth: 1,
     borderRadius: 5,
