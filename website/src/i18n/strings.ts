@@ -284,10 +284,10 @@ const en: SiteStrings = {
 	hero_title_2: "Only you hold the key.",
 	hero_sub:
 		"ZPass keeps your logins, passkeys and 2FA codes encrypted on your own devices. We never see them in plain text — not in transit, not at rest, not anywhere on our servers. Native apps for every platform you use.",
-	hero_cta_primary: "Download v0.0.2",
+	hero_cta_primary: "Download {version}",
 	hero_availability: "Windows · Linux · Android · Chrome / Firefox · iOS soon",
 
-	release_eyebrow: "AVAILABLE NOW · v0.0.2",
+	release_eyebrow: "AVAILABLE NOW · {version}",
 	release_title: "Download ZPass",
 	release_sub:
 		"Native builds for every platform you use, all carved out of the same audited Rust core. Pick the package that fits your machine — everything is end-to-end encrypted by design.",
@@ -348,7 +348,7 @@ const en: SiteStrings = {
 	mobile_body:
 		"Sign in to apps and websites with a single tap through the iOS and Android system keyboard. 2FA codes surface on the lock screen when you're about to use them — and stay out of sight the rest of the time.",
 	mobile_status_ios: "iOS · in development",
-	mobile_status_android: "Android · v0.0.2 available",
+	mobile_status_android: "Android · {version} available",
 	mobile_status_autofill: "system autofill",
 	mobile_phone_kicker: "VAULT · 412 ITEMS",
 	mobile_phone_greeting: "Good evening, Alex",
@@ -363,8 +363,8 @@ const en: SiteStrings = {
 	desktop_body:
 		"Everything is decrypted locally. ⌘K opens the command palette, ⌘L locks the app instantly, and the full vault stays usable with no network at all. Same encrypted core as the mobile app — just with more room to breathe.",
 	desktop_status_macos: "macOS · in development",
-	desktop_status_windows: "Windows · v0.0.2 available",
-	desktop_status_linux: "Linux · v0.0.2 available",
+	desktop_status_windows: "Windows · {version} available",
+	desktop_status_linux: "Linux · {version} available",
 	desktop_status_extra: "⌘K command palette · offline-first",
 	desktop_section_label: "DESKTOP",
 	desktop_ui_brand_tag: "v2.4",
@@ -604,10 +604,10 @@ const zh: SiteStrings = {
 	hero_title_2: "只有你拿得到钥匙。",
 	hero_sub:
 		"ZPass 把你的登录信息、通行密钥和两步验证码统一加密存放在本地设备。未经加密的明文不会进入网络、不会落到磁盘、也不会出现在我们的服务器上——我们看不到，任何第三方也看不到。覆盖你日常使用的每一个平台。",
-	hero_cta_primary: "下载 v0.0.2",
+	hero_cta_primary: "下载 {version}",
 	hero_availability: "Windows · Linux · Android · Chrome / Firefox · iOS 即将到来",
 
-	release_eyebrow: "现已发布 · v0.0.2",
+	release_eyebrow: "现已发布 · {version}",
 	release_title: "下载 ZPass",
 	release_sub:
 		"覆盖你日常使用的每一个平台，全部基于同一份 Rust 内核构建。挑选适合你设备的安装包即可——所有版本都默认端到端加密。",
@@ -667,7 +667,7 @@ const zh: SiteStrings = {
 	mobile_body:
 		"通过 iOS 与 Android 系统级键盘，在 App 和网页里一键完成登录。两步验证码只在你将要使用时浮现在锁屏上，其余时间安静待在密码库里。",
 	mobile_status_ios: "iOS · 开发中",
-	mobile_status_android: "Android · 已发布 v0.0.2",
+	mobile_status_android: "Android · 已发布 {version}",
 	mobile_status_autofill: "系统自动填充",
 	mobile_phone_kicker: "密码库 · 412 项",
 	mobile_phone_greeting: "晚上好，Alex",
@@ -682,8 +682,8 @@ const zh: SiteStrings = {
 	desktop_body:
 		"所有解密都在本地完成。⌘K 唤出命令面板，⌘L 一键锁定，完全离线也能正常使用整个密码库。与移动端共用同一套加密内核——只是屏幕更大、呼吸更从容。",
 	desktop_status_macos: "macOS · 开发中",
-	desktop_status_windows: "Windows · 已发布 v0.0.2",
-	desktop_status_linux: "Linux · 已发布 v0.0.2",
+	desktop_status_windows: "Windows · 已发布 {version}",
+	desktop_status_linux: "Linux · 已发布 {version}",
 	desktop_status_extra: "⌘K 命令面板 · 离线优先",
 	desktop_section_label: "桌面端",
 	desktop_ui_brand_tag: "v2.4",
@@ -911,6 +911,23 @@ export const STRINGS: Record<Locale, SiteStrings> = { en, zh };
 export function getStrings(locale: Locale | string | undefined): SiteStrings {
 	if (locale === "zh") return STRINGS.zh;
 	return STRINGS.en;
+}
+
+/**
+ * 把字符串集合中所有 `{version}` 占位符替换为给定版本号。
+ * 文案里的版本号统一通过占位符表达，由 SSR 拉到的最新 release 在渲染前注入，
+ * 避免文案与版本耦合。
+ */
+export function applyVersion(t: SiteStrings, version: string): SiteStrings {
+	const out: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(t) as [string, unknown][]) {
+		if (typeof value === "string" && value.includes("{version}")) {
+			out[key] = value.replaceAll("{version}", version);
+		} else {
+			out[key] = value;
+		}
+	}
+	return out as unknown as SiteStrings;
 }
 
 /**

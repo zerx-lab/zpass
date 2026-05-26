@@ -26,10 +26,16 @@ import Faq from "../components/Faq.astro";
 import Footer from "../components/Footer.astro";
 import ContactDialog from "../components/ContactDialog.astro";
 
-import { getStrings } from "../i18n/strings";
+import { applyVersion, getStrings } from "../i18n/strings";
+import { getLatestRelease } from "../lib/release-fetcher";
+
+// 走 SSR：每次请求都通过 release-fetcher 取最新版本（命中 24h 缓存时无外网开销），
+// 用拿到的版本号把所有 `{version}` 占位符替换成真实值，再交给子组件渲染。
+export const prerender = false;
 
 const locale = "en" as const;
-const t = getStrings(locale);
+const release = await getLatestRelease();
+const t = applyVersion(getStrings(locale), release.version);
 
 // 页面级 SEO
 const title = "ZPass — a calmer password manager";

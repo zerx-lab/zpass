@@ -17,13 +17,12 @@
 
 import type { SiteStrings } from "../i18n/strings";
 import {
-	PLATFORMS,
-	RELEASE_TAG_URL,
-	RELEASE_VERSION,
+	buildPlatforms,
 	formatSize,
 	type PlatformGroup,
 	type ReleaseAsset,
 } from "../data/release";
+import { getLatestRelease } from "../lib/release-fetcher";
 
 export interface Props {
 	t: SiteStrings;
@@ -32,6 +31,12 @@ export interface Props {
 
 const { t, locale = "en" } = Astro.props;
 const isZh = locale === "zh";
+
+// SSR 时拉取最新 release（24h 模块缓存），并按本地展示元数据合成平台分组。
+const release = await getLatestRelease();
+const PLATFORMS = buildPlatforms(release);
+const RELEASE_VERSION = release.version;
+const RELEASE_TAG_URL = release.tagUrl;
 
 interface Resolved {
 	id: PlatformGroup["id"];
