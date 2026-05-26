@@ -38,9 +38,21 @@ yarn-error.*
 
 app-example
 
-# generated native folders
+# Generated native folders
 /ios
-/android
+
+# Android: track source/config, ignore only build artifacts and sensitive keystores.
+# (debug.keystore is intentionally tracked so APK signature stays stable across machines.)
+/android/build/
+/android/.gradle/
+/android/.kotlin/
+/android/.cxx/
+/android/local.properties
+/android/app/build/
+/android/app/.cxx/
+/android/app/release/
+/android/app/*.keystore
+!/android/app/debug.keystore
 
 # 本地 Expo Module 的 Android Gradle 产物（源码保留，编译输出不入 git）
 modules/*/android/build/
