@@ -153,6 +153,7 @@ export default function SyncPage() {
                 styles.input,
                 styles.pinInput,
                 { color: c.text, borderColor: c.line, fontFamily: MONO },
+                pin.length === 0 && { letterSpacing: 0 },
               ]}
             />
             <TouchableOpacity
