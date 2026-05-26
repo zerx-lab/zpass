@@ -1,0 +1,252 @@
+---
+// ============================================================================
+// ZPass 官网 — 隐私协议（中文，路径 /zh/privacy）
+// 与 /privacy 同结构，文案直接给出，避免对每段细则做 i18n key 化。
+// ============================================================================
+
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import Nav from "../../components/Nav.astro";
+import Footer from "../../components/Footer.astro";
+import ContactDialog from "../../components/ContactDialog.astro";
+import { applyVersion, getStrings } from "../../i18n/strings";
+import { getLatestRelease } from "../../lib/release-fetcher";
+
+export const prerender = false;
+
+const locale = "zh" as const;
+const release = await getLatestRelease();
+const t = applyVersion(getStrings(locale), release.version);
+
+const title = "隐私协议 — ZPass";
+const description =
+	"ZPass 如何处理你的数据：本地优先、零知识架构，以及本站本身收集与不收集的内容。";
+
+const lastUpdated = "2026-05-26";
+---
+
+<BaseLayout title={title} description={description} locale={locale} theme="auto" body="sans">
+	<Nav t={t} locale={locale} />
+	<main class="legal-main">
+		<div class="wrap legal-wrap">
+			<header class="legal-head">
+				<p class="legal-eyebrow mono">隐私协议</p>
+				<h1 class="legal-title">隐私协议</h1>
+				<p class="legal-meta mono">最近更新 · {lastUpdated}</p>
+				<p class="legal-lede">
+					ZPass 采用零知识架构。你的主密码与密码库内容在离开设备之前就已被
+					加密封装，我们从设计上就拿不到能解开它们的钥匙。本页面用尽量直白
+					的方式说明：客户端与本站确实会接触的那一小部分数据，以及我们对它
+					所做的事。
+				</p>
+			</header>
+
+			<section class="legal-section">
+				<h2>1. 谁在运营 ZPass</h2>
+				<p>
+					ZPass 是一个开源项目，源码托管在
+					<a href="https://github.com/zerx-lab/zpass" target="_blank" rel="noopener">github.com/zerx-lab/zpass</a>，
+					遵循 AGPL-3.0 许可证。本站（<span class="mono">zpass.dev</span>）
+					与联系表单后端由 ZPass 项目维护者运营。如果你访问的是他人自托管
+					的实例，则该实例由其运营者负责；本协议仅约束官方站点与第一方应用。
+				</p>
+			</section>
+
+			<section class="legal-section">
+				<h2>2. 客户端保存的内容及位置</h2>
+				<ul>
+					<li>
+						<strong>主密码绝不会被传输。</strong>
+						它仅在你的设备本地经 Argon2id 拉伸后用于派生密钥，我们以任何
+						形式都不会接收到它。
+					</li>
+					<li>
+						<strong>密码库内容在同步前已在本地加密。</strong>
+						每条记录连同元数据（所属文件夹、图标、时间戳等）都会用
+						XChaCha20-Poly1305 单独封装后才离开设备，到达服务端的仅是密文。
+					</li>
+					<li>
+						<strong>默认本地优先。</strong>
+						未启用同步时，密码库数据根本不会跨越网络。
+					</li>
+					<li>
+						<strong>启用托管同步后</strong>
+						，服务端仅存放密文以及在多端之间路由变更所必需的最小元数据
+						（密文 blob、版本向量、设备 id）。
+					</li>
+				</ul>
+			</section>
+
+			<section class="legal-section">
+				<h2>3. 浏览器扩展的通信范围</h2>
+				<p>
+					ZPass 浏览器扩展不会与任何云服务通信，仅通过 Chrome 原生消息协议
+					与运行在你本机上的 ZPass 桌面端对话。它不收集遥测，也不会把凭据
+					发送到任何远程端点。
+				</p>
+			</section>
+
+			<section class="legal-section">
+				<h2>4. 本站收集的内容</h2>
+				<p>
+					本站使用自托管的
+					<a href="https://openpanel.dev" target="_blank" rel="noopener">OpenPanel</a>
+					实例（<span class="mono">openpanel-api.zerx.dev</span>）做无 Cookie
+					的隐私友好型分析，仅记录页面访问、语言偏好与外链点击。本站
+					<strong>不</strong>设置广告 Cookie、不进行设备指纹识别、也不与
+					任何第三方共享数据。IP 地址仅用于解析出粗粒度国家位置，原始 IP
+					不会留存。
+				</p>
+				<p>
+					字体由 Google Fonts 提供，下载字体样式表时浏览器会不可避免地把你
+					的 IP 地址暴露给 Google；除此之外，我们不会向 Google 传递任何
+					额外标识。
+				</p>
+			</section>
+
+			<section class="legal-section">
+				<h2>5. 联系表单</h2>
+				<p>
+					本站「联系我们」对话框会通过 <span class="mono">/api/contact</span>
+					端点把你填写的姓名、邮箱、主题与正文发送到由维护者管理的私人
+					邮箱，仅用于回复你的来信，留存至该次沟通完结。我们不会将其用于
+					任何营销目的，也不会与第三方共享。
+				</p>
+			</section>
+
+			<section class="legal-section">
+				<h2>6. Cookie 与本地存储</h2>
+				<ul>
+					<li>
+						<span class="mono">localStorage("zpass-theme")</span> —— 你在本
+						设备上选择的浅色 / 深色 / 跟随系统主题偏好。
+					</li>
+					<li>
+						<span class="mono">localStorage("zpass-lang")</span> —— 你在本
+						设备上选择的语言偏好。
+					</li>
+					<li>
+						<span class="mono">sessionStorage("zpass-lang-redirected")</span>
+						—— 一次性哨兵，用于防止自动语言跳转造成循环；关闭标签页即清除。
+					</li>
+				</ul>
+				<p>本站不设置任何用于追踪的 Cookie。</p>
+			</section>
+
+			<section class="legal-section">
+				<h2>7. 你的权利</h2>
+				<p>
+					由于零知识架构的存在，托管同步可能持有的密码库数据对我们而言只是
+					一段无法解读、也无法恢复的密文。你可以：
+				</p>
+				<ul>
+					<li>随时在桌面端本地导出你的密码库，支持明文或加密格式。</li>
+					<li>从桌面端删除账号，对应的密文会从托管同步中清除。</li>
+					<li>通过联系表单要求我们删除你提交过的联系记录。</li>
+				</ul>
+				<p>
+					如果你身处欧盟 / 英国，你还享有 GDPR 下的相关权利（访问、更正、
+					删除、限制处理、可携带、拒绝处理）。如需行使这些权利，请通过页面
+					底部的联系表单与我们沟通。
+				</p>
+			</section>
+
+			<section class="legal-section">
+				<h2>8. 安全与漏洞披露</h2>
+				<p>
+					如怀疑发现安全漏洞，请通过联系表单提交，并将主题设为
+					<strong>安全披露</strong>。我们会尽快确认收到，并与你协调披露
+					时间表。一旦确认存在影响你数据的事故，我们会在合理时间内主动
+					通知受影响的用户。
+				</p>
+			</section>
+
+			<section class="legal-section">
+				<h2>9. 本协议的变更</h2>
+				<p>
+					当本页面有实质性变更时，页面顶部的<em>最近更新</em>日期会同步
+					更新，所有修改记录都可在开源仓库中追溯。
+				</p>
+			</section>
+		</div>
+	</main>
+	<Footer t={t} />
+	<ContactDialog t={t} />
+</BaseLayout>
+
+<style>
+	.legal-main {
+		padding: 64px 0 96px;
+	}
+	.legal-wrap {
+		max-width: 760px;
+	}
+	.legal-head {
+		padding-bottom: 28px;
+		border-bottom: 1px solid var(--line);
+		margin-bottom: 28px;
+	}
+	.legal-eyebrow {
+		font-size: 11px;
+		letter-spacing: 0.14em;
+		color: var(--text-3);
+		margin: 0 0 14px;
+	}
+	.legal-title {
+		font-size: clamp(32px, 4.4vw, 44px);
+		line-height: 1.1;
+		letter-spacing: -0.02em;
+		margin: 0 0 14px;
+	}
+	.legal-meta {
+		font-size: 11px;
+		color: var(--text-3);
+		letter-spacing: 0.04em;
+		margin: 0 0 22px;
+	}
+	.legal-lede {
+		font-size: 16px;
+		color: var(--text-2);
+		line-height: 1.65;
+		margin: 0;
+	}
+	.legal-section {
+		margin: 36px 0;
+	}
+	.legal-section h2 {
+		font-size: 17px;
+		font-weight: 600;
+		margin: 0 0 12px;
+		letter-spacing: -0.005em;
+	}
+	.legal-section p,
+	.legal-section li {
+		font-size: 15px;
+		line-height: 1.65;
+		color: var(--text-2);
+	}
+	.legal-section p {
+		margin: 0 0 12px;
+	}
+	.legal-section ul {
+		padding-left: 20px;
+		margin: 0 0 12px;
+	}
+	.legal-section li {
+		margin: 6px 0;
+	}
+	.legal-section a {
+		color: var(--text);
+		text-decoration: underline;
+		text-underline-offset: 3px;
+		text-decoration-color: var(--line);
+		transition: text-decoration-color 0.15s, color 0.15s;
+	}
+	.legal-section a:hover {
+		color: var(--accent);
+		text-decoration-color: var(--accent);
+	}
+	.legal-section strong {
+		color: var(--text);
+		font-weight: 600;
+	}
+</style>

@@ -1,0 +1,264 @@
+---
+// ============================================================================
+// ZPass 官网 — 隐私协议（英文，路径 /privacy）
+// 内容独立于 i18n strings.ts，直接以静态文案呈现，避免对每段细则做 token 化。
+// 用 BaseLayout + Nav + Footer 复用，保持与首页一致的导航与品牌闭环。
+// ============================================================================
+
+import BaseLayout from "../layouts/BaseLayout.astro";
+import Nav from "../components/Nav.astro";
+import Footer from "../components/Footer.astro";
+import ContactDialog from "../components/ContactDialog.astro";
+import { applyVersion, getStrings } from "../i18n/strings";
+import { getLatestRelease } from "../lib/release-fetcher";
+
+export const prerender = false;
+
+const locale = "en" as const;
+const release = await getLatestRelease();
+const t = applyVersion(getStrings(locale), release.version);
+
+const title = "Privacy Policy — ZPass";
+const description =
+	"How ZPass handles your data. Local-first, zero-knowledge, and what the website itself does or does not collect.";
+
+const lastUpdated = "2026-05-26";
+---
+
+<BaseLayout title={title} description={description} locale={locale} theme="auto" body="sans">
+	<Nav t={t} locale={locale} />
+	<main class="legal-main">
+		<div class="wrap legal-wrap">
+			<header class="legal-head">
+				<p class="legal-eyebrow mono">PRIVACY</p>
+				<h1 class="legal-title">Privacy Policy</h1>
+				<p class="legal-meta mono">Last updated · {lastUpdated}</p>
+				<p class="legal-lede">
+					ZPass is built on a zero-knowledge architecture. Your master password
+					and the contents of your vault are encrypted on your own device
+					before anything reaches the network, and we — by design — never hold
+					the keys that can open them. This page explains the small set of
+					data the apps and this website do touch, and what we do with it.
+				</p>
+			</header>
+
+			<section class="legal-section">
+				<h2>1. Who runs ZPass</h2>
+				<p>
+					ZPass is an open-source project published at
+					<a href="https://github.com/zerx-lab/zpass" target="_blank" rel="noopener">github.com/zerx-lab/zpass</a>
+					under the AGPL-3.0 license. This website (<span class="mono">zpass.dev</span>)
+					and the contact endpoint are operated by the ZPass project maintainers.
+					Self-hosted instances are operated by whoever installed them; this
+					policy describes the canonical website and the first-party apps only.
+				</p>
+			</section>
+
+			<section class="legal-section">
+				<h2>2. What the apps store, and where</h2>
+				<ul>
+					<li>
+						<strong>Your master password is never transmitted.</strong> It is
+						stretched with Argon2id on your device and used only to derive
+						local keys. We never receive it, in any form.
+					</li>
+					<li>
+						<strong>Vault contents are encrypted on-device before sync.</strong>
+						Every record — including its metadata, folder, icon and
+						timestamps — is sealed with XChaCha20-Poly1305 before it leaves
+						your device. The server only ever sees ciphertext.
+					</li>
+					<li>
+						<strong>Local-first by default.</strong> Without enabling sync,
+						no vault data crosses the network at all.
+					</li>
+					<li>
+						<strong>Hosted sync (when enabled)</strong> stores only ciphertext
+						and the minimum metadata required to route updates across your
+						devices (encrypted blob, version vector, device id).
+					</li>
+				</ul>
+			</section>
+
+			<section class="legal-section">
+				<h2>3. What the browser extension does</h2>
+				<p>
+					The ZPass browser extension does not contact any cloud service. It
+					communicates only with the ZPass desktop app running on your own
+					machine, over Chrome native messaging. It does not collect telemetry
+					and does not transmit credentials to any remote endpoint.
+				</p>
+			</section>
+
+			<section class="legal-section">
+				<h2>4. What this website collects</h2>
+				<p>
+					The website uses a self-hosted instance of
+					<a href="https://openpanel.dev" target="_blank" rel="noopener">OpenPanel</a>
+					(<span class="mono">openpanel-api.zerx.dev</span>) for privacy-friendly,
+					cookie-less analytics. It records page views, language preference and
+					outbound link clicks. It does <strong>not</strong> set advertising
+					cookies, fingerprint your device, or share data with third parties.
+					IP addresses are processed only to derive a coarse country and are
+					not retained in raw form.
+				</p>
+				<p>
+					Fonts are loaded from Google Fonts; that request unavoidably exposes
+					your IP address to Google in the act of downloading the stylesheet.
+					We do not pass any additional identifiers to Google.
+				</p>
+			</section>
+
+			<section class="legal-section">
+				<h2>5. Contact form</h2>
+				<p>
+					The contact dialog on this site sends the name, email, topic and
+					message you enter to a private mailbox operated by the maintainers,
+					via the <span class="mono">/api/contact</span> endpoint. The submission
+					is used only to reply to your inquiry and is retained until the
+					conversation is resolved. It is not used for marketing and is not
+					shared with third parties.
+				</p>
+			</section>
+
+			<section class="legal-section">
+				<h2>6. Cookies and local storage</h2>
+				<ul>
+					<li>
+						<span class="mono">localStorage("zpass-theme")</span> — your
+						chosen light / dark / auto preference, on this device only.
+					</li>
+					<li>
+						<span class="mono">localStorage("zpass-lang")</span> — your
+						chosen language, on this device only.
+					</li>
+					<li>
+						<span class="mono">sessionStorage("zpass-lang-redirected")</span>
+						— a one-shot guard to prevent the auto-language redirect from
+						looping. Cleared when you close the tab.
+					</li>
+				</ul>
+				<p>The website itself does not set any tracking cookies.</p>
+			</section>
+
+			<section class="legal-section">
+				<h2>7. Your rights</h2>
+				<p>
+					Because of the zero-knowledge architecture, the vault data we may
+					hold on hosted sync is opaque ciphertext we cannot read or recover.
+					You can:
+				</p>
+				<ul>
+					<li>Export your vault locally at any time, in plaintext or encrypted form.</li>
+					<li>Delete your account from the desktop app; the ciphertext is wiped from hosted sync.</li>
+					<li>Request that your contact-form record be deleted by writing to us.</li>
+				</ul>
+				<p>
+					If you are in the EU / UK, you also have rights under GDPR (access,
+					rectification, erasure, restriction, portability, objection). To
+					exercise them, use the contact form below.
+				</p>
+			</section>
+
+			<section class="legal-section">
+				<h2>8. Security and breach disclosure</h2>
+				<p>
+					Suspected vulnerabilities should be reported through the contact
+					form with the topic set to <strong>Security</strong>. We will
+					confirm receipt promptly and coordinate disclosure. We will notify
+					affected users without undue delay if a breach is ever shown to
+					compromise data we hold on your behalf.
+				</p>
+			</section>
+
+			<section class="legal-section">
+				<h2>9. Changes to this policy</h2>
+				<p>
+					When this page changes in a substantive way, the <em>Last updated</em>
+					date above will move. Edits are tracked in the open-source repository
+					linked at the top of this page.
+				</p>
+			</section>
+		</div>
+	</main>
+	<Footer t={t} />
+	<ContactDialog t={t} />
+</BaseLayout>
+
+<style>
+	.legal-main {
+		padding: 64px 0 96px;
+	}
+	.legal-wrap {
+		max-width: 760px;
+	}
+	.legal-head {
+		padding-bottom: 28px;
+		border-bottom: 1px solid var(--line);
+		margin-bottom: 28px;
+	}
+	.legal-eyebrow {
+		font-size: 11px;
+		letter-spacing: 0.14em;
+		color: var(--text-3);
+		margin: 0 0 14px;
+	}
+	.legal-title {
+		font-size: clamp(32px, 4.4vw, 44px);
+		line-height: 1.1;
+		letter-spacing: -0.02em;
+		margin: 0 0 14px;
+	}
+	.legal-meta {
+		font-size: 11px;
+		color: var(--text-3);
+		letter-spacing: 0.04em;
+		margin: 0 0 22px;
+	}
+	.legal-lede {
+		font-size: 16px;
+		color: var(--text-2);
+		line-height: 1.65;
+		margin: 0;
+	}
+	.legal-section {
+		margin: 36px 0;
+	}
+	.legal-section h2 {
+		font-size: 17px;
+		font-weight: 600;
+		margin: 0 0 12px;
+		letter-spacing: -0.005em;
+	}
+	.legal-section p,
+	.legal-section li {
+		font-size: 15px;
+		line-height: 1.65;
+		color: var(--text-2);
+	}
+	.legal-section p {
+		margin: 0 0 12px;
+	}
+	.legal-section ul {
+		padding-left: 20px;
+		margin: 0 0 12px;
+	}
+	.legal-section li {
+		margin: 6px 0;
+	}
+	.legal-section a {
+		color: var(--text);
+		text-decoration: underline;
+		text-underline-offset: 3px;
+		text-decoration-color: var(--line);
+		transition: text-decoration-color 0.15s, color 0.15s;
+	}
+	.legal-section a:hover {
+		color: var(--accent);
+		text-decoration-color: var(--accent);
+	}
+	.legal-section strong {
+		color: var(--text);
+		font-weight: 600;
+	}
+</style>
