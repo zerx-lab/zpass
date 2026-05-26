@@ -279,20 +279,20 @@ const en: SiteStrings = {
 	nav_how: "How it works",
 	nav_faq: "FAQ",
 
-	hero_eyebrow: "End-to-end encrypted · Open protocol · Built in Rust",
+	hero_eyebrow: "End-to-end encrypted · Open protocol · Local-first",
 	hero_title_1: "Every password, every device.",
 	hero_title_2: "Only you hold the key.",
 	hero_sub:
 		"ZPass keeps your logins, passkeys and 2FA codes encrypted on your own devices. We never see them in plain text — not in transit, not at rest, not anywhere on our servers. Native apps for every platform you use.",
 	hero_cta_primary: "Download {version}",
-	hero_availability: "Windows · Linux · Android · Chrome / Firefox · iOS soon",
+	hero_availability: "Windows · Linux · Android · Chrome / Firefox · macOS / iOS soon",
 
 	release_eyebrow: "AVAILABLE NOW · {version}",
 	release_title: "Download ZPass",
 	release_sub:
-		"Native builds for every platform you use, all carved out of the same audited Rust core. Pick the package that fits your machine — everything is end-to-end encrypted by design.",
+		"Native builds for every platform you use, all sharing the same end-to-end encrypted vault format. Pick the package that fits your machine — your data stays sealed in transit and at rest.",
 	release_note:
-		"All artifacts are signed and reproducible. Each asset on the release page ships its own SHA-256 so you can verify before you install.",
+		"Every asset on the GitHub release page ships with its own SHA-256 hash, so you can verify what you downloaded before installing it.",
 
 	download_section_label: "DOWNLOAD",
 	download_recommended: "Recommended",
@@ -357,7 +357,7 @@ const en: SiteStrings = {
 
 	section_desktop: "ZPass on desktop",
 	section_desktop_sub:
-		"A focused three-pane workspace that gets out of your way. Native windows on macOS, Windows and Linux — all driven by the same Rust core.",
+		"A focused three-pane workspace that gets out of your way. Native windows on macOS, Windows and Linux — all reading the same end-to-end encrypted vault as the mobile apps.",
 	desktop_eyebrow: "MACOS · WINDOWS · LINUX · ⌘K · OFFLINE FIRST",
 	desktop_headline: "Your whole vault, one keystroke away.",
 	desktop_body:
@@ -415,7 +415,7 @@ const en: SiteStrings = {
 
 	section_security: "Security architecture",
 	section_security_sub:
-		"Every claim on this page is meant to be checked. The protocol is documented, the client is reproducible, and the server has nothing worth stealing.",
+		"Every claim on this page is meant to be checked. The protocol will be documented, reproducible builds are on the roadmap, and the server is designed so there's nothing worth stealing.",
 	sec_1_k: "Threat model",
 	sec_1_v:
 		"Server compromise · TLS interception · malicious update · cold-boot recovery on a lost device. We design against all four.",
@@ -427,10 +427,10 @@ const en: SiteStrings = {
 		"An independent third-party audit is scheduled before public release. The threat model and protocol spec will be published for external review well ahead of launch.",
 	sec_4_k: "Reproducible builds",
 	sec_4_v:
-		"Release binaries are deterministic. You can rebuild from the tagged commit and verify the exact binary you're running.",
+		"Deterministic, reproducible builds are on the roadmap before public release — so you'll be able to rebuild from a tagged commit and bit-for-bit compare against the binary you downloaded.",
 	sec_5_k: "Openly documented",
 	sec_5_v:
-		"The protocol spec and threat model are public. Every algorithm choice and every data flow is written down — nothing in the path between you and your data is hand-waved.",
+		"The protocol spec and threat model will be published before public release. Every algorithm choice and every data flow is being written down — nothing in the path between you and your data should be hand-waved.",
 	sec_6_k: "Trusted algorithms",
 	sec_6_v:
 		"We don't roll our own crypto. Every algorithm in ZPass is a well-studied standard, used the way its designers recommend.",
@@ -599,20 +599,20 @@ const zh: SiteStrings = {
 	nav_how: "工作原理",
 	nav_faq: "常见问题",
 
-	hero_eyebrow: "端到端加密 · 开放协议 · Rust 打造",
+	hero_eyebrow: "端到端加密 · 开放协议 · 本地优先",
 	hero_title_1: "你的所有密码，所有设备。",
 	hero_title_2: "只有你拿得到钥匙。",
 	hero_sub:
 		"ZPass 把你的登录信息、通行密钥和两步验证码统一加密存放在本地设备。未经加密的明文不会进入网络、不会落到磁盘、也不会出现在我们的服务器上——我们看不到，任何第三方也看不到。覆盖你日常使用的每一个平台。",
 	hero_cta_primary: "下载 {version}",
-	hero_availability: "Windows · Linux · Android · Chrome / Firefox · iOS 即将到来",
+	hero_availability: "Windows · Linux · Android · Chrome / Firefox · macOS / iOS 即将到来",
 
 	release_eyebrow: "现已发布 · {version}",
 	release_title: "下载 ZPass",
 	release_sub:
-		"覆盖你日常使用的每一个平台，全部基于同一份 Rust 内核构建。挑选适合你设备的安装包即可——所有版本都默认端到端加密。",
+		"覆盖你日常使用的每一个平台，全部共用同一份端到端加密的密码库格式。挑选适合你设备的安装包即可——无论传输还是落盘，你的数据都全程加密封装。",
 	release_note:
-		"所有构建均可复现，并附 SHA-256 校验。可在 GitHub 发布页比对哈希后再安装。",
+		"GitHub 发布页每个安装包都附 SHA-256 哈希——可在安装前比对哈希，确认下载内容未被篡改。",
 
 	download_section_label: "下载",
 	download_recommended: "推荐版本",
@@ -676,7 +676,7 @@ const zh: SiteStrings = {
 
 	section_desktop: "ZPass 桌面端",
 	section_desktop_sub:
-		"专注的三栏式工作区，用的时候在，不用的时候不打扰。macOS、Windows、Linux 均为原生窗口，背后是同一套 Rust 核心。",
+		"专注的三栏式工作区，用的时候在，不用的时候不打扰。macOS、Windows、Linux 均为原生窗口，读取的密码库与移动端完全一致。",
 	desktop_eyebrow: "MACOS · WINDOWS · LINUX · ⌘K · 离线优先",
 	desktop_headline: "整个密码库，一次按键就能召唤。",
 	desktop_body:
@@ -734,7 +734,7 @@ const zh: SiteStrings = {
 
 	section_security: "安全架构",
 	section_security_sub:
-		"本页每一条结论都欢迎你亲自核对：协议有公开文档、客户端可复现构建、服务器拿不出任何有价值的东西。",
+		"本页每一条结论都欢迎你亲自核对：协议会有公开文档、客户端可复现构建已列入路线图、服务器从设计上就拿不出任何有价值的东西。",
 	sec_1_k: "威胁模型",
 	sec_1_v:
 		"服务器被攻破 · TLS 中间人 · 带毒更新 · 设备丢失后的冷启动取证——这四种场景是我们从第一天起就在防的。",
@@ -746,10 +746,10 @@ const zh: SiteStrings = {
 		"公开发布前会完成独立的第三方安全审计。威胁模型与协议规范也会提前公开，供外部研究者评审。",
 	sec_4_k: "可复现构建",
 	sec_4_v:
-		"发布版本是确定性构建——你可以用同一个 tag 自行编译，并与官方下载的二进制逐字节比对。",
+		"可复现构建已列入公开发布前的路线图——届时你可以用同一个 tag 自行编译，与官方下载的二进制逐字节比对。",
 	sec_5_k: "公开文档",
 	sec_5_v:
-		"协议规范与威胁模型公开发布。每一个算法选择、每一条数据流转路径都写得清清楚楚——你和密码之间没有任何「黑盒环节」。",
+		"协议规范与威胁模型会在公开发布前一并放出。每一个算法选择、每一条数据流转路径都在写明——你和密码之间不该有任何「黑盒环节」。",
 	sec_6_k: "只用经典算法",
 	sec_6_v:
 		"我们不自造密码学轮子。ZPass 用到的每一个算法都是业界长期审查过的标准方案，并严格按其作者推荐的方式使用。",
