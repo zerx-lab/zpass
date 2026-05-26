@@ -142,20 +142,46 @@ export default function SyncPage() {
             <Text style={[styles.label, { color: c.text3 }]}>
               PIN（对端屏幕上 6 位数字）
             </Text>
-            <TextInput
-              value={pin}
-              onChangeText={setPin}
-              placeholder="123456"
-              placeholderTextColor={c.text4}
-              keyboardType="number-pad"
-              maxLength={6}
-              style={[
-                styles.input,
-                styles.pinInput,
-                { color: c.text, borderColor: c.line, fontFamily: MONO },
-                pin.length === 0 && { letterSpacing: 0 },
-              ]}
-            />
+            <View style={styles.pinRow}>
+              <View pointerEvents="none" style={styles.pinCellsRow}>
+                {Array.from({ length: 6 }).map((_, i) => {
+                  const ch = pin[i] ?? "";
+                  const focused = pin.length === i;
+                  return (
+                    <View
+                      key={i}
+                      style={[
+                        styles.pinCell,
+                        {
+                          borderColor: focused ? c.accent : c.line,
+                          backgroundColor: c.bg,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.pinCellText,
+                          { color: ch ? c.text : c.text4, fontFamily: MONO },
+                        ]}
+                      >
+                        {ch || "·"}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
+              <TextInput
+                value={pin}
+                onChangeText={(t) =>
+                  setPin(t.replace(/[^0-9]/g, "").slice(0, 6))
+                }
+                keyboardType="number-pad"
+                maxLength={6}
+                caretHidden
+                selectionColor="transparent"
+                style={styles.pinHiddenInput}
+              />
+            </View>
             <TouchableOpacity
               onPress={handleConnect}
               disabled={busy}
@@ -291,7 +317,32 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     fontSize: 14,
   },
-  pinInput: { letterSpacing: 6, textAlign: "center", fontSize: 18 },
+  pinRow: { position: "relative", height: 44, marginTop: 2 },
+  pinCellsRow: {
+    flexDirection: "row",
+    gap: 6,
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  pinCell: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pinCellText: { fontSize: 20, fontWeight: "500" },
+  pinHiddenInput: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    opacity: 0,
+  },
   button: {
     marginTop: 6,
     borderRadius: 8,
