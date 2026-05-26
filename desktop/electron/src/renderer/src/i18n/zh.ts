@@ -616,6 +616,11 @@ export const zh: Strings = {
 	settings_section_ssh_agent: "SSH agent",
 	settings_section_ssh_agent_desc:
 		"让 ssh / git 直接使用保险柜内的 SSH 密钥，无需复制私钥。",
+
+	// Settings — LAN sync
+	settings_section_lan_sync: "局域网同步",
+	settings_section_lan_sync_desc:
+		"与同局域网内的手机或电脑互相合并 vault；冲突由用户选择保留哪一份。",
 	settings_ssh_agent_loading: "正在检查状态…",
 	settings_ssh_agent_btn_enable: "启用",
 	settings_ssh_agent_btn_disable: "停用",

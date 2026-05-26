@@ -3,6 +3,7 @@
 // 与 desktop SettingsPage 对齐：所有偏好均在本地，云端模式占位。
 // 主密码修改、清空保险库、明文导入导出都直接走加密 vault。
 
+import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
   StyleSheet,
@@ -210,6 +211,7 @@ function UserCard({
 export default function MeScreen() {
   const scheme = useColorScheme() ?? "dark";
   const c = Colors[scheme];
+  const router = useRouter();
 
   const { mode: themeMode, setMode: setThemeMode } = useTheme();
   const {
@@ -395,6 +397,13 @@ export default function MeScreen() {
           : "未启用",
       showChevron: trustedDeviceSupported,
       onPress: handleToggleTrustedDevice,
+    },
+    {
+      key: "lan-sync",
+      label: "局域网同步",
+      value: "连接桌面端",
+      showChevron: true,
+      onPress: () => router.push("/sync" as never),
     },
     {
       key: "lock-now",

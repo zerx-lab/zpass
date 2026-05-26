@@ -27,9 +27,22 @@ getrandom = "0.2"
 # 仅在 feature=android 时启用
 jni = { version = "0.21", default-features = false, optional = true }
 
-[dev-dependencies]
-# 单元测试里的 Argon2id 已知向量比对（lib.rs::derive_kek_known_vector）
+# ---- sync 子模块依赖（同步协议；PAKE 握手 + CBOR proto + 会话 AEAD） ----
+# SPAKE2 PAKE 实现（magic-wormhole 同款，生产级）
+spake2 = "0.4"
+# 协议消息序列化
+serde = { version = "1", features = ["derive"] }
+serde_bytes = "0.11"
+# CBOR 编码（确定性编码 / 无外部 schema 文件 / std 友好）
+ciborium = "0.2"
+# 二进制 SHA-256（用于 contentHash 与协议 transcript hash）
+sha2 = { version = "0.10", default-features = false }
+# 常数时间比较（防止侧信道）
+subtle = "2.5"
+# 协议十六进制编码（PIN 派生输入 / 会话 ID 展示）
 hex = "0.4"
+
+[dev-dependencies]
 
 [profile.release]
 # 体积优先：移动端的 .so 越小越好

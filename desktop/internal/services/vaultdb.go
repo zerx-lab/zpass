@@ -90,7 +90,9 @@ const (
 	// v1 → v2：新增 vault_trusted_device 表，存储 DPAPI/Keychain 包装的
 	// DEK 备份，让用户可在「信任设备」上重启免输主密码。
 	// v2 → v3：新增 vault_audit 表，持久化 SSH agent 签名审计日志。
-	vaultSchemaVersion = 3
+	// v3 → v4：vault_items 新增 deleted_at 列（软删除 tombstone）+ 索引。
+	// 同步功能需要保留删除标记以避免对端把已删条目「复活」回来。
+	vaultSchemaVersion = 4
 
 	// kdfNameArgon2id 写入 vault_meta.kdf 字段的标识
 	// 未来若引入新 KDF（比如 PHC 接班的算法），这里增加新常量并在
@@ -131,11 +133,18 @@ type VaultMeta struct {
 // Payload 是密文 BLOB，明文结构由 vaultservice 自己定义并 JSON
 // 序列化，DB 层不感知。这是"加密在外、存储在内"原则的体现 —— 即使
 // 未来换数据库（比如改 BoltDB）也只动这一层，密文格式不变。
+//
+// DeletedAt 软删除时间戳（unix ms）—— 同步 tombstone：
+//   - nil = 未删除（默认值），与 SQL deleted_at IS NULL 对应
+//   - 非 nil = 该时刻被删除；ListItems 默认过滤；ListItemsWithTombstones 才返回
+//
+// 顶层缓存方便 SQL 层快速过滤；权威值仍在加密 payload 内（AEAD 保护）。
 type VaultItemRow struct {
 	ID        string
 	Payload   []byte
 	CreatedAt int64
 	UpdatedAt int64
+	DeletedAt *int64
 }
 
 // TrustedDeviceRow 是 vault_trusted_device 表的内存表示
@@ -299,11 +308,15 @@ func (db *VaultDB) initSchema() error {
 			id         TEXT    PRIMARY KEY,
 			payload    BLOB    NOT NULL,
 			created_at INTEGER NOT NULL,
-			updated_at INTEGER NOT NULL
+			updated_at INTEGER NOT NULL,
+			deleted_at INTEGER          -- 软删除 tombstone：NULL = 未删除
 		);
 
 		CREATE INDEX IF NOT EXISTS idx_vault_items_updated_at
 			ON vault_items (updated_at DESC);
+		-- 注意：idx_vault_items_live_updated 在 ensureVaultItemsV4Schema()
+		-- 里建，因为对老表（v1-v3，没有 deleted_at 列）必须先 ALTER ADD
+		-- COLUMN 再 CREATE INDEX，不能放在 CREATE TABLE 段里直接执行。
 
 		CREATE TABLE IF NOT EXISTS vault_trusted_device (
 			id         INTEGER PRIMARY KEY CHECK (id = 1),
@@ -323,6 +336,13 @@ func (db *VaultDB) initSchema() error {
 	`)
 	if err != nil {
 		return fmt.Errorf("create tables: %w", err)
+	}
+
+	// 老表（v1-v3）走过 CREATE TABLE IF NOT EXISTS 时不会被改写 schema —— 必须
+	// 显式补齐 deleted_at 列与对应索引，再继续后面的 version 检查；新表则
+	// 直接含 deleted_at，下面的 ALTER 会被 hasColumn 短路。
+	if err := db.ensureVaultItemsV4Schema(); err != nil {
+		return fmt.Errorf("ensure vault_items v4 schema: %w", err)
 	}
 
 	// 若 vault_meta 已有行，检查 version；落后就跑 migrate
@@ -346,6 +366,63 @@ func (db *VaultDB) initSchema() error {
 		if err := db.migrate(version, vaultSchemaVersion); err != nil {
 			return fmt.Errorf("migrate %d -> %d: %w", version, vaultSchemaVersion, err)
 		}
+	}
+	return nil
+}
+
+// ensureVaultItemsV4Schema 幂等地把 vault_items 升级到 v4 schema
+//
+// 调用时机：每次 initSchema 启动都跑一次，无论 vault 是否已 Initialize。
+//
+// 工作流：
+//  1. PRAGMA table_info(vault_items) 看是否已有 deleted_at 列
+//  2. 没有 → ALTER TABLE vault_items ADD COLUMN deleted_at INTEGER
+//  3. CREATE INDEX IF NOT EXISTS idx_vault_items_live_updated（partial index
+//     需要 deleted_at 列存在才能编译，因此放在 step 2 之后）
+//
+// 不会对已有 v4 schema 重复添加列（PRAGMA 检查 + ALTER 只有缺列时才执行）。
+// 索引创建用 IF NOT EXISTS，反复跑没副作用。
+func (db *VaultDB) ensureVaultItemsV4Schema() error {
+	rows, err := db.handle.Query(`PRAGMA table_info(vault_items)`)
+	if err != nil {
+		return fmt.Errorf("pragma table_info: %w", err)
+	}
+	hasDeletedAt := false
+	for rows.Next() {
+		var (
+			cid       int
+			name      string
+			ctype     string
+			notnull   int
+			dfltValue sql.NullString
+			pk        int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan table_info: %w", err)
+		}
+		if name == "deleted_at" {
+			hasDeletedAt = true
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate table_info: %w", err)
+	}
+
+	if !hasDeletedAt {
+		if _, err := db.handle.Exec(
+			`ALTER TABLE vault_items ADD COLUMN deleted_at INTEGER`,
+		); err != nil {
+			return fmt.Errorf("add deleted_at column: %w", err)
+		}
+	}
+	// 部分索引（WHERE deleted_at IS NULL）—— 加速 ListItems 默认查询路径
+	if _, err := db.handle.Exec(
+		`CREATE INDEX IF NOT EXISTS idx_vault_items_live_updated
+			ON vault_items (updated_at DESC) WHERE deleted_at IS NULL`,
+	); err != nil {
+		return fmt.Errorf("create idx_vault_items_live_updated: %w", err)
 	}
 	return nil
 }
@@ -405,6 +482,19 @@ func (db *VaultDB) migrate(from, to int) error {
 			`)
 			if err != nil {
 				return fmt.Errorf("v3: create vault_audit: %w", err)
+			}
+		case 4:
+			// v3 → v4：vault_items 新增 deleted_at 列与索引。
+			//
+			// 软删除 tombstone：NULL = 未删除；非 NULL = 该时刻被删（毫秒）。
+			// 同步协议需要保留 id + updatedAt + deletedAt 以避免对端把已删
+			// 条目「复活」回来。物理清除留给未来的 GC（90 天后清理）。
+			//
+			// 实际 schema 改动已在 initSchema 头部的 ensureVaultItemsV4Schema()
+			// 幂等执行过；此处只需确认成功（重复 ALTER 会报"duplicate column"，
+			// 因此走 ensureVaultItemsV4Schema 而非直接 ALTER）。
+			if err := db.ensureVaultItemsV4Schema(); err != nil {
+				return fmt.Errorf("v4: ensure deleted_at schema: %w", err)
 			}
 		}
 		// 落版本号 —— 每个分支结束后单独 UPDATE，避免某个分支内部
@@ -578,7 +668,10 @@ func (db *VaultDB) WriteMeta(m *VaultMeta) error {
 // vault_items CRUD
 // ---------------------------------------------------------------------------
 
-// ListItems 返回所有条目（按 updated_at 倒序）
+// ListItems 返回所有「未删除」条目（按 updated_at 倒序）
+//
+// 默认过滤 deleted_at IS NULL —— tombstone 不返回给业务层（前端不可见）。
+// 同步协议需要列举 tombstone 时改用 ListItemsWithTombstones。
 //
 // 整库扫描：vault 单库通常 < 10k 条，全量取出在 vaultservice 内解密
 // 后做过滤 / 搜索；不在 SQL 层做（DB 看不到明文）。
@@ -587,8 +680,9 @@ func (db *VaultDB) WriteMeta(m *VaultMeta) error {
 // 调用方如果需要其它顺序（创建时间 / 字母序）自己在内存里 sort。
 func (db *VaultDB) ListItems() ([]VaultItemRow, error) {
 	rows, err := db.handle.Query(`
-		SELECT id, payload, created_at, updated_at
+		SELECT id, payload, created_at, updated_at, deleted_at
 		FROM vault_items
+		WHERE deleted_at IS NULL
 		ORDER BY updated_at DESC
 	`)
 	if err != nil {
@@ -599,8 +693,13 @@ func (db *VaultDB) ListItems() ([]VaultItemRow, error) {
 	out := make([]VaultItemRow, 0, 16)
 	for rows.Next() {
 		var r VaultItemRow
-		if err := rows.Scan(&r.ID, &r.Payload, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		var deletedAt sql.NullInt64
+		if err := rows.Scan(&r.ID, &r.Payload, &r.CreatedAt, &r.UpdatedAt, &deletedAt); err != nil {
 			return nil, fmt.Errorf("scan item: %w", err)
+		}
+		if deletedAt.Valid {
+			v := deletedAt.Int64
+			r.DeletedAt = &v
 		}
 		out = append(out, r)
 	}
@@ -610,24 +709,80 @@ func (db *VaultDB) ListItems() ([]VaultItemRow, error) {
 	return out, nil
 }
 
-// GetItem 按 id 读取单条
+// ListItemsWithTombstones 返回所有条目（含 tombstone），同步协议用
+//
+// 顺序与 ListItems 一致：updated_at DESC。前端绝不应调此接口（会看到墓碑）。
+func (db *VaultDB) ListItemsWithTombstones() ([]VaultItemRow, error) {
+	rows, err := db.handle.Query(`
+		SELECT id, payload, created_at, updated_at, deleted_at
+		FROM vault_items
+		ORDER BY updated_at DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query items with tombstones: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]VaultItemRow, 0, 16)
+	for rows.Next() {
+		var r VaultItemRow
+		var deletedAt sql.NullInt64
+		if err := rows.Scan(&r.ID, &r.Payload, &r.CreatedAt, &r.UpdatedAt, &deletedAt); err != nil {
+			return nil, fmt.Errorf("scan item: %w", err)
+		}
+		if deletedAt.Valid {
+			v := deletedAt.Int64
+			r.DeletedAt = &v
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// CountLiveItems 返回未删除条目数（SQL COUNT，不解密）
+//
+// Status() 用此接口暴露给前端的 ItemCount —— 不能简单用 len(ListItems)
+// 因为那样 tombstone 也会计入。
+func (db *VaultDB) CountLiveItems() (int, error) {
+	var n int
+	err := db.handle.QueryRow(
+		`SELECT COUNT(*) FROM vault_items WHERE deleted_at IS NULL`,
+	).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count live items: %w", err)
+	}
+	return n, nil
+}
+
+// GetItem 按 id 读取单条（含 tombstone）
 //
 // 找不到返回 (nil, nil) —— 与"key not found"语义对齐，调用方据此返回
 // HTTP 404 风格错误。区分"找不到"与"DB 错误"对前端体验很重要。
+//
+// 注意：本方法**不过滤** tombstone（DeletedAt 非 nil 也会返回），让调用方
+// 自己根据语境决定行为：
+//   - vaultservice.GetItem  解密 payload 后看到 tombstone → 返回 (nil, nil)
+//   - vaultservice.DeleteItem / UpdateItem  需要拿到 tombstone 行做幂等判断
+//   - 同步协议 fetch 必须看到 tombstone 才能告诉对端「这条被删了」
 func (db *VaultDB) GetItem(id string) (*VaultItemRow, error) {
 	if id == "" {
 		return nil, errors.New("item id cannot be empty")
 	}
 	var r VaultItemRow
+	var deletedAt sql.NullInt64
 	err := db.handle.QueryRow(`
-		SELECT id, payload, created_at, updated_at
+		SELECT id, payload, created_at, updated_at, deleted_at
 		FROM vault_items WHERE id = ?
-	`, id).Scan(&r.ID, &r.Payload, &r.CreatedAt, &r.UpdatedAt)
+	`, id).Scan(&r.ID, &r.Payload, &r.CreatedAt, &r.UpdatedAt, &deletedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get item %s: %w", id, err)
+	}
+	if deletedAt.Valid {
+		v := deletedAt.Int64
+		r.DeletedAt = &v
 	}
 	return &r, nil
 }
@@ -655,10 +810,14 @@ func (db *VaultDB) InsertItem(r *VaultItemRow) error {
 	if r.UpdatedAt == 0 {
 		r.UpdatedAt = now
 	}
+	var deletedAt sql.NullInt64
+	if r.DeletedAt != nil {
+		deletedAt = sql.NullInt64{Int64: *r.DeletedAt, Valid: true}
+	}
 	_, err := db.handle.Exec(`
-		INSERT INTO vault_items (id, payload, created_at, updated_at)
-		VALUES (?, ?, ?, ?)
-	`, r.ID, r.Payload, r.CreatedAt, r.UpdatedAt)
+		INSERT INTO vault_items (id, payload, created_at, updated_at, deleted_at)
+		VALUES (?, ?, ?, ?, ?)
+	`, r.ID, r.Payload, r.CreatedAt, r.UpdatedAt, deletedAt)
 	if err != nil {
 		return fmt.Errorf("insert item %s: %w", r.ID, err)
 	}
@@ -702,10 +861,14 @@ func (db *VaultDB) InsertItemBatch(rows []*VaultItemRow) error {
 		if r.UpdatedAt == 0 {
 			r.UpdatedAt = now
 		}
+		var deletedAt sql.NullInt64
+		if r.DeletedAt != nil {
+			deletedAt = sql.NullInt64{Int64: *r.DeletedAt, Valid: true}
+		}
 		_, err := tx.Exec(`
-			INSERT INTO vault_items (id, payload, created_at, updated_at)
-			VALUES (?, ?, ?, ?)
-		`, r.ID, r.Payload, r.CreatedAt, r.UpdatedAt)
+			INSERT INTO vault_items (id, payload, created_at, updated_at, deleted_at)
+			VALUES (?, ?, ?, ?, ?)
+		`, r.ID, r.Payload, r.CreatedAt, r.UpdatedAt, deletedAt)
 		if err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("batch insert item %s: %w", r.ID, err)
@@ -718,10 +881,16 @@ func (db *VaultDB) InsertItemBatch(rows []*VaultItemRow) error {
 	return nil
 }
 
-// UpdateItem 覆盖现有条目的 payload + updated_at
+// UpdateItem 覆盖现有条目的 payload + updated_at（**不动** deleted_at 列）
 //
 // 找不到 id 返回 ErrItemNotFound（调用方据此 404）。
 // created_at 不动 —— 创建时间是不可变事实。
+//
+// 接口契约：UpdateItem 永远不改变条目的「是否已删除」状态。
+//   - 软删除请用 SoftDeleteItem
+//   - 撤销 tombstone（从 deleted_at 非 NULL 改回 NULL）用 RestoreItem
+//   - 这样让 vaultservice / passkeyservice 等业务方调用 UpdateItem 时不必
+//     担心误复活墓碑或误删活动行。
 func (db *VaultDB) UpdateItem(r *VaultItemRow) error {
 	if r == nil {
 		return errors.New("nil item row")
@@ -740,6 +909,65 @@ func (db *VaultDB) UpdateItem(r *VaultItemRow) error {
 	`, r.Payload, r.UpdatedAt, r.ID)
 	if err != nil {
 		return fmt.Errorf("update item %s: %w", r.ID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrItemNotFound
+	}
+	return nil
+}
+
+// SoftDeleteItem 把活动行改为 tombstone
+//
+// 同时更新 payload（携带 plaintext deletedAt 字段，AEAD 保护）+ updated_at
+// + deleted_at 列。调用方必须先把 plaintext payload 加密好。
+//
+// 找不到 id 返回 ErrItemNotFound。已 tombstone 的行也允许覆盖（幂等更新）。
+func (db *VaultDB) SoftDeleteItem(id string, payload []byte, updatedAt, deletedAt int64) error {
+	if id == "" {
+		return errors.New("item id cannot be empty")
+	}
+	if len(payload) == 0 {
+		return errors.New("payload cannot be empty")
+	}
+	if deletedAt <= 0 {
+		return errors.New("deletedAt must be positive")
+	}
+	res, err := db.handle.Exec(`
+		UPDATE vault_items SET payload = ?, updated_at = ?, deleted_at = ? WHERE id = ?
+	`, payload, updatedAt, deletedAt, id)
+	if err != nil {
+		return fmt.Errorf("soft delete item %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrItemNotFound
+	}
+	return nil
+}
+
+// RestoreItem 把 tombstone 改回活动行（deleted_at = NULL）
+//
+// 同步合并时若用户选「保留对端的活动版本，本地原本是 tombstone」，调用此方法。
+// 找不到 id 返回 ErrItemNotFound。
+func (db *VaultDB) RestoreItem(id string, payload []byte, updatedAt int64) error {
+	if id == "" {
+		return errors.New("item id cannot be empty")
+	}
+	if len(payload) == 0 {
+		return errors.New("payload cannot be empty")
+	}
+	res, err := db.handle.Exec(`
+		UPDATE vault_items SET payload = ?, updated_at = ?, deleted_at = NULL WHERE id = ?
+	`, payload, updatedAt, id)
+	if err != nil {
+		return fmt.Errorf("restore item %s: %w", id, err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {

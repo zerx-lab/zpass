@@ -142,6 +142,7 @@ type deps struct {
 	vault         *services.VaultService
 	sshAgent      *services.SshAgentService
 	browserBridge *services.BrowserBridgeServer
+	sync          *services.SyncService
 	registry      *wailscompat.Registry
 	hub           *wailscompat.Hub
 }
@@ -178,6 +179,8 @@ func buildServices() (*deps, error) {
 	sshAgent.SetEventEmitter(emit)
 	vault.SetEventEmitter(emit)
 
+	syncSvc := services.NewSyncService(vault)
+
 	registry := wailscompat.NewRegistry()
 	registry.Register("ConfigService", services.NewConfigService())
 	registry.Register("VaultService", vault)
@@ -185,6 +188,7 @@ func buildServices() (*deps, error) {
 	registry.Register("QRService", services.NewQRService())
 	registry.Register("SshAgentService", sshAgent)
 	registry.Register("ExportService", services.NewExportService(vault))
+	registry.Register("SyncService", syncSvc)
 
 	// Re-adopt a background agent that the previous GUI run left alive.
 	// Same logic as the old Wails main.go — see SshAgentService.Shutdown
@@ -204,6 +208,7 @@ func buildServices() (*deps, error) {
 		vault:         vault,
 		sshAgent:      sshAgent,
 		browserBridge: browserBridge,
+		sync:          syncSvc,
 		registry:      registry,
 		hub:           hub,
 	}, nil
@@ -218,6 +223,10 @@ func (d *deps) shutdown() {
 	}
 	if d.browserBridge != nil {
 		_ = d.browserBridge.Shutdown()
+	}
+	if d.sync != nil {
+		_ = d.sync.StopServer()
+		_ = d.sync.Disconnect()
 	}
 	if d.sshAgent != nil {
 		_ = d.sshAgent.Shutdown()

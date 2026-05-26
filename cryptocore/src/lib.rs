@@ -18,6 +18,8 @@ use rand_core::{OsRng, RngCore};
 #[cfg(feature = "android")]
 pub mod android;
 
+pub mod sync;
+
 /// XChaCha20-Poly1305 密钥长度（与 Go chacha20poly1305.KeySize 对齐）
 pub const KEY_SIZE: usize = 32;
 /// XChaCha20-Poly1305 nonce 长度（extended nonce；与 Go chacha20poly1305.NonceSizeX 对齐）

@@ -61,6 +61,13 @@ export interface EncryptedItemRow {
   payload: Uint8Array;
   createdAt: number;
   updatedAt: number;
+  /**
+   * 软删除时间戳（毫秒）—— null/缺省 = 未删除。
+   *
+   * 这是 plaintext 顶层缓存，与 payload 内 ItemPayload.deletedAt 同步写入。
+   * 同步 manifest 不解密就能列出全部 tombstone；权威值仍在 payload 内（AEAD 保护）。
+   */
+  deletedAt?: number | null;
 }
 
 /**
@@ -126,6 +133,8 @@ interface ItemJSON {
   payload: string; // base64
   createdAt: number;
   updatedAt: number;
+  /** 软删除时间戳，缺省 / null 表示未删除。同步 manifest 用 */
+  deletedAt?: number | null;
 }
 
 interface TrustedDeviceJSON {
@@ -179,12 +188,17 @@ function metaFromJSON(j: MetaJSON): VaultMeta {
 }
 
 function itemToJSON(r: EncryptedItemRow): ItemJSON {
-  return {
+  const out: ItemJSON = {
     id: r.id,
     payload: toB64(r.payload),
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
+  // 仅在显式软删除时才落字段，避免给历史 vault 文件引入无意义的 null
+  if (typeof r.deletedAt === "number" && r.deletedAt > 0) {
+    out.deletedAt = r.deletedAt;
+  }
+  return out;
 }
 
 function itemFromJSON(j: ItemJSON): EncryptedItemRow {
@@ -193,6 +207,8 @@ function itemFromJSON(j: ItemJSON): EncryptedItemRow {
     payload: fromB64(j.payload),
     createdAt: j.createdAt,
     updatedAt: j.updatedAt,
+    deletedAt:
+      typeof j.deletedAt === "number" && j.deletedAt > 0 ? j.deletedAt : null,
   };
 }
 

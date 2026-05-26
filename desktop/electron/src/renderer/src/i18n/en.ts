@@ -629,6 +629,11 @@ export const en = {
 	settings_section_ssh_agent: "SSH agent",
 	settings_section_ssh_agent_desc:
 		"Use your vault SSH keys with ssh / git directly. No private key copying required.",
+
+	// Settings — LAN sync
+	settings_section_lan_sync: "LAN sync",
+	settings_section_lan_sync_desc:
+		"Merge your vault with another ZPass on the same LAN; you resolve any conflicts.",
 	settings_ssh_agent_loading: "Checking status…",
 	settings_ssh_agent_btn_enable: "Enable",
 	settings_ssh_agent_btn_disable: "Disable",

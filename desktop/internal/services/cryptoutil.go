@@ -63,12 +63,16 @@ package services
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/chacha20poly1305"
 )
+
+// base64Std 是同步 / 桥接里用的标准 base64 编码器（与 phone TS 端 toB64 一致）。
+var base64Std = base64.StdEncoding
 
 // ---------------------------------------------------------------------------
 // 常量
@@ -333,6 +337,60 @@ func OpenAEAD(key, sealed, aad []byte) ([]byte, error) {
 // ---------------------------------------------------------------------------
 // 内存清理
 // ---------------------------------------------------------------------------
+
+// sealAEADWithNonce 与 SealAEAD 等价，但 nonce 由调用方提供
+//
+// LAN 同步协议需要让两端把方向位 + 单调计数器编入 nonce（用于防重放与
+// 防反射攻击），随机 nonce 不满足此需求 —— 因此暴露一个内部 helper 让
+// syncservice 用。普通业务路径仍用 SealAEAD（避免外部错误地复用 nonce）。
+func sealAEADWithNonce(key, plaintext, aad, nonce []byte) ([]byte, error) {
+	if len(key) != KeySize {
+		return nil, fmt.Errorf("aead key length must be %d, got %d", KeySize, len(key))
+	}
+	if len(nonce) != NonceSize {
+		return nil, fmt.Errorf("nonce length must be %d, got %d", NonceSize, len(nonce))
+	}
+	aead, err := chacha20poly1305.NewX(key)
+	if err != nil {
+		return nil, fmt.Errorf("init xchacha20poly1305: %w", err)
+	}
+	return aead.Seal(nil, nonce, plaintext, aad), nil
+}
+
+// openAEADWithNonce 与 OpenAEAD 等价，但调用方负责提供 nonce
+//
+// 输入 ct 仅为 [ciphertext][tag]，不含 nonce 前缀（与 sealAEADWithNonce
+// 配对使用）。
+func openAEADWithNonce(key, ct, aad, nonce []byte) ([]byte, error) {
+	if len(key) != KeySize {
+		return nil, fmt.Errorf("aead key length must be %d, got %d", KeySize, len(key))
+	}
+	if len(nonce) != NonceSize {
+		return nil, fmt.Errorf("nonce length must be %d, got %d", NonceSize, len(nonce))
+	}
+	if len(ct) < chacha20poly1305.Overhead {
+		return nil, fmt.Errorf("ciphertext too short: %d bytes", len(ct))
+	}
+	aead, err := chacha20poly1305.NewX(key)
+	if err != nil {
+		return nil, fmt.Errorf("init xchacha20poly1305: %w", err)
+	}
+	plaintext, err := aead.Open(nil, nonce, ct, aad)
+	if err != nil {
+		return nil, errors.New("aead authentication failed")
+	}
+	return plaintext, nil
+}
+
+// base64Encode / base64Decode 是为 syncservice 提供的 base64 helper
+// 与 phone TS 端的 toB64 / fromB64 字节兼容（标准 base64，无 URL 安全变体）。
+func base64Encode(b []byte) string {
+	return base64Std.EncodeToString(b)
+}
+
+func base64Decode(s string) ([]byte, error) {
+	return base64Std.DecodeString(s)
+}
 
 // WipeBytes 把切片内容置零
 //

@@ -218,6 +218,19 @@ type ItemPayload struct {
 	Fields    map[string]any `json:"fields"`    // 类型特定字段
 	CreatedAt int64          `json:"createdAt"` // unix ms（后端写入，前端只读）
 	UpdatedAt int64          `json:"updatedAt"` // unix ms（后端写入，前端只读）
+
+	// DeletedAt 软删除时间戳（unix ms）—— 同步 tombstone。
+	//
+	// 用指针表达可空：nil = 未删除，*ptr > 0 = tombstone。
+	// 设计要点：
+	//   - ListItems / GetItem 必须过滤 DeletedAt 非 nil 的条目（对前端不可见）
+	//   - 同步协议保留 tombstone 以告诉对端"此条已删除"，避免对端复活
+	//   - 物理清除由未来的 GC 在 90 天后执行；当前阶段无限保留
+	DeletedAt *int64 `json:"deletedAt,omitempty"`
+
+	// Revision 单设备内写入版本号（每次 create/update/delete 递增）。
+	// 不参与冲突判定（UpdatedAt 决定），仅用于审计 / 调试。
+	Revision int64 `json:"revision,omitempty"`
 }
 
 // ItemSummary 是列表 API 返回的"轻量摘要" —— 包含足够渲染列表项的字段
@@ -490,11 +503,11 @@ func (s *VaultService) Status() (VaultStatus, error) {
 	// 信道信息（虽然条目数从加密 vault 推断不出明文，但攻击者根本拿
 	// 不到这个数据库时也不应通过 IPC 探到）。
 	if st.Unlocked && hasMeta {
-		rows, err := s.db.ListItems()
-		if err == nil {
-			st.ItemCount = len(rows)
+		// 用 SQL COUNT 过滤 tombstone，避免每次 Status 都全表解密
+		if n, err := s.db.CountLiveItems(); err == nil {
+			st.ItemCount = n
 		}
-		// ListItems 失败时 ItemCount 留 0，不让 Status 整个失败 —— 状态
+		// CountLiveItems 失败时 ItemCount 留 0，不让 Status 整个失败 —— 状态
 		// 探测要尽可能容错。
 	}
 	return st, nil
@@ -1103,6 +1116,10 @@ func (s *VaultService) ListItems() ([]ItemSummary, error) {
 			fmt.Printf("[vault] decrypt item %s failed: %v\n", r.ID, err)
 			continue
 		}
+		// tombstone（同步保留的软删除墓碑）对前端列表不可见
+		if payload.DeletedAt != nil && *payload.DeletedAt > 0 {
+			continue
+		}
 		// 透明迁移旧 wallet 条目为 note（仅读路径，不改改 DB）
 		migrateLegacyTypeInPlace(payload)
 		totpSecret, _ := payload.Fields["totp"].(string)
@@ -1142,6 +1159,10 @@ func (s *VaultService) GetItem(id string) (*ItemPayload, error) {
 	payload, err := s.decryptItem(row)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt item: %w", err)
+	}
+	// tombstone 对前端不可见 —— 返回 (nil, nil) 与"未找到"语义对齐
+	if payload.DeletedAt != nil && *payload.DeletedAt > 0 {
+		return nil, nil
 	}
 	// 透明迁移旧 wallet 条目为 note（仅读路径，不改改 DB）
 	migrateLegacyTypeInPlace(payload)
@@ -1186,6 +1207,8 @@ func (s *VaultService) CreateItem(in ItemPayload) (*ItemSummary, error) {
 	in.ID = id
 	in.CreatedAt = now
 	in.UpdatedAt = now
+	in.Revision = 1
+	in.DeletedAt = nil
 
 	// 加密整个 payload；aad=id 绑定上下文（防止条目调换攻击）
 	plaintext, err := json.Marshal(&in)
@@ -1274,6 +1297,8 @@ func (s *VaultService) BatchCreateItems(inputs []ItemPayload) ([]ItemSummary, er
 		in.ID = id
 		in.CreatedAt = now
 		in.UpdatedAt = now
+		in.Revision = 1
+		in.DeletedAt = nil
 
 		plaintext, err := json.Marshal(in)
 		if err != nil {
@@ -1346,6 +1371,11 @@ func (s *VaultService) UpdateItem(in ItemPayload) (*ItemSummary, error) {
 	if existing == nil {
 		return nil, ErrItemNotFound
 	}
+	// tombstone 行对前端不可见，禁止经普通 UpdateItem 路径复活 ——
+	// 同步合并时若需要撤销删除，应该走 sync 模块的 RestoreItem 路径
+	if existing.DeletedAt != nil && *existing.DeletedAt > 0 {
+		return nil, ErrItemNotFound
+	}
 	// 先把单调水位线推到既有项的 UpdatedAt，再生成新时间戳。
 	//
 	// 为什么这一步必要：
@@ -1365,6 +1395,15 @@ func (s *VaultService) UpdateItem(in ItemPayload) (*ItemSummary, error) {
 	now := s.nowMs()
 	in.CreatedAt = existing.CreatedAt
 	in.UpdatedAt = now
+	// 防御性：前端不应该通过 UpdateItem 设置 DeletedAt（请走 DeleteItem 路径）
+	in.DeletedAt = nil
+	// Revision 自增；从 existing payload 读出当前值需要解密，开销可接受
+	if existingPayload, err := s.decryptItem(existing); err == nil {
+		in.Revision = existingPayload.Revision + 1
+	} else {
+		// 解密失败极罕见 —— 用墙钟兜底，保证严格大于先前任意值
+		in.Revision = now
+	}
 
 	plaintext, err := json.Marshal(&in)
 	if err != nil {
@@ -1414,12 +1453,16 @@ func (s *VaultService) UpdateItem(in ItemPayload) (*ItemSummary, error) {
 	return summary, nil
 }
 
-// DeleteItem 按 id 删除条目
+// DeleteItem 软删除 —— 写 tombstone 而不是物理移除
 //
-// secure_delete pragma 已开（见 vaultdb.go），删除页填零，密文不会留
-// 在文件未使用空间里被取证软件恢复。
+// 为什么不物理删：同步语义需要让对端知道"这条已被删"；如果直接 DELETE，
+// 下次与对端同步时对端会把它当作"我有他没有的新条目"复活回来。tombstone
+// 保留 id + updatedAt + deletedAt 让冲突检测算法正确。
 //
-// 找不到 id 返回 ErrItemNotFound（前端可据此提示"条目已不存在"或忽略）。
+// 实现：解密 → 标 DeletedAt = now → 重新加密 → UpdateItem 落回。
+// 物理清除留给未来 GC（90 天后清理）。
+//
+// 找不到 id 返回 ErrItemNotFound；已 tombstone 的条目幂等 nil。
 func (s *VaultService) DeleteItem(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1430,18 +1473,138 @@ func (s *VaultService) DeleteItem(id string) error {
 	if id == "" {
 		return errors.New("item id cannot be empty")
 	}
-	if err := s.db.DeleteItem(id); err != nil {
-		return err
+
+	existingRow, err := s.db.GetItem(id)
+	if err != nil {
+		return fmt.Errorf("get existing: %w", err)
+	}
+	if existingRow == nil {
+		return ErrItemNotFound
+	}
+	existing, err := s.decryptItem(existingRow)
+	if err != nil {
+		// 行密文损坏 —— 无法构造有效 tombstone，回退物理删除
+		// 这是兼容路径：vault.db 局部损坏时也要让用户能"删"掉烦人项
+		if dbErr := s.db.DeleteItem(id); dbErr != nil {
+			return dbErr
+		}
+		s.notifyVaultChanged("delete", "", id)
+		return nil
+	}
+	// 已 tombstone → 幂等返回成功，不重写时间戳避免污染同步顺序
+	if existing.DeletedAt != nil && *existing.DeletedAt > 0 {
+		return nil
+	}
+
+	if existingRow.UpdatedAt > s.lastTsMs {
+		s.lastTsMs = existingRow.UpdatedAt
+	}
+	now := s.nowMs()
+	existing.UpdatedAt = now
+	existing.DeletedAt = &now
+	existing.Revision = existing.Revision + 1
+
+	plaintext, err := json.Marshal(existing)
+	if err != nil {
+		return fmt.Errorf("marshal tombstone: %w", err)
+	}
+	ciphertext, err := SealAEAD(s.dek, plaintext, []byte(id))
+	WipeBytes(plaintext)
+	if err != nil {
+		return fmt.Errorf("seal tombstone: %w", err)
+	}
+	if err := s.db.SoftDeleteItem(id, ciphertext, now, now); err != nil {
+		return fmt.Errorf("soft delete: %w", err)
 	}
 
 	// 删除后也该通知 —— 如果是刚删的 ssh item，该 fingerprint 不应再
-	// 出现在 agent 的公钥索引中。这里不走「先查原类型」优化：同上，
-	// PushVaultKeys 是幂等应不贵。
+	// 出现在 agent 的公钥索引中。
 	s.notifySshAgentSafe(func(n SshAgentNotifier) {
 		go func() { _ = n.PushVaultKeys() }()
 	})
 	s.notifyVaultChanged("delete", "", id)
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// 同步专用 API（被 SyncService 调用，前端不应直接走）
+// ---------------------------------------------------------------------------
+
+// IngestForeignPayload 把对端同步过来的 plaintext payload 用本端 DEK 加密落盘
+//
+// 两端 vault 独立，DEK 不同；同步协议在 wire 上只传 plaintext payload（外层
+// 有 session AEAD 保护），本端用自己的 DEK 重新加密写入。
+//
+// 行为：
+//   - 本端不存在 id → InsertItem（保留 remote 的 createdAt/updatedAt）
+//   - 本端已有但 updatedAt < remote → UpdateItem 或 RestoreItem（tombstone → 活动）
+//   - 本端已有且 updatedAt >= remote → 跳过（LWW）
+//
+// 调用方负责保证 payload.DeletedAt == nil（tombstone 走 DeleteItem 路径）。
+func (s *VaultService) IngestForeignPayload(id string, payload *ItemPayload, createdAt, updatedAt int64) (applied bool, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dek == nil {
+		return false, ErrVaultLocked
+	}
+	if id == "" || payload == nil {
+		return false, errors.New("ingest: empty id or payload")
+	}
+	// 强制 id / 时间戳与对端一致；本端不重新生成 id（保持跨端可识别）
+	payload.ID = id
+	payload.CreatedAt = createdAt
+	payload.UpdatedAt = updatedAt
+	payload.DeletedAt = nil
+	if payload.Fields == nil {
+		payload.Fields = map[string]any{}
+	}
+
+	plaintext, err := json.Marshal(payload)
+	if err != nil {
+		return false, fmt.Errorf("marshal ingest payload: %w", err)
+	}
+	ciphertext, err := SealAEAD(s.dek, plaintext, []byte(id))
+	WipeBytes(plaintext)
+	if err != nil {
+		return false, fmt.Errorf("seal ingest payload: %w", err)
+	}
+
+	existing, err := s.db.GetItem(id)
+	if err != nil {
+		return false, fmt.Errorf("get existing: %w", err)
+	}
+	if existing == nil {
+		row := &VaultItemRow{
+			ID:        id,
+			Payload:   ciphertext,
+			CreatedAt: createdAt,
+			UpdatedAt: updatedAt,
+		}
+		if err := s.db.InsertItem(row); err != nil {
+			return false, fmt.Errorf("insert: %w", err)
+		}
+		return true, nil
+	}
+	if existing.UpdatedAt >= updatedAt {
+		return false, nil // LWW: 本端更新或一样新，不覆盖
+	}
+	if existing.DeletedAt != nil {
+		// 本端原是 tombstone，对端是活动版本且更新 → 复活
+		if err := s.db.RestoreItem(id, ciphertext, updatedAt); err != nil {
+			return false, fmt.Errorf("restore: %w", err)
+		}
+		return true, nil
+	}
+	row := &VaultItemRow{
+		ID:        id,
+		Payload:   ciphertext,
+		CreatedAt: existing.CreatedAt,
+		UpdatedAt: updatedAt,
+	}
+	if err := s.db.UpdateItem(row); err != nil {
+		return false, fmt.Errorf("update: %w", err)
+	}
+	return true, nil
 }
 
 // ---------------------------------------------------------------------------

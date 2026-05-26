@@ -663,9 +663,13 @@ func TestDeleteItem(t *testing.T) {
 		t.Errorf("expected nil after delete, got %+v", got)
 	}
 
-	// 重复删
-	if err := svc.DeleteItem(created.ID); !errors.Is(err, ErrItemNotFound) {
-		t.Errorf("expected ErrItemNotFound on second delete, got %v", err)
+	// 重复删 —— 已 tombstone 的条目幂等成功（软删除语义：再删一次没意义）
+	if err := svc.DeleteItem(created.ID); err != nil {
+		t.Errorf("expected nil on second delete (idempotent), got %v", err)
+	}
+	// 但对不存在的 id 仍然返回 ErrItemNotFound
+	if err := svc.DeleteItem("nonexistent-id"); !errors.Is(err, ErrItemNotFound) {
+		t.Errorf("expected ErrItemNotFound for missing id, got %v", err)
 	}
 }
 

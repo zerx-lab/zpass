@@ -53,6 +53,17 @@ export interface BaseItem {
    * 兼容性：未持久化该字段的旧 item 视为属于 DEFAULT_SPACE_ID。
    */
   spaceId?: string;
+  /**
+   * 软删除时间戳（毫秒）—— 同步用 tombstone。
+   * UI 层不展示 deletedAt !== undefined 的条目；保留行是为了同步时能告知对端"此条已删除"。
+   * 物理清除由 GC 在 90 天后执行。
+   */
+  deletedAt?: number;
+  /**
+   * 写入版本号 —— 每次 create/update/delete 单调递增（同设备内）。
+   * 仅用于调试 / 审计，不参与冲突判定（updatedAt 才是冲突判定字段）。
+   */
+  revision?: number;
 }
 
 export interface LoginItem extends BaseItem {

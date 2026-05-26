@@ -130,6 +130,20 @@ export interface ItemPayload {
   fields: Record<string, unknown>;
   createdAt: number;
   updatedAt: number;
+  /**
+   * 软删除时间戳（毫秒）—— 同步 tombstone。
+   *
+   * 设计要点：
+   *   - listItems / getItem 必须过滤 deletedAt 非 null 的条目，对前端表现为"已删除"
+   *   - sync 协议需要保留 tombstone 来告诉对端"我这里删了"，避免对端把已删除条目"复活"
+   *   - tombstone 在 GC（90 天后）才物理移除；未实现 GC 时无限保留
+   */
+  deletedAt?: number | null;
+  /**
+   * 写入版本号 —— 单设备内 create/update/delete 单调递增。
+   * 不参与冲突判定（updatedAt 决定），仅审计 / 调试用。
+   */
+  revision?: number;
 }
 
 const VALID_TYPES: ReadonlySet<VaultItemType> = new Set<VaultItemType>([
@@ -163,10 +177,14 @@ class VaultService {
   /** 返回当前 vault 状态（前端路由守卫用） */
   async status(): Promise<VaultStatus> {
     const file = await readVaultFile();
+    // tombstone 不计入用户感知的 itemCount
+    const liveCount = file.items.filter(
+      (r) => !(typeof r.deletedAt === "number" && r.deletedAt > 0),
+    ).length;
     return {
       initialized: !!file.meta,
       unlocked: this.dek !== null,
-      itemCount: this.dek !== null ? file.items.length : 0,
+      itemCount: this.dek !== null ? liveCount : 0,
     };
   }
 
@@ -761,9 +779,13 @@ class VaultService {
     const remaining = fixed.spaces.filter((s) => s.id !== id);
     // 选迁移目标：保留集合里的第一个（按 order）
     const fallback = sortSpaces(remaining)[0]?.id ?? DEFAULT_SPACE_ID;
-    // 把目标空间下的 item 解密 -> 改 spaceId -> 重新加密
+    // 把目标空间下的 item 解密 -> 改 spaceId -> 重新加密；跳过 tombstone
     const nextItems: EncryptedItemRow[] = [];
     for (const row of file.items) {
+      if (typeof row.deletedAt === "number" && row.deletedAt > 0) {
+        nextItems.push(row);
+        continue;
+      }
       try {
         const payload = this.decryptRow(row);
         const curSpace = readSpaceIdFromFields(payload.fields) ?? fixed.activeSpaceId;
@@ -773,6 +795,7 @@ class VaultService {
             spaceId: fallback,
           };
           payload.updatedAt = this.nowMs();
+          payload.revision = (payload.revision ?? 0) + 1;
           nextItems.push(this.encryptPayload(payload));
         } else {
           nextItems.push(row);
@@ -796,14 +819,19 @@ class VaultService {
   /* CRUD                                                                     */
   /* ------------------------------------------------------------------------ */
 
-  /** 获取并解密所有 item */
+  /** 获取并解密所有 item（自动过滤 tombstone） */
   async listItems(): Promise<ItemPayload[]> {
     this.requireUnlocked();
     const file = await readVaultFile();
     const out: ItemPayload[] = [];
     for (const row of file.items) {
+      // 顶层缓存命中即可跳过解密；权威值由 decryptRow 二次校验
+      if (typeof row.deletedAt === "number" && row.deletedAt > 0) continue;
       try {
         const payload = this.decryptRow(row);
+        if (typeof payload.deletedAt === "number" && payload.deletedAt > 0) {
+          continue;
+        }
         out.push(payload);
       } catch {
         // 单条解密失败不阻塞全表
@@ -819,7 +847,12 @@ class VaultService {
     const file = await readVaultFile();
     const row = file.items.find((r) => r.id === id);
     if (!row) return null;
-    return this.decryptRow(row);
+    if (typeof row.deletedAt === "number" && row.deletedAt > 0) return null;
+    const payload = this.decryptRow(row);
+    if (typeof payload.deletedAt === "number" && payload.deletedAt > 0) {
+      return null;
+    }
+    return payload;
   }
 
   /** 新增 item，返回带后端补全字段的完整 payload */
@@ -850,6 +883,8 @@ class VaultService {
       fields: finalFields,
       createdAt: now,
       updatedAt: now,
+      revision: 1,
+      deletedAt: null,
     };
     const row = this.encryptPayload(payload);
     file.items = [row, ...file.items];
@@ -859,7 +894,7 @@ class VaultService {
     return payload;
   }
 
-  /** 整体覆盖 item（按 id 匹配），不存在抛 not-found */
+  /** 整体覆盖 item（按 id 匹配），不存在或已软删除抛 not-found */
   async updateItem(
     id: string,
     patch: { name?: string; type?: VaultItemType; fields?: Record<string, unknown> },
@@ -868,26 +903,52 @@ class VaultService {
     const file = await readVaultFile();
     const idx = file.items.findIndex((r) => r.id === id);
     if (idx === -1) throw new VaultError("not-found", "条目不存在");
+    const row = file.items[idx];
+    if (typeof row.deletedAt === "number" && row.deletedAt > 0) {
+      // 已 tombstone 的条目对 UI 不可见，不可编辑
+      throw new VaultError("not-found", "条目不存在");
+    }
 
-    const existing = this.decryptRow(file.items[idx]);
+    const existing = this.decryptRow(row);
     const next: ItemPayload = {
       ...existing,
       name: patch.name?.trim() ?? existing.name,
       type: patch.type ?? existing.type,
       fields: patch.fields ?? existing.fields,
       updatedAt: this.nowMs(),
+      revision: (existing.revision ?? 0) + 1,
+      deletedAt: null,
     };
     file.items[idx] = this.encryptPayload(next);
     await writeVaultFile(file);
     return next;
   }
 
+  /** 软删除 —— 写 tombstone（保留 row，标 deletedAt），同步用 */
   async deleteItem(id: string): Promise<void> {
     this.requireUnlocked();
     const file = await readVaultFile();
-    const next = file.items.filter((r) => r.id !== id);
-    if (next.length === file.items.length) return; // 静默幂等
-    file.items = next;
+    const idx = file.items.findIndex((r) => r.id === id);
+    if (idx === -1) return; // 静默幂等
+    const row = file.items[idx];
+    if (typeof row.deletedAt === "number" && row.deletedAt > 0) return; // 已删
+    let existing: ItemPayload;
+    try {
+      existing = this.decryptRow(row);
+    } catch {
+      // 行密文损坏 —— 直接物理移除（无法形成有效 tombstone）
+      file.items = file.items.filter((r) => r.id !== id);
+      await writeVaultFile(file);
+      return;
+    }
+    const now = this.nowMs();
+    const tombstone: ItemPayload = {
+      ...existing,
+      updatedAt: now,
+      deletedAt: now,
+      revision: (existing.revision ?? 0) + 1,
+    };
+    file.items[idx] = this.encryptPayload(tombstone);
     await writeVaultFile(file);
   }
 
@@ -913,6 +974,8 @@ class VaultService {
         fields,
         createdAt: now,
         updatedAt: now,
+        revision: 1,
+        deletedAt: null,
       };
       return this.encryptPayload(payload);
     });
@@ -939,15 +1002,68 @@ class VaultService {
     if (!this.dek) throw new VaultError("locked", "vault 已锁定");
   }
 
+  /**
+   * 同步协议专用：把对端同步过来的 plaintext payload 用本端 DEK 加密落盘
+   *
+   * 两端 vault 独立、DEK 不同；wire 上只传 plaintext（外层 session AEAD 保护），
+   * 本端用自己的 DEK 重新加密写入。保留对端 id / createdAt / updatedAt。
+   *
+   * 行为：
+   *   - 本端不存在该 id → 插入新行（LWW 入场）
+   *   - 本端已有但 updatedAt < remote → 整行覆盖
+   *   - 本端已有且 updatedAt >= remote → 跳过
+   *
+   * 调用方需保证 payload.deletedAt == null —— tombstone 走 deleteItem 路径。
+   */
+  async ingestForeignPayload(
+    id: string,
+    payload: ItemPayload,
+    createdAt: number,
+    updatedAt: number,
+  ): Promise<"inserted" | "updated" | "skipped"> {
+    this.requireUnlocked();
+    if (!id) throw new VaultError("not-found", "ingest: empty id");
+    // 强制 id / 时间戳与对端一致；本端不重新生成 id（保持跨端可识别）
+    const normalized: ItemPayload = {
+      ...payload,
+      id,
+      createdAt,
+      updatedAt,
+      deletedAt: null,
+      revision: payload.revision ?? 1,
+      fields: payload.fields ?? {},
+    };
+    const file = await readVaultFile();
+    const idx = file.items.findIndex((r) => r.id === id);
+    if (idx === -1) {
+      const encrypted = this.encryptPayload(normalized);
+      file.items = [encrypted, ...file.items];
+      await writeVaultFile(file);
+      return "inserted";
+    }
+    if (file.items[idx].updatedAt >= updatedAt) {
+      return "skipped";
+    }
+    const encrypted = this.encryptPayload(normalized);
+    file.items[idx] = encrypted;
+    await writeVaultFile(file);
+    return "updated";
+  }
+
   private encryptPayload(payload: ItemPayload): EncryptedItemRow {
     const plaintext = utf8(JSON.stringify(payload));
     const ciphertext = sealAEAD(this.dek!, plaintext, utf8(payload.id));
     wipeBytes(plaintext);
+    const deletedAt =
+      typeof payload.deletedAt === "number" && payload.deletedAt > 0
+        ? payload.deletedAt
+        : null;
     return {
       id: payload.id,
       payload: ciphertext,
       createdAt: payload.createdAt,
       updatedAt: payload.updatedAt,
+      deletedAt,
     };
   }
 
@@ -958,6 +1074,9 @@ class VaultService {
     parsed.createdAt = row.createdAt;
     parsed.updatedAt = row.updatedAt;
     parsed.id = row.id;
+    // deletedAt 的权威来源是密文内部值（受 AEAD 保护），顶层缓存只用于快速过滤
+    if (parsed.deletedAt === undefined) parsed.deletedAt = null;
+    if (parsed.revision === undefined) parsed.revision = 1;
     return parsed;
   }
 }

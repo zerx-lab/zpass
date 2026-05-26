@@ -3,6 +3,7 @@ import { clsx } from "clsx";
 import {
 	AlertTriangle,
 	AppWindow,
+	ArrowRightLeft,
 	Globe,
 	ImagePlus,
 	Info,
@@ -28,6 +29,7 @@ import { FontSelect } from "@/components/FontSelect";
 import { SpaceAvatar } from "@/components/SpaceAvatar";
 import { resizeImageToDataUrl } from "@/lib/image";
 import { SshAgentSection } from "@/features/sshagent/SshAgentSection";
+import { LanSyncSection } from "@/features/settings/LanSyncSection";
 import { vaultApi, vaultErrorKind } from "@/lib/vault-api";
 import {
 	type Body,
@@ -1628,6 +1630,12 @@ const NAV_ITEMS: NavItem[] = [
 		group: "security",
 	},
 	{
+		id: "lan-sync",
+		labelKey: "settings_section_lan_sync",
+		icon: ArrowRightLeft,
+		group: "security",
+	},
+	{
 		id: "about",
 		labelKey: "settings_section_about",
 		icon: Info,
@@ -1790,6 +1798,9 @@ export function SettingsPage() {
 					</div>
 					<div ref={sectionRef("ssh-agent")} data-section-id="ssh-agent">
 						<SshAgentSection />
+					</div>
+					<div ref={sectionRef("lan-sync")} data-section-id="lan-sync">
+						<LanSyncSection />
 					</div>
 					<div
 						ref={sectionRef("about")}

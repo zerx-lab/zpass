@@ -124,6 +124,13 @@ interface VaultContextValue {
   breachLastScanAt: number | null;
   /** 触发一次全量泄露扫描；force=true 时先清缓存再扫 */
   runBreachScan: (force?: boolean) => Promise<void>;
+  /**
+   * 强制重新从磁盘拉取 vault 快照刷新内存 state。
+   *
+   * 用于外部模块（如 LAN 同步）直接修改 vault 文件后通知 UI 刷新 ——
+   * 普通 CRUD 路径已经在内部自动调 refresh，不必显式调用。
+   */
+  refresh: () => Promise<void>;
 }
 
 const VaultContext = createContext<VaultContextValue | null>(null);
@@ -615,6 +622,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       breachScanning,
       breachLastScanAt,
       runBreachScan,
+      refresh,
     }),
     [
       items,
@@ -651,6 +659,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       breachScanning,
       breachLastScanAt,
       runBreachScan,
+      refresh,
     ],
   );
 
