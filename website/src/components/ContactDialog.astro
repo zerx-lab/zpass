@@ -372,7 +372,6 @@ const { t, endpoint = "/api/contact" } = Astro.props;
 
     // ---- DOM refs ----
     var overlay = document.querySelector("[data-contact-dialog]");
-    var panel = overlay && overlay.querySelector("[data-contact-panel]");
     var form = overlay && overlay.querySelector("[data-contact-form]");
 
     if (!overlay || !form) return;

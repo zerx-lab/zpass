@@ -270,7 +270,7 @@ const metaColorScheme =
 		 - 自托管 apiUrl：https://openpanel-api.zerx.dev
 		 ==================================================================== -->
 		<script is:inline>
-			window.op = window.op || function () { var n = []; return new Proxy(function () { arguments.length && n.push([].slice.call(arguments)) }, { get: function (t, r) { return "q" === r ? n : function () { n.push([r].concat([].slice.call(arguments))) } }, has: function (t, r) { return "q" === r } }) }();
+			window.op = window.op || function () { var n = []; return new Proxy(function () { arguments.length && n.push([].slice.call(arguments)) }, { get: function (_t, r) { return "q" === r ? n : function () { n.push([r].concat([].slice.call(arguments))) } }, has: function (_t, r) { return "q" === r } }) }();
 			window.op('init', {
 				apiUrl: 'https://openpanel-api.zerx.dev',
 				clientId: '4fce5f43-6fdf-4b7f-8116-61bc435460e5',

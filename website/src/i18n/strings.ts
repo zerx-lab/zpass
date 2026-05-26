@@ -2,6 +2,9 @@
 // 内容移植自 ZPassDesign/src/site/site-i18n.jsx，扩展为强类型 TS 模块。
 // 在页面与组件中通过 `getStrings(locale)` 获取对应语言文案。
 
+/** ZPass 官方 GitHub 仓库（Nav / Footer / README 等多处引用，集中在此避免不一致） */
+export const GITHUB_URL = "https://github.com/zerx-lab/zpass";
+
 export type Locale = "en" | "zh";
 
 export interface PriceTier {
@@ -243,6 +246,10 @@ export interface SiteStrings {
 	theme_dark: string;
 	theme_light: string;
 	theme_auto: string;
+
+	// 开源 / GitHub
+	github_aria: string;
+	footer_oss: string;
 
 	// contact dialog（联系我们对话框）
 	contact_trigger: string;
@@ -565,6 +572,8 @@ const en: SiteStrings = {
 	theme_dark: "Dark",
 	theme_light: "Light",
 	theme_auto: "Auto",
+	github_aria: "View ZPass on GitHub",
+	footer_oss: "Open source · AGPL-3.0",
 	contact_trigger: "Contact",
 	contact_title: "Get in touch",
 	contact_name_label: "Name",
@@ -879,6 +888,8 @@ const zh: SiteStrings = {
 	theme_dark: "深色",
 	theme_light: "浅色",
 	theme_auto: "跟随系统",
+	github_aria: "在 GitHub 查看 ZPass",
+	footer_oss: "开源 · AGPL-3.0",
 	contact_trigger: "联系我们",
 	contact_title: "联系我们",
 	contact_name_label: "姓名",

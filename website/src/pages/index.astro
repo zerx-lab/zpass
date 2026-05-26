@@ -7,7 +7,6 @@
 // 注：发布前版本——
 //   - 用 Release(“即将发布” 状态区块) 替代原 Subscribe(邮件订阅) 区块
 //   - Live(实时演示 iframe) 默认 show=false 隐藏,产品尚未发布
-//   - 页面 SEO 描述去掉了"开源 / self-hostable"等表述
 // ============================================================================
 
 import BaseLayout from "../layouts/BaseLayout.astro";
@@ -40,7 +39,7 @@ const t = applyVersion(getStrings(locale), release.version);
 // 页面级 SEO
 const title = "ZPass — a calmer password manager";
 const description =
-	"ZPass is a cross-platform credential manager built on zero-knowledge architecture. End-to-end encrypted by design — launching soon. Get in touch to learn more.";
+	"ZPass is an open-source, cross-platform credential manager built on zero-knowledge architecture. End-to-end encrypted, self-hostable, AGPL-3.0 — launching soon.";
 ---
 
 <BaseLayout

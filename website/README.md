@@ -3,7 +3,8 @@
 ZPass 官方网站，基于 [Astro](https://astro.build/) 5.x 构建，纯静态输出。
 设计稿与原型源自同仓库的 [`../ZPassDesign/`](../ZPassDesign/)。
 
-> **关于 ZPass**：一款基于零知识架构的跨平台密码管理器，端到端加密、支持自托管、完全开源（MIT）。
+> **关于 ZPass**：一款基于零知识架构的跨平台密码管理器，端到端加密、支持自托管、完全开源
+> （[AGPL-3.0](../LICENSE)）。源码仓库：<https://github.com/zerx-lab/zpass>。
 
 ---
 
@@ -192,4 +193,4 @@ React 18 + Babel standalone（CDN）渲染。
 
 ## 许可证
 
-源码 MIT。设计与文案版权归 ZPass 项目所有。
+源码遵循根仓库的 [AGPL-3.0](../LICENSE)。设计与文案版权归 ZPass 项目所有。
