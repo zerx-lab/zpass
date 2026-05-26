@@ -115,12 +115,8 @@ export class InlineMenuInjector {
    * 返回 false 表示已被永久关停。
    */
   openList(rect: InlineMenuFieldRect): boolean {
-    if (this.disabled) {
-      console.log("[ZPass inline-menu] injector disabled (top-layer hijack)");
-      return false;
-    }
+    if (this.disabled) return false;
     if (this.list) {
-      console.log("[ZPass inline-menu] injector reposition existing list");
       this.list.lastRect = rect;
       this.list.iframe.setPosition(rect);
       this.ensureShellVisible(this.list);
@@ -130,20 +126,10 @@ export class InlineMenuInjector {
       InlineMenuOverlayElement.List,
       "ZPass autofill list",
     );
-    console.log(
-      "[ZPass inline-menu] injector created shell",
-      "tag=", this.list.tagName,
-      "iframe.src=", this.list.iframe.iframeSrc(),
-    );
     this.appendToContainer(this.list.element);
     this.ensureShellVisible(this.list);
     this.list.lastRect = rect;
     this.list.iframe.setPosition(rect);
-    console.log(
-      "[ZPass inline-menu] injector mounted",
-      "container=", this.currentContainer?.tagName,
-      "shellConnected=", this.list.element.isConnected,
-    );
     return true;
   }
 
@@ -286,7 +272,7 @@ export class InlineMenuInjector {
     }
     if (!needRefresh) return;
     if (this.isHijackThresholdReached()) {
-      this.disable("inline menu disabled: too many top-layer refreshes");
+      this.disable();
       return;
     }
     try {
@@ -310,9 +296,8 @@ export class InlineMenuInjector {
     return this.refreshTimestamps.length > POPOVER_REFRESH_THRESHOLD;
   }
 
-  private disable(reason: string): void {
+  private disable(): void {
     this.disabled = true;
-    console.log("[ZPass]", reason);
     this.closeList();
     this.htmlObserver.disconnect();
     this.bodyObserver.disconnect();

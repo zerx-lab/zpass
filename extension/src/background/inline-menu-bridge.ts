@@ -79,7 +79,6 @@ export class InlineMenuBridge {
   attachPort(port: Browser.runtime.Port): boolean {
     if (port.name !== InlineMenuPort.List) return false;
     const tabId = port.sender?.tab?.id;
-    console.log("[ZPass inline-menu bg] attachPort tabId=", tabId);
     if (typeof tabId !== "number") {
       try {
         port.disconnect();
@@ -125,12 +124,6 @@ export class InlineMenuBridge {
     tabId: number,
     req: Extract<InlineMenuExtensionRequest, { type: "zpass.inlineMenu.open" }>,
   ): Promise<void> {
-    console.log(
-      "[ZPass inline-menu bg] handleOpen tabId=", tabId,
-      "origin=", req.origin,
-      "kind=", req.inputKind,
-      "hasListPort=", this.tabs.get(tabId)?.listPort != null,
-    );
     await this.startOpen(tabId, req.origin, req.rect, req.inputKind, req.focusList === true, false);
   }
 
@@ -143,12 +136,6 @@ export class InlineMenuBridge {
     req: Extract<InlineMenuExtensionRequest, { type: "zpass.inlineMenu.subFrameOpen" }>,
     topOrigin: string,
   ): Promise<void> {
-    console.log(
-      "[ZPass inline-menu bg] handleSubFrameOpen tabId=", tabId,
-      "origin=", topOrigin,
-      "kind=", req.inputKind,
-      "rect=", `${req.rect.top},${req.rect.left},${req.rect.width}x${req.rect.height}`,
-    );
     await this.startOpen(tabId, topOrigin, req.rect, req.inputKind, false, true);
   }
 
@@ -192,17 +179,9 @@ export class InlineMenuBridge {
       if (state.inputKind === "totp") {
         payload = { ...payload, items: payload.items.filter((i) => i.hasTotp) };
       }
-      console.log(
-        "[ZPass inline-menu bg] queryLogins",
-        "unlocked=", payload.unlocked,
-        "kind=", state.inputKind,
-        "items=", payload.items.length,
-      );
-    } catch (error) {
-      console.log(
-        "[ZPass inline-menu bg] queryLogins failed:",
-        error instanceof Error ? error.message : String(error),
-      );
+    } catch {
+      // desktop 离线 / vault 未解锁 / 网络错误 —— 当作空 list 处理,
+      // iframe 仍渲染"没有匹配项"或"已锁定"占位。
       payload = {
         unlocked: false,
         origin,

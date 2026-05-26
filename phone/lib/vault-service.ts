@@ -3,12 +3,18 @@
 // 对齐 desktop/internal/services/vaultservice.go：
 //   - Status / Initialize / Unlock / Lock / ChangeMasterPassword
 //   - ListItems / GetItem / CreateItem / UpdateItem / DeleteItem
+//   - IsTrustedDeviceSupported / IsTrustedDeviceEnabled
+//     / EnableTrustedDevice / DisableTrustedDevice / TryUnlockWithTrustedDevice
 //
 // 与 desktop 的差异：单进程单实例（RN runtime），无 mutex；
 //   状态机以 in-memory dek 是否非空表达「已解锁」。
 
+import { Platform } from "react-native";
+import * as SecureStore from "expo-secure-store";
+
 import {
   AAD_DEK,
+  AAD_TRUSTED_DEVICE,
   AAD_VERIFIER,
   KEY_SIZE,
   SALT_SIZE,
@@ -16,9 +22,11 @@ import {
   constantTimeEqual,
   defaultArgon2idParams,
   deriveKEKAsync,
+  fromB64,
   openAEAD,
   randomBytes,
   sealAEAD,
+  toB64,
   utf8,
   utf8Decode,
   validatePasswordStrength,
@@ -30,6 +38,7 @@ import {
   readVaultFile,
   writeVaultFile,
   type EncryptedItemRow,
+  type TrustedDeviceRow,
   type VaultFile,
   type VaultMeta,
 } from "./vault-storage";
@@ -63,7 +72,31 @@ export type VaultErrorCode =
   | "corrupt"
   | "io"
   | "space-invalid"
-  | "space-last";
+  | "space-last"
+  /** 当前平台不支持「信任设备」自动解锁 —— 与 desktop ErrTrustedDeviceUnsupported 对齐 */
+  | "trusted-unsupported";
+
+/* ----------------------------------------------------------------------------
+ * 信任设备 —— Method 标识 & SecureStore key
+ *
+ * 与 desktop trusteddevice.go 的常量并列：
+ *   - desktop: dpapi / keychain / libsecret
+ *   - phone:   keystore-ios / keystore-android
+ *
+ * Method 字段在 vault file 里持久化；Unprotect 时校验当前平台 method 是否
+ * 匹配，不匹配走静默清行回退 —— 与 desktop TryUnlockWithTrustedDevice 一致。
+ * -------------------------------------------------------------------------- */
+
+export const TRUSTED_DEVICE_METHOD_KEYSTORE_IOS = "keystore-ios";
+export const TRUSTED_DEVICE_METHOD_KEYSTORE_ANDROID = "keystore-android";
+
+/**
+ * SecureStore 内 WrapKey 的 key 名 —— 进程级常量，不进 vault 文件。
+ *
+ * 命名规则：仅含 SecureStore 允许的 `[A-Za-z0-9._-]`（见 setItemAsync doc），
+ * 避免触发原生层 key 名校验失败。
+ */
+const TRUSTED_DEVICE_WRAPKEY_NAME = "zpass.trusted_device.wrapkey.v1";
 
 /* ----------------------------------------------------------------------------
  * 状态查询
@@ -174,6 +207,7 @@ class VaultService {
       items: [],
       spaces: [def],
       activeSpaceId: def.id,
+      trustedDevice: null,
     });
 
     if (this.dek) wipeBytes(this.dek);
@@ -296,10 +330,314 @@ class VaultService {
     await writeVaultFile({ ...file, meta: newMeta });
   }
 
-  /** 物理重置：删除 vault 文件，状态切回未初始化 */
+  /** 物理重置：删除 vault 文件，状态切回未初始化
+   *
+   * 必须同时清掉 SecureStore 里的 WrapKey —— 否则用户重置后再次启用信任
+   * 设备时会复用旧 WrapKey，旧 vault 备份若被拷回还能被解。
+   */
   async reset(): Promise<void> {
     this.lock();
+    await this.deleteTrustedDeviceWrapKey();
     await deleteVaultFile();
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* 信任设备 / 自动解锁                                                       */
+  /* ------------------------------------------------------------------------ */
+  //
+  // 与 desktop/internal/services/vaultservice.go 的同名方法一一对齐。
+  // 详见 desktop trusteddevice.go 头部安全模型注释 —— 此处仅记录 phone
+  // 端落差：blob 字节布局是 AEAD(WrapKey, DEK, AAD_TRUSTED_DEVICE)，WrapKey
+  // 由 expo-secure-store 托管（iOS Keychain + biometryCurrentSet / Android
+  // Keystore + setUserAuthenticationRequired），desktop 则把整个 DEK 直接交
+  // 给 DPAPI/Keychain/libsecret。差异由 method 字段隔离。
+
+  /** 当前平台是否支持信任设备自动解锁
+   *
+   * 锁定状态下也能安全调用 —— 仅探测 OS API 可用性，与 desktop 一致。
+   */
+  async isTrustedDeviceSupported(): Promise<boolean> {
+    return this.detectTrustedDeviceSupport();
+  }
+
+  /** 当前 vault 是否已经在此设备启用了自动解锁
+   *
+   * 锁定状态下也能调用 —— 仅查 vault 文件是否有 trustedDevice 行。
+   * 与 desktop IsTrustedDeviceEnabled 行为对齐：返回 true 仅表示行存在，
+   * 不保证 blob 真的能解开（WrapKey 可能已被 OS 失效）。
+   */
+  async isTrustedDeviceEnabled(): Promise<boolean> {
+    const file = await readVaultFile();
+    return file.trustedDevice !== null;
+  }
+
+  /** 启用「在此设备上自动解锁」
+   *
+   * 校验链与 desktop EnableTrustedDevice 等价：
+   *   1. 平台支持
+   *   2. confirmPassword 非空
+   *   3. 已解锁（持有 DEK）
+   *   4. 用 confirmPassword 跑完整 KDF + AEAD 派生 candidateDEK
+   *   5. constantTimeEqual(candidateDEK, dek) —— 不等就拒，防内存被污染
+   *   6. 调 Protect(dek) 写入 trustedDevice 行
+   */
+  async enableTrustedDevice(confirmPassword: string): Promise<void> {
+    if (!(await this.detectTrustedDeviceSupport())) {
+      throw new VaultError("trusted-unsupported", "当前平台不支持信任设备解锁");
+    }
+    if (!confirmPassword) {
+      throw new VaultError("invalid-password", "请输入主密码");
+    }
+    if (!this.dek) {
+      throw new VaultError("locked", "vault 已锁定");
+    }
+
+    const file = await readVaultFile();
+    if (!file.meta) {
+      throw new VaultError("not-initialized", "vault 未初始化");
+    }
+
+    // 二次验证主密码 —— 与 unlock 同等强度。若 confirmPassword 错，KDF 推
+    // 出的 KEK 解 wrappedDEK 会失败 / 解出来的 DEK 与内存 DEK 不等。
+    const kek = await deriveKEKAsync(
+      confirmPassword,
+      file.meta.salt,
+      file.meta.params,
+    );
+    let candidateDEK: Uint8Array | null = null;
+    try {
+      try {
+        candidateDEK = openAEAD(kek, file.meta.wrappedDEK, utf8(AAD_DEK));
+      } catch {
+        throw new VaultError("invalid-password", "主密码错误");
+      }
+      if (!constantTimeEqual(candidateDEK, this.dek)) {
+        // 派生的 DEK 与内存中的不一致 —— 极端异常（vault 文件被外部改过 /
+        // DEK 内存损坏），拒绝继续，避免把错误的 DEK 封进 trusted blob。
+        throw new VaultError("invalid-password", "主密码错误");
+      }
+    } finally {
+      wipeBytes(kek);
+      if (candidateDEK) wipeBytes(candidateDEK);
+    }
+
+    // 生成 WrapKey + 用 WrapKey 包装 DEK 得 blob + WrapKey 落 SecureStore
+    const wrapKey = randomBytes(KEY_SIZE);
+    let blob: Uint8Array;
+    try {
+      blob = sealAEAD(wrapKey, this.dek, utf8(AAD_TRUSTED_DEVICE));
+      await this.writeTrustedDeviceWrapKey(wrapKey);
+    } finally {
+      wipeBytes(wrapKey);
+    }
+
+    const row: TrustedDeviceRow = {
+      method: this.currentTrustedDeviceMethod(),
+      blob,
+      createdAt: this.nowMs(),
+    };
+    // 二次读取 vault 文件（中间 KDF 期间用户可能改了别的字段）—— 与 createItem
+    // 等其它写路径一致，永远基于最新快照写回
+    const latest = await readVaultFile();
+    if (!latest.meta) {
+      // 极端：刚做完 KDF 校验，vault 文件就被外部删了 → 清掉刚写的 WrapKey
+      await this.deleteTrustedDeviceWrapKey();
+      throw new VaultError("not-initialized", "vault 未初始化");
+    }
+    latest.trustedDevice = row;
+    await writeVaultFile(latest);
+  }
+
+  /** 关闭「在此设备上自动解锁」
+   *
+   * 不需要主密码确认 —— 关闭只是降低安全等级，没有提权风险。
+   * 幂等：未启用时调用也返回成功。
+   */
+  async disableTrustedDevice(): Promise<void> {
+    // 先清 SecureStore，再清 vault 文件 —— 反向顺序在中途崩溃时会留下
+    // "vault 没行但 SecureStore 有孤儿 key"，下次启用时会被新 setItemAsync
+    // 覆盖，无害；但正向顺序遇到崩溃则会留下"vault 有行但 WrapKey 已删"，
+    // 启动 tryUnlock 时 Unprotect 会失败 → 静默清行，最终一致。两种顺序都
+    // 安全收敛，选先清 SecureStore 是因为它更可能失败（生物识别拒绝）。
+    await this.deleteTrustedDeviceWrapKey();
+    const file = await readVaultFile();
+    if (!file.trustedDevice) return;
+    file.trustedDevice = null;
+    await writeVaultFile(file);
+  }
+
+  /** 启动时尝试用「信任设备」自动解锁
+   *
+   * 返回 true 表示已解锁；false 涵盖"未启用 / Unprotect 失败 / OS 凭据已变化"
+   * 等所有需要让用户走主密码流程的情况（与 desktop TryUnlockWithTrustedDevice
+   * 的 (bool, error) 语义一致，错误仅在真异常时抛）。
+   *
+   * 失败时**静默清除** vault.trustedDevice 行 + SecureStore WrapKey，让下次
+   * 启动直接进主密码界面，不向用户暴露内部错误。
+   */
+  async tryUnlockWithTrustedDevice(): Promise<boolean> {
+    if (this.dek) return true; // 已解锁 —— 与 desktop 幂等返回一致
+
+    if (!(await this.detectTrustedDeviceSupport())) return false;
+
+    const file = await readVaultFile();
+    if (!file.meta) return false; // vault 未初始化
+    const row = file.trustedDevice;
+    if (!row) return false; // 未启用
+
+    // method 不匹配（理论上只有跨平台拷 vault 文件才会触发）→ 静默清行
+    if (row.method !== this.currentTrustedDeviceMethod()) {
+      await this.clearTrustedDeviceArtifacts();
+      return false;
+    }
+
+    let wrapKey: Uint8Array | null = null;
+    let dek: Uint8Array | null = null;
+    try {
+      wrapKey = await this.readTrustedDeviceWrapKey();
+      if (!wrapKey) {
+        // SecureStore 里没有 / 已失效（生物识别变更）→ 静默清行
+        await this.clearTrustedDeviceArtifacts();
+        return false;
+      }
+      try {
+        dek = openAEAD(wrapKey, row.blob, utf8(AAD_TRUSTED_DEVICE));
+      } catch {
+        // blob 已损坏 / WrapKey 跟 blob 不配对 → 静默清行
+        await this.clearTrustedDeviceArtifacts();
+        return false;
+      }
+      if (dek.length !== KEY_SIZE) {
+        await this.clearTrustedDeviceArtifacts();
+        return false;
+      }
+      // verifier 校验：用解出的 DEK 解 vault.meta.verifier，必须等于约定明文。
+      // 防御攻击者直接改 vault 文件、塞别的 DEK 进 trustedDevice.blob。
+      // 与 desktop TryUnlockWithTrustedDevice 第 7 步一致。
+      let verPlain: Uint8Array | null = null;
+      try {
+        verPlain = openAEAD(dek, file.meta.verifier, utf8(AAD_VERIFIER));
+      } catch {
+        await this.clearTrustedDeviceArtifacts();
+        return false;
+      }
+      try {
+        if (utf8Decode(verPlain) !== VERIFIER_PLAINTEXT) {
+          await this.clearTrustedDeviceArtifacts();
+          return false;
+        }
+      } finally {
+        wipeBytes(verPlain);
+      }
+
+      // 全部校验通过 —— 安装 DEK
+      if (this.dek) wipeBytes(this.dek);
+      this.dek = dek;
+      dek = null; // 防止 finally 抹掉刚安装的 DEK
+    } finally {
+      if (wrapKey) wipeBytes(wrapKey);
+      if (dek) wipeBytes(dek);
+    }
+
+    // 兼容旧 vault：与 unlock() 同样保证至少一个空间存在
+    await this.ensureSpacesPersisted();
+    return true;
+  }
+
+  /* ---------------- 信任设备 内部辅助 ---------------- */
+
+  /** 探测当前平台是否能用 SecureStore + 生物识别 */
+  private async detectTrustedDeviceSupport(): Promise<boolean> {
+    if (Platform.OS !== "ios" && Platform.OS !== "android") return false;
+    try {
+      if (!(await SecureStore.isAvailableAsync())) return false;
+    } catch {
+      return false;
+    }
+    try {
+      // 必须有生物识别 / 设备 PIN，否则 requireAuthentication 没意义
+      if (!SecureStore.canUseBiometricAuthentication()) return false;
+    } catch {
+      return false;
+    }
+    return true;
+  }
+
+  /** 返回当前平台写入 trustedDevice.method 的标识 */
+  private currentTrustedDeviceMethod(): string {
+    if (Platform.OS === "ios") return TRUSTED_DEVICE_METHOD_KEYSTORE_IOS;
+    if (Platform.OS === "android") return TRUSTED_DEVICE_METHOD_KEYSTORE_ANDROID;
+    return ""; // 不支持平台 —— 调用方应当先经 detectTrustedDeviceSupport 拒绝
+  }
+
+  /** 把 WrapKey 写进 SecureStore；触发 Android 生物识别弹窗 */
+  private async writeTrustedDeviceWrapKey(key: Uint8Array): Promise<void> {
+    await SecureStore.setItemAsync(
+      TRUSTED_DEVICE_WRAPKEY_NAME,
+      toB64(key),
+      {
+        requireAuthentication: true,
+        authenticationPrompt: "启用 ZPass 设备解锁",
+        keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+      },
+    );
+  }
+
+  /** 从 SecureStore 读 WrapKey；触发 iOS / Android 生物识别弹窗
+   *
+   * 返回 null 表示 key 不存在或已被系统失效（用户改了生物识别配置）。
+   */
+  private async readTrustedDeviceWrapKey(): Promise<Uint8Array | null> {
+    let b64: string | null;
+    try {
+      b64 = await SecureStore.getItemAsync(TRUSTED_DEVICE_WRAPKEY_NAME, {
+        requireAuthentication: true,
+        authenticationPrompt: "解锁 ZPass 保险库",
+        keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+      });
+    } catch {
+      // 用户取消生物识别 / 多次失败 → 视为不可用
+      return null;
+    }
+    if (!b64) return null;
+    let bytes: Uint8Array;
+    try {
+      bytes = fromB64(b64);
+    } catch {
+      return null;
+    }
+    if (bytes.length !== KEY_SIZE) {
+      wipeBytes(bytes);
+      return null;
+    }
+    return bytes;
+  }
+
+  /** 删 SecureStore 里的 WrapKey；幂等，删不存在的 key 也不抛 */
+  private async deleteTrustedDeviceWrapKey(): Promise<void> {
+    try {
+      await SecureStore.deleteItemAsync(TRUSTED_DEVICE_WRAPKEY_NAME);
+    } catch {
+      // 不存在 / 平台不支持 → 静默吞
+    }
+  }
+
+  /** 同时清掉 vault.trustedDevice 行 + SecureStore WrapKey
+   *
+   * tryUnlockWithTrustedDevice 在任何校验失败时调用，让下次启动直接走
+   * 主密码流程，与 desktop 一致。
+   */
+  private async clearTrustedDeviceArtifacts(): Promise<void> {
+    await this.deleteTrustedDeviceWrapKey();
+    try {
+      const file = await readVaultFile();
+      if (file.trustedDevice) {
+        file.trustedDevice = null;
+        await writeVaultFile(file);
+      }
+    } catch {
+      // 写盘失败不阻塞主密码兜底路径 —— 下次再清也行
+    }
   }
 
   /* ------------------------------------------------------------------------ */

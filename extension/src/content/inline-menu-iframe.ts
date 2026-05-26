@@ -177,23 +177,11 @@ export class InlineMenuIframeShell {
     } catch {
       // src 不合法 —— 静默。
     }
-    if (!expectedOrigin || event.origin !== expectedOrigin) {
-      console.log(
-        "[ZPass inline-menu] resize message rejected: origin mismatch",
-        "event=", event.origin,
-        "expected=", expectedOrigin,
-      );
-      return;
-    }
+    if (!expectedOrigin || event.origin !== expectedOrigin) return;
     if (typeof data.height !== "number" || !Number.isFinite(data.height)) return;
     const clamped = Math.min(
       MAX_LIST_HEIGHT_PX,
       Math.max(MIN_LIST_HEIGHT_PX, Math.round(data.height)),
-    );
-    console.log(
-      "[ZPass inline-menu] resize applied",
-      "raw=", data.height,
-      "clamped=", clamped,
     );
     this.iframe.style.setProperty("height", `${clamped}px`, "important");
     this.iframe.style.setProperty("min-height", `${clamped}px`, "important");
@@ -204,16 +192,6 @@ export class InlineMenuIframeShell {
   setPosition(rect: InlineMenuFieldRect): void {
     if (this.destroyed) return;
     applyStyles(this.iframe, rectToIframeStyle(rect));
-    // 诊断:打印应用样式后的实际 rect, 确认 iframe 已被布局引擎采纳。
-    const after = this.iframe.getBoundingClientRect();
-    const cs = window.getComputedStyle(this.iframe);
-    console.log(
-      "[ZPass inline-menu] iframe setPosition done",
-      "rect=", `${after.left},${after.top},${after.width}x${after.height}`,
-      "display=", cs.display,
-      "visibility=", cs.visibility,
-      "opacity=", cs.opacity,
-    );
   }
 
   /** 调试用。 */
@@ -240,11 +218,6 @@ export class InlineMenuIframeShell {
 
   private handleLoad = (): void => {
     if (this.destroyed) return;
-    console.log(
-      "[ZPass inline-menu] iframe loaded",
-      "src=", this.iframe.src,
-      "rect=", this.iframe.getBoundingClientRect(),
-    );
     if (this.fadeInTimer !== null) globalThis.clearTimeout(this.fadeInTimer);
     this.fadeInTimer = globalThis.setTimeout(() => {
       this.fadeInTimer = null;

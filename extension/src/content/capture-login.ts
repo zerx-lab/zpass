@@ -87,9 +87,8 @@ export function installLoginCapture(): void {
   if (urlPollTimer === null) {
     urlPollTimer = globalThis.setInterval(() => {
       if (location.href !== lastUrl) {
-        const previous = lastUrl;
         lastUrl = location.href;
-        finalizeAllWatchers(`url-change ${previous} → ${lastUrl}`);
+        finalizeAllWatchers();
       }
     }, 250);
   }
@@ -122,7 +121,7 @@ function rescanDocument(): void {
       if (scope instanceof HTMLFormElement) {
         scope.addEventListener(
           "submit",
-          () => finalizeAllWatchers("form-submit"),
+          () => finalizeAllWatchers(),
           { capture: true },
         );
       }
@@ -166,7 +165,7 @@ function handleClick(event: MouseEvent): void {
   );
   if (!button) return;
   if (!isLikelyLoginButton(button)) return;
-  finalizeAllWatchers(`click ${describeButton(button)}`);
+  finalizeAllWatchers();
 }
 
 function handleKeydown(event: KeyboardEvent): void {
@@ -177,15 +176,15 @@ function handleKeydown(event: KeyboardEvent): void {
     target.type === "password" ||
     (target.form && isLoginLikeForm(target.form))
   ) {
-    finalizeAllWatchers("enter-key");
+    finalizeAllWatchers();
   }
 }
 
 function handleBeforeUnload(): void {
-  finalizeAllWatchers("beforeunload");
+  finalizeAllWatchers();
 }
 
-function finalizeAllWatchers(reason: string): void {
+function finalizeAllWatchers(): void {
   // formMap 是 WeakMap，没法迭代——我们改成从文档里现拉一次所有 form
   // + document 来检查。
   const scopes: Array<Element | Document> = [
@@ -198,30 +197,22 @@ function finalizeAllWatchers(reason: string): void {
     if (!watch || !watch.currentSnapshot) continue;
     const snapshot = watch.currentSnapshot;
     watch.currentSnapshot = null; // 立即清，避免被同一信号重复触发
-    void reportCapture(snapshot, reason);
+    void reportCapture(snapshot);
     triggered++;
-  }
-  if (triggered === 0) {
-    console.log("[ZPass] finalize skipped (no snapshot)", reason);
   }
 }
 
-async function reportCapture(
-  snapshot: CredentialSnapshot,
-  reason: string,
-): Promise<void> {
+async function reportCapture(snapshot: CredentialSnapshot): Promise<void> {
   const fingerprint = `${snapshot.username}::${snapshot.password}`;
   const now = Date.now();
   if (
     lastReportedFingerprint === fingerprint &&
     now - lastReportedAt < REPORT_DEDUPE_WINDOW_MS
   ) {
-    console.log("[ZPass] report skipped (dedupe)", reason, snapshot.username);
     return;
   }
   lastReportedFingerprint = fingerprint;
   lastReportedAt = now;
-  console.log("[ZPass] report capture", reason, snapshot.username);
 
   try {
     await browser.runtime.sendMessage({
@@ -236,7 +227,6 @@ async function reportCapture(
     });
     // 不再处理 decision——保存提示由 background 直接开独立 popup 窗口展示。
     // content-script 上报完即收工，登录页面再如何跳转都不影响用户能否完成保存。
-    void reason;
   } catch {
     // 通信失败（service worker 短暂 unload / desktop 离线）——静默。
   }
@@ -319,11 +309,6 @@ function isLikelyLoginButton(button: HTMLElement): boolean {
     .toLowerCase();
   if (!text) return false;
   return LOGIN_BUTTON_KEYWORDS.some((kw) => text.includes(kw));
-}
-
-function describeButton(button: HTMLElement): string {
-  const text = (button.textContent ?? "").trim().slice(0, 40);
-  return `${button.tagName.toLowerCase()}[${text}]`;
 }
 
 function isLoginLikeForm(form: HTMLFormElement): boolean {

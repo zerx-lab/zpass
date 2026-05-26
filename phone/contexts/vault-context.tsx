@@ -71,6 +71,17 @@ interface VaultContextValue {
   /** 首次状态探测是否完成（避免渲染期间闪烁 onboarding） */
   hydrated: boolean;
 
+  /** 当前平台是否支持「信任设备」自动解锁（与 desktop 同名 selector） */
+  trustedDeviceSupported: boolean;
+  /** 当前 vault 是否已经在此设备启用了自动解锁 */
+  trustedDeviceEnabled: boolean;
+  /** 是否正在自动解锁中（启动一次性尝试） */
+  trustedDeviceTrying: boolean;
+  enableTrustedDevice: (confirmPassword: string) => Promise<ActionResult>;
+  disableTrustedDevice: () => Promise<ActionResult>;
+  /** 锁屏页"使用设备解锁"按钮调用；返回是否成功解锁 */
+  tryUnlockWithTrustedDevice: () => Promise<boolean>;
+
   /** 空间列表（按 order 升序） */
   spaces: Space[];
   /** 当前激活空间 id；首次启动尚未创建任何空间时为 null */
@@ -136,6 +147,12 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const [breachScanning, setBreachScanning] = useState(false);
   const [breachLastScanAt, setBreachLastScanAt] = useState<number | null>(null);
 
+  // 信任设备状态：supported 是平台能力（OS 探测），enabled 是当前 vault 是否
+  // 启用（vault 文件里有 trustedDevice 行）。两个独立维度。
+  const [trustedDeviceSupported, setTrustedDeviceSupported] = useState(false);
+  const [trustedDeviceEnabled, setTrustedDeviceEnabled] = useState(false);
+  const [trustedDeviceTrying, setTrustedDeviceTrying] = useState(false);
+
   // 扫描代际 token：lock / reset 时递增，扫描完成对比 token 不一致就丢弃结果。
   // 防止"用户扫描中途按锁屏 → 扫描完成后又把含明文条目名的 results 回写到 state"。
   const breachGenerationRef = useRef(0);
@@ -146,6 +163,11 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   // 启动时探测一次 vault 状态；若已 initialized，顺便把 plaintext 的 spaces
   // 拉一遍 —— 锁屏页 / 我的页头像要展示"当前空间名首字符"，spaces 是
   // plaintext，不需要解锁就能读（参见 vault-service.listSpaces 的注释）。
+  //
+  // 信任设备：若启用了且 vault 未解锁，**不**在 hydrate 里自动调
+  // tryUnlockWithTrustedDevice —— 直接调会立即弹生物识别，对用户来说像
+  // 是应用启动就劫持。改由 LockOverlay 渲染后由用户点按钮触发（也可在
+  // overlay mount 时用一次性 effect 自动触发，决策见 LockOverlay）。
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -162,6 +184,18 @@ export function VaultProvider({ children }: { children: ReactNode }) {
             setActiveSpaceIdState(snap.activeSpaceId);
           } catch {
             // plaintext 读取失败不致命 —— 头像走 fallback "Z"
+          }
+          // 信任设备能力 + 是否启用 —— 锁定态下也能查
+          try {
+            const [supported, enabled] = await Promise.all([
+              vaultService.isTrustedDeviceSupported(),
+              vaultService.isTrustedDeviceEnabled(),
+            ]);
+            if (!alive) return;
+            setTrustedDeviceSupported(supported);
+            setTrustedDeviceEnabled(enabled);
+          } catch {
+            // 探测失败按"不可用"处理 —— 与 desktop ErrTrustedDeviceUnsupported 等价
           }
         }
       } catch {
@@ -328,6 +362,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     setActiveSpaceIdState(null);
     setLocked(true);
     setInitialized(false);
+    // reset 已经在 service 层删了 SecureStore WrapKey 与 trustedDevice 行
+    setTrustedDeviceEnabled(false);
     breachGenerationRef.current += 1;
     clearBreachCache();
     setBreachResults(null);
@@ -449,6 +485,55 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  /* ---------------------- 信任设备 ---------------------- */
+
+  const enableTrustedDevice = useCallback(
+    async (confirmPassword: string): Promise<ActionResult> => {
+      try {
+        await vaultService.enableTrustedDevice(confirmPassword);
+        setTrustedDeviceEnabled(true);
+        return { ok: true };
+      } catch (e) {
+        return toActionError(e);
+      }
+    },
+    [],
+  );
+
+  const disableTrustedDevice = useCallback(async (): Promise<ActionResult> => {
+    try {
+      await vaultService.disableTrustedDevice();
+      setTrustedDeviceEnabled(false);
+      return { ok: true };
+    } catch (e) {
+      return toActionError(e);
+    }
+  }, []);
+
+  // 防重入：LockOverlay 的 mount-effect + 用户点按钮可能并发触发
+  const trustedTryInflightRef = useRef(false);
+
+  const tryUnlockWithTrustedDevice = useCallback(async (): Promise<boolean> => {
+    if (trustedTryInflightRef.current) return false;
+    trustedTryInflightRef.current = true;
+    setTrustedDeviceTrying(true);
+    try {
+      const ok = await vaultService.tryUnlockWithTrustedDevice();
+      if (ok) {
+        setLocked(false);
+      } else {
+        // service 内部失败时已清行 —— 同步前端状态，避免锁屏页继续显示按钮
+        setTrustedDeviceEnabled(false);
+      }
+      return ok;
+    } catch {
+      return false;
+    } finally {
+      setTrustedDeviceTrying(false);
+      trustedTryInflightRef.current = false;
+    }
+  }, []);
+
   /* ---------------------- HIBP 泄露扫描 ---------------------- */
 
   // 用 ref 防重入：同时多次点扫描按钮时只有第一次会真正发请求
@@ -513,6 +598,12 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       unlock,
       lock,
       changeMasterPassword,
+      trustedDeviceSupported,
+      trustedDeviceEnabled,
+      trustedDeviceTrying,
+      enableTrustedDevice,
+      disableTrustedDevice,
+      tryUnlockWithTrustedDevice,
       breachResults,
       breachScanning,
       breachLastScanAt,
@@ -543,6 +634,12 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       unlock,
       lock,
       changeMasterPassword,
+      trustedDeviceSupported,
+      trustedDeviceEnabled,
+      trustedDeviceTrying,
+      enableTrustedDevice,
+      disableTrustedDevice,
+      tryUnlockWithTrustedDevice,
       breachResults,
       breachScanning,
       breachLastScanAt,

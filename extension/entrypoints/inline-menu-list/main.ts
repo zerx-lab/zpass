@@ -21,8 +21,6 @@ import {
 } from "../../src/shared/inline-menu-enums";
 import "./list.css";
 
-console.log("[ZPass inline-menu list] page boot");
-
 const root = document.getElementById("root");
 if (!root) throw new Error("missing #root in inline-menu-list iframe");
 
@@ -38,18 +36,12 @@ connectPort();
 function connectPort(): void {
   try {
     port = browser.runtime.connect({ name: InlineMenuPort.List });
-    console.log("[ZPass inline-menu list] connected to background port");
-  } catch (error) {
-    console.log(
-      "[ZPass inline-menu list] runtime.connect failed:",
-      error instanceof Error ? error.message : String(error),
-    );
+  } catch {
     renderError("ZPass 扩展未能就绪");
     return;
   }
   port.onMessage.addListener((raw: unknown) => handlePortMessage(raw));
   port.onDisconnect.addListener(() => {
-    console.log("[ZPass inline-menu list] port disconnected");
     port = null;
     portKey = null;
   });
@@ -81,7 +73,6 @@ function handleInit(message: InlineMenuIframeMessage): void {
   portKey = payload.portKey;
   translations = payload.translations;
   currentOrigin = payload.origin;
-  console.log("[ZPass inline-menu list] init received", "origin=", currentOrigin);
   render();
 }
 
@@ -90,11 +81,6 @@ function handleCiphers(message: InlineMenuIframeMessage): void {
   if (!payload || typeof payload !== "object") return;
   ciphers = payload;
   focusedRowIndex = ciphers.items.length > 0 ? 0 : -1;
-  console.log(
-    "[ZPass inline-menu list] ciphers received",
-    "unlocked=", ciphers.unlocked,
-    "count=", ciphers.items.length,
-  );
   render();
 }
 
@@ -129,22 +115,14 @@ function reportHeight(): void {
     const shell = root!.firstElementChild as HTMLElement | null;
     if (!shell) return;
     const height = Math.ceil(shell.scrollHeight);
-    console.log(
-      "[ZPass inline-menu list] reportHeight",
-      "height=", height,
-      "parentSame=", window.parent === window,
-    );
     if (height <= 0) return;
     try {
       window.parent.postMessage(
         { source: "zpass-inline-menu", type: "resize", height },
         "*",
       );
-    } catch (error) {
-      console.log(
-        "[ZPass inline-menu list] postMessage to parent failed:",
-        error instanceof Error ? error.message : String(error),
-      );
+    } catch {
+      // parent 已断或 sandbox 阻止 —— 静默。
     }
   });
 }

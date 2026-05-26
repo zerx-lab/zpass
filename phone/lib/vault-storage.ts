@@ -63,6 +63,28 @@ export interface EncryptedItemRow {
   updatedAt: number;
 }
 
+/**
+ * 信任设备包装 DEK 的单例行 —— 与 desktop `vault_trusted_device` 表对齐。
+ *
+ *   - method：保护方式标识，desktop 用 `dpapi/keychain/libsecret`，
+ *     phone 用 `keystore-ios/keystore-android`。Unprotect 时据此校验
+ *     当前平台 method 是否匹配；不匹配走静默清行回退。
+ *   - blob：被 OS 设备绑定密钥包装后的 DEK 密文。phone 的字节布局是
+ *     `nonce(24) + AEAD(WrapKey, DEK, AAD_TRUSTED_DEVICE)`；WrapKey
+ *     本身托管在 expo-secure-store，不进 vault 文件。
+ *   - createdAt：启用时间（unix ms）。UI 可展示"已信任 X 天"。
+ *
+ * 安全约定（与 desktop TrustedDeviceRow 一致）：
+ *   - 该字段**不应**云同步 —— SecureStore 内的 WrapKey 离开此设备无法取出。
+ *   - reset / deleteVaultFile 必须显式清掉，包括 SecureStore 里的 WrapKey。
+ *   - ChangeMasterPassword **不影响**本行 —— DEK 不变，包装也不需要重建。
+ */
+export interface TrustedDeviceRow {
+  method: string;
+  blob: Uint8Array;
+  createdAt: number;
+}
+
 /** 持久化层完整快照（内存中持有的解码后形态） */
 export interface VaultFile {
   meta: VaultMeta | null;
@@ -77,6 +99,11 @@ export interface VaultFile {
    * 没有持久化值时由 VaultService 选择默认空间补齐。
    */
   activeSpaceId: string | null;
+  /**
+   * 信任设备单例行（可空）—— null = 未启用，与 desktop 表为空行同义。
+   * 旧 vault 文件没有此字段时回退为 null。
+   */
+  trustedDevice: TrustedDeviceRow | null;
 }
 
 /* ----------------------------------------------------------------------------
@@ -101,6 +128,12 @@ interface ItemJSON {
   updatedAt: number;
 }
 
+interface TrustedDeviceJSON {
+  method: string;
+  blob: string; // base64
+  createdAt: number;
+}
+
 interface FileJSON {
   schema: string;
   meta: MetaJSON | null;
@@ -108,6 +141,8 @@ interface FileJSON {
   /** v1 没有此字段；v2 起始落盘 */
   spaces?: Space[];
   activeSpaceId?: string | null;
+  /** 信任设备单例行（可空），缺省 / null = 未启用 */
+  trustedDevice?: TrustedDeviceJSON | null;
 }
 
 const FILE_SCHEMA = "zpass-vault-file-v1";
@@ -161,6 +196,28 @@ function itemFromJSON(j: ItemJSON): EncryptedItemRow {
   };
 }
 
+function trustedDeviceToJSON(r: TrustedDeviceRow): TrustedDeviceJSON {
+  return {
+    method: r.method,
+    blob: toB64(r.blob),
+    createdAt: r.createdAt,
+  };
+}
+
+function trustedDeviceFromJSON(
+  j: TrustedDeviceJSON | null | undefined,
+): TrustedDeviceRow | null {
+  if (!j) return null;
+  // 损坏行（method 空 / blob 空）当作未启用，与 desktop ReadTrustedDevice 的
+  // 字段非空校验等价 —— 不让坏数据卡死启动路径。
+  if (typeof j.method !== "string" || !j.method) return null;
+  if (typeof j.blob !== "string" || !j.blob) return null;
+  const blob = fromB64(j.blob);
+  if (blob.length === 0) return null;
+  const createdAt = typeof j.createdAt === "number" ? j.createdAt : 0;
+  return { method: j.method, blob, createdAt };
+}
+
 /* ----------------------------------------------------------------------------
  * 读 / 写
  * -------------------------------------------------------------------------- */
@@ -170,7 +227,13 @@ export async function readVaultFile(): Promise<VaultFile> {
   const path = vaultPath();
   const info = await FileSystem.getInfoAsync(path);
   if (!info.exists) {
-    return { meta: null, items: [], spaces: [], activeSpaceId: null };
+    return {
+      meta: null,
+      items: [],
+      spaces: [],
+      activeSpaceId: null,
+      trustedDevice: null,
+    };
   }
   const text = await FileSystem.readAsStringAsync(path, {
     encoding: FileSystem.EncodingType.UTF8,
@@ -190,6 +253,7 @@ export async function readVaultFile(): Promise<VaultFile> {
     spaces: Array.isArray(parsed.spaces) ? parsed.spaces : [],
     activeSpaceId:
       typeof parsed.activeSpaceId === "string" ? parsed.activeSpaceId : null,
+    trustedDevice: trustedDeviceFromJSON(parsed.trustedDevice),
   };
 }
 
@@ -201,6 +265,9 @@ export async function writeVaultFile(file: VaultFile): Promise<void> {
     items: file.items.map(itemToJSON),
     spaces: file.spaces ?? [],
     activeSpaceId: file.activeSpaceId ?? null,
+    trustedDevice: file.trustedDevice
+      ? trustedDeviceToJSON(file.trustedDevice)
+      : null,
   };
   const text = JSON.stringify(json);
   const tmp = tmpPath();

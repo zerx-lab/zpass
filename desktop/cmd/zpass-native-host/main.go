@@ -27,7 +27,9 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -217,15 +219,27 @@ func waitForBridge() bool {
 // bridgeReachable 发一个低开销的 status 探测确认 bridge 真的能应答
 //
 // 仅检查配置文件存在是不够的：GUI 写完 json 到真正 listen 之间有窗口期。
+//
+// id 用随机 hex 而非固定 "probe"：waitForBridge 可能在同一秒内多次探测，
+// 也可能与并发的 dispatchMessage 共享 GUI bridge；固定 id 在 GUI 端虽不
+// 路由冲突（probe 不会与扩展 seq 撞），但日志/审计层面无法区分单次探测。
 func bridgeReachable() bool {
 	cfg, err := nativebridge.ReadStandardConfig()
+	if err != nil {
+		return false
+	}
+	id, err := randomProbeID()
+	if err != nil {
+		return false
+	}
+	body, err := json.Marshal(nativeEnvelope{ID: id, Type: "status"})
 	if err != nil {
 		return false
 	}
 	req, err := http.NewRequest(
 		http.MethodPost,
 		"http://127.0.0.1:"+cfg.Port+"/native",
-		bytes.NewReader([]byte(`{"id":"probe","type":"status"}`)),
+		bytes.NewReader(body),
 	)
 	if err != nil {
 		return false
@@ -239,6 +253,14 @@ func bridgeReachable() bool {
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode == http.StatusOK
+}
+
+func randomProbeID() (string, error) {
+	var buf [8]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", err
+	}
+	return "probe-" + hex.EncodeToString(buf[:]), nil
 }
 
 func forwardToDesktopClient(msg nativeEnvelope) (nativeResponse, error) {

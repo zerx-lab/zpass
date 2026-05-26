@@ -135,12 +135,6 @@ function persistPending(): void {
 function rememberPendingCapture(capture: PendingCapture): void {
   pendingCaptures.set(pendingKey(capture.tabId, capture.origin), capture);
   persistPending();
-  console.log(
-    "[ZPass] remember capture",
-    capture.decision.status,
-    capture.origin,
-    capture.username,
-  );
   if (capture.decision.status === "locked") {
     startUnlockPolling();
   }
@@ -335,12 +329,9 @@ async function openOrUpdateSavePopup(capture: PendingCapture): Promise<void> {
       popupByKey.set(key, created.id);
       keyByPopup.set(created.id, key);
     }
-  } catch (error) {
-    console.log(
-      "[ZPass] open save popup failed",
-      capture.origin,
-      error instanceof Error ? error.message : error,
-    );
+  } catch {
+    // windows.create 失败（无权限 / 窗口数上限）—— 静默放弃，
+    // 下次 capture 重评时会再次尝试。
   }
 }
 
@@ -742,13 +733,6 @@ async function handleMessage(
         username,
         password,
       });
-      console.log(
-        "[ZPass] captureLogin decision",
-        decision.status,
-        origin,
-        username,
-        decision.reason ?? "",
-      );
       if (
         tab.id !== undefined &&
         (decision.status === "new" ||

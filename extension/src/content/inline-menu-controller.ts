@@ -65,11 +65,6 @@ export class InlineMenuController {
 
   init(): void {
     if (this.destroyed) return;
-    console.log(
-      "[ZPass inline-menu] controller init",
-      "topFrame=", window === window.top,
-      "hasInjector=", this.injector !== null,
-    );
     // background 完成 fill / 主动要求关闭时, 广播 zpass.inlineMenu.close
     // 给所有 frame 的 content; 我们这里收到就拆 iframe + 清焦点。与
     // zpass.fillLogin 的 listener 共存(那条由 content.ts 注册, 负责真正
@@ -149,21 +144,7 @@ export class InlineMenuController {
     const target = event.target;
     if (!(target instanceof HTMLInputElement)) return;
     const kind = inputKindFor(target);
-    if (kind === null) {
-      console.log(
-        "[ZPass inline-menu] focusin rejected (not login/totp candidate)",
-        "type=", target.type,
-        "name=", target.name,
-        "id=", target.id,
-      );
-      return;
-    }
-    console.log(
-      "[ZPass inline-menu] focusin accepted",
-      "kind=", kind,
-      "type=", target.type,
-      "name=", target.name,
-    );
+    if (kind === null) return;
     this.focusedInput = target;
     this.focusedKind = kind;
     this.clearBlurCloseTimer();
@@ -269,33 +250,16 @@ export class InlineMenuController {
     // 同 form 内有 password(常见站点 2FA 单独一页, 只有 OTP input)。
     if (kind === "login") {
       const form = findLoginFormForInput(input);
-      if (!form) {
-        console.log(
-          "[ZPass inline-menu] requestOpen rejected: no login form for input",
-        );
-        return;
-      }
+      if (!form) return;
     }
     const rect = this.measureRect(input);
-    if (!rect) {
-      console.log("[ZPass inline-menu] requestOpen rejected: rect zero");
-      return;
-    }
-
-    console.log(
-      "[ZPass inline-menu] requestOpen accepted",
-      "kind=", kind,
-      "rect=", `${rect.top},${rect.left},${rect.width}x${rect.height}`,
-      "focusList=", focusList,
-      "topFrame=", window === window.top,
-    );
+    if (!rect) return;
 
     if (this.injector) {
       // 顶层 frame —— rect 已是顶层 viewport 坐标, 直接挂浮层。
       const origin = currentOrigin();
       if (!origin) return;
       const opened = this.injector.openList(rect);
-      console.log("[ZPass inline-menu] injector.openList →", opened);
       if (!opened) return;
       void this.notify({
         type: "zpass.inlineMenu.open",

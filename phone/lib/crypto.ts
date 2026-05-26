@@ -45,6 +45,9 @@ export const VERIFIER_PLAINTEXT = "zpass-vault-verifier-v1";
 /** AAD 上下文标识 —— 防止密文跨上下文挪用 */
 export const AAD_DEK = "zpass:dek";
 export const AAD_VERIFIER = "zpass:verifier";
+/** 信任设备包装 DEK 的 AAD —— 与 desktop trusteddevice entropy 同义，
+ *  独立常量避免与 AAD_DEK 互换使用 */
+export const AAD_TRUSTED_DEVICE = "zpass:trusted-device:v1";
 
 /* ----------------------------------------------------------------------------
  * Argon2id 参数
