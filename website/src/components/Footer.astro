@@ -7,15 +7,17 @@
 //   - 一行版权 + 开发状态
 // ============================================================================
 
-import type { SiteStrings } from "../i18n/strings";
-import { GITHUB_URL } from "../i18n/strings";
+import type { Locale, SiteStrings } from "../i18n/strings";
+import { GITHUB_URL, localizePath } from "../i18n/strings";
 import Brandmark from "./Brandmark.astro";
 
 export interface Props {
 	t: SiteStrings;
+	locale?: Locale;
 }
 
-const { t } = Astro.props;
+const { t, locale = "en" } = Astro.props;
+const privacyHref = localizePath("/privacy", locale);
 ---
 
 <footer class="foot foot--lite">
@@ -64,6 +66,8 @@ const { t } = Astro.props;
 					<span>{t.footer_oss}</span>
 					<span aria-hidden="true">·</span>
 					<span>{t.footer_version}</span>
+					<span aria-hidden="true">·</span>
+					<a class="foot-privacy" href={privacyHref}>{t.footer_privacy}</a>
 				</div>
 			</div>
 		</div>
@@ -100,6 +104,16 @@ const { t } = Astro.props;
 		gap: 10px;
 		font-size: 11px;
 		color: var(--text-3);
+		flex-wrap: wrap;
+	}
+
+	.foot-privacy {
+		color: var(--text-3);
+		text-decoration: none;
+		transition: color 0.15s;
+	}
+	.foot-privacy:hover {
+		color: var(--text);
 	}
 
 	.foot-actions {

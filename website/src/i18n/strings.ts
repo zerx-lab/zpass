@@ -215,10 +215,11 @@ export interface SiteStrings {
 	faq_5_q: string;
 	faq_5_a: string;
 
-	// footer（精简版：仅保留品牌 tagline + 版权 + 开发状态）
+	// footer（精简版：仅保留品牌 tagline + 版权 + 开发状态 + 隐私协议入口）
 	footer_tagline: string;
 	footer_version: string;
 	footer_built: string;
+	footer_privacy: string;
 
 	// demo
 	vault_demo_label: string;
@@ -549,6 +550,7 @@ const en: SiteStrings = {
 	footer_tagline: "Trusted algorithms. Obsessive details.",
 	footer_version: "in active development",
 	footer_built: "© 2026 ZPass",
+	footer_privacy: "Privacy",
 
 	vault_demo_label: "Live demo — vault",
 	vault_demo_hint: "Click a row. Everything runs locally in your browser.",
@@ -865,6 +867,7 @@ const zh: SiteStrings = {
 	footer_tagline: "用经典密码学，抠每一个细节。",
 	footer_version: "开发中",
 	footer_built: "© 2026 ZPass",
+	footer_privacy: "隐私协议",
 
 	vault_demo_label: "实时演示 — 密码库",
 	vault_demo_hint: "点击任一行。所有运算都在你的浏览器本地完成。",
