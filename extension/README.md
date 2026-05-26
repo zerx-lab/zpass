@@ -7,7 +7,8 @@ WXT-based browser extension for ZPass Desktop autofill.
 - Detects login forms on `http` and `https` pages.
 - Detects TOTP / one-time-code inputs and fills the current OTP from the
   matching ZPass login (see [TOTP autofill](#totp-autofill)).
-- Shows an inline ZPass fill button beside password / username / TOTP fields.
+- Shows an **inline autofill menu** below the focused login input listing
+  matching credentials for the current site (see [Inline autofill menu](#inline-autofill-menu)).
 - **Prompts to save / update credentials after a successful sign-in**
   (see [Save-login prompt](#save-login-prompt)).
 - Queries ZPass Desktop through the browser native messaging protocol.
@@ -15,6 +16,58 @@ WXT-based browser extension for ZPass Desktop autofill.
 - Reveals the password only after the user selects a matching login.
 - Bridges WebAuthn `navigator.credentials.create/get` calls to ZPass Desktop
   passkeys, using vault-backed ES256 credentials without exporting private keys.
+
+### Inline autofill menu
+
+When the user focuses (or clicks into) a recognised login `<input>`, ZPass
+mounts an inline floating menu just below the field, listing every saved
+login whose URL host matches the current page. Selecting an entry fills the
+username and password, using the same DOM-write path as the toolbar popup
+(`simulateUserFill`, including the React `_valueTracker` reset).
+
+Architecture (mirrors Bitwarden's `apps/browser/src/autofill/overlay/inline-menu/`
+in shape; **clean-room reimplementation in ZPass code — no Bitwarden source
+is reused, since `bitwarden/clients` is GPL-3.0**):
+
+```
+[user focuses input]
+        |
+        v
+InlineMenuController (per-frame, src/content/inline-menu-controller.ts)
+  - measures bounding rect
+  - top-frame: InlineMenuInjector.openList(rect)
+  - notifies background "zpass.inlineMenu.open"
+        |
+        v
+InlineMenuInjector (src/content/inline-menu-injector.ts)
+  - random-named Custom Element + popover="manual" + showPopover()
+  - closed ShadowRoot wraps InlineMenuIframeShell
+  - MutationObserver hardening (style / body last-child / page opacity)
+  - top-layer hijack backoff: > 10 refreshes in 5s -> permanently disabled
+        |
+        v
+InlineMenuIframeShell (src/content/inline-menu-iframe.ts)
+  - <iframe credentialless src="inline-menu-list.html">
+  - !important inline styles, MutationObserver-protected
+  - fade-in 80ms after load
+        |
+        v
+Inline menu list page (entrypoints/inline-menu-list/)
+  - runs in extension origin
+  - chrome.runtime.connect({ name: "zpass-inline-menu-list-port" })
+  - renders cipher list, emits FillSelected upstream
+        |
+        v
+InlineMenuBridge (background, src/background/inline-menu-bridge.ts)
+  - pairs port with sender.tab.id
+  - queries NativeBridge.queryLogins for the page origin
+  - pushes init + ciphers to the iframe
+  - on FillSelected: revealLogin -> tabs.sendMessage zpass.fillLogin -> content fills form
+```
+
+Design tokens follow the ZPass design system: 5/7/10 px corner radii, Geist /
+Geist Mono fonts, stroke-first iconography, no emoji or Unicode decoration.
+Theme follows `prefers-color-scheme` inside the iframe.
 
 ### TOTP autofill
 

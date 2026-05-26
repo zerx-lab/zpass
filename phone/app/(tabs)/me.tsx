@@ -10,7 +10,6 @@ import {
   Text,
   ScrollView,
   TouchableOpacity,
-  Alert,
   Platform,
   Modal,
   TextInput,
@@ -28,6 +27,7 @@ import { exportVault, pickAndParseImport } from "@/lib/transfer";
 import { sortSpaces, type Space } from "@/lib/spaces";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { SpaceAvatar } from "@/components/space-avatar";
+import { actionSheet, dialog, toast } from "@/components/ui/dialog";
 
 const MONO = Platform.select({ ios: "ui-monospace", default: "monospace" });
 
@@ -63,7 +63,7 @@ function MenuRow({
 }) {
   const handlePress = () => {
     if (config.onPress) config.onPress();
-    else Alert.alert("功能开发中", config.label + " 暂未实现");
+    else toast.info("功能开发中", config.label + " 暂未实现");
   };
 
   const badgeColor = config.badge
@@ -237,31 +237,23 @@ export default function MeScreen() {
   }, [spaces, activeSpaceId]);
 
   /* ── 导出：明文备份 ── */
-  const handleExport = React.useCallback(() => {
+  const handleExport = React.useCallback(async () => {
     if (items.length === 0) {
-      Alert.alert("保险库为空", "暂无可导出的条目");
+      toast.warn("保险库为空", "暂无可导出的条目");
       return;
     }
-    Alert.alert(
+    const ok = await dialog.confirm(
       "导出明文备份",
       `备份文件将包含全部 ${items.length} 个条目的明文内容（含密码、密钥、TOTP 等）。请妥善保管，切勿上传到不可信的位置。`,
-      [
-        { text: "取消", style: "cancel" },
-        {
-          text: "继续导出",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              const r = await exportVault(items);
-              if (!r.shared)
-                Alert.alert("已生成备份", `已写入：${r.path}`);
-            } catch (e) {
-              Alert.alert("导出失败", e instanceof Error ? e.message : String(e));
-            }
-          },
-        },
-      ],
+      { okLabel: "继续导出", destructive: true },
     );
+    if (!ok) return;
+    try {
+      const r = await exportVault(items);
+      if (!r.shared) toast.ok("已生成备份", r.path);
+    } catch (e) {
+      toast.danger("导出失败", e instanceof Error ? e.message : String(e));
+    }
   }, [items]);
 
   /* ── 导入：选择 JSON ── */
@@ -269,7 +261,7 @@ export default function MeScreen() {
     const res = await pickAndParseImport();
     if (!res.ok) {
       if (res.reason === "cancelled") return;
-      Alert.alert(
+      await dialog.alert(
         "导入失败",
         res.reason === "empty"
           ? "文件中没有可识别的条目"
@@ -277,54 +269,38 @@ export default function MeScreen() {
       );
       return;
     }
-    Alert.alert(
+    const ok = await dialog.confirm(
       "确认导入",
       `已从「${res.fileName}」解析到 ${res.items.length} 个条目，全部追加到加密保险库？`,
-      [
-        { text: "取消", style: "cancel" },
-        {
-          text: "导入",
-          onPress: async () => {
-            const n = await importItems(res.items as VaultItem[]);
-            Alert.alert("导入完成", `已导入 ${n} 个条目`);
-          },
-        },
-      ],
+      { okLabel: "导入" },
     );
+    if (!ok) return;
+    const n = await importItems(res.items as VaultItem[]);
+    toast.ok("导入完成", `已导入 ${n} 个条目`);
   }, [importItems]);
 
   /* ── 清空 ── */
-  const handleClearAll = React.useCallback(() => {
+  const handleClearAll = React.useCallback(async () => {
     if (items.length === 0) {
-      Alert.alert("保险库已为空");
+      toast.info("保险库已为空");
       return;
     }
-    Alert.alert(
+    const ok = await dialog.confirm(
       "清空保险库",
       `将永久删除全部 ${items.length} 个条目，主密码与加密元数据保留，此操作不可撤销。建议先导出备份。`,
-      [
-        { text: "取消", style: "cancel" },
-        { text: "清空", style: "destructive", onPress: () => clearAll() },
-      ],
+      { okLabel: "清空", destructive: true },
     );
+    if (ok) clearAll();
   }, [items.length, clearAll]);
 
   /* ── 完全重置 ── */
-  const handleReset = React.useCallback(() => {
-    Alert.alert(
+  const handleReset = React.useCallback(async () => {
+    const ok = await dialog.confirm(
       "重置 ZPass",
       "将永久删除主密码与所有条目，应用回到初始状态。此操作不可撤销。",
-      [
-        { text: "取消", style: "cancel" },
-        {
-          text: "重置",
-          style: "destructive",
-          onPress: async () => {
-            await reset();
-          },
-        },
-      ],
+      { okLabel: "重置", destructive: true },
     );
+    if (ok) await reset();
   }, [reset]);
 
   /* ── 主题切换 ── */
@@ -334,24 +310,22 @@ export default function MeScreen() {
     return themeMode === "dark" ? "深色" : "浅色";
   }, [themeMode, scheme]);
 
-  const handleThemePress = React.useCallback(() => {
+  const handleThemePress = React.useCallback(async () => {
     const options: { label: string; value: ThemeMode }[] = [
       { label: "跟随系统", value: "system" },
       { label: "深色", value: "dark" },
       { label: "浅色", value: "light" },
     ];
-    Alert.alert(
-      "选择主题",
-      "切换 ZPass 的外观主题",
-      [
-        ...options.map((opt) => ({
-          text: `${opt.label}${themeMode === opt.value ? "（已选）" : ""}`,
-          onPress: () => setThemeMode(opt.value),
-        })),
-        { text: "取消", style: "cancel" as const },
-      ],
-      { cancelable: true },
-    );
+    const key = await actionSheet.show({
+      title: "选择主题",
+      message: "切换 ZPass 的外观主题",
+      actions: options.map((opt) => ({
+        key: opt.value,
+        label: `${opt.label}${themeMode === opt.value ? " · 已选" : ""}`,
+        variant: themeMode === opt.value ? "primary" : "default",
+      })),
+    });
+    if (key) setThemeMode(key as ThemeMode);
   }, [themeMode, setThemeMode]);
 
   const typeCounts = React.useMemo(() => countByType(items), [items]);
@@ -377,11 +351,13 @@ export default function MeScreen() {
       key: "lock-now",
       label: "立即锁定",
       showChevron: true,
-      onPress: () =>
-        Alert.alert("锁定 ZPass", "确认要锁定保险库吗？", [
-          { text: "取消", style: "cancel" },
-          { text: "锁定", style: "destructive", onPress: () => lock() },
-        ]),
+      onPress: async () => {
+        const ok = await dialog.confirm("锁定 ZPass", "确认要锁定保险库吗？", {
+          okLabel: "锁定",
+          destructive: true,
+        });
+        if (ok) lock();
+      },
     },
   ];
 
@@ -561,7 +537,7 @@ function ChangePasswordModal({
     if (r.ok) {
       reset();
       onClose();
-      Alert.alert("已更新", "主密码已修改");
+      toast.ok("已更新", "主密码已修改");
     } else {
       setError(r.message);
     }
@@ -678,99 +654,57 @@ function SpacesModal({
   ) => Promise<{ ok: true } | { ok: false; code: string; message: string }>;
   c: typeof Colors.dark;
 }) {
-  const [createMode, setCreateMode] = useState(false);
-  const [draftName, setDraftName] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [renameTarget, setRenameTarget] = useState<Space | null>(null);
-  const [renameDraft, setRenameDraft] = useState("");
-
   const ordered = React.useMemo(() => sortSpaces(spaces), [spaces]);
 
-  const closeAll = () => {
-    setCreateMode(false);
-    setDraftName("");
-    setRenameTarget(null);
-    setRenameDraft("");
-    onClose();
-  };
-
   const handleCreate = async () => {
-    const trimmed = draftName.trim();
-    if (!trimmed) {
-      Alert.alert("名称不能为空");
-      return;
-    }
-    setBusy(true);
-    const sp = await onCreate(trimmed);
-    setBusy(false);
-    if (sp) {
-      setCreateMode(false);
-      setDraftName("");
-    } else {
-      Alert.alert("创建失败", "请稍后重试");
-    }
+    const name = await dialog.prompt("新建空间", {
+      placeholder: "空间名",
+      maxLength: 32,
+      okLabel: "新建",
+    });
+    if (!name) return;
+    const sp = await onCreate(name);
+    if (!sp) await dialog.alert("创建失败", "请稍后重试");
   };
 
-  const handleRow = (sp: Space) => {
-    Alert.alert(
-      sp.name,
-      undefined,
-      [
-        { text: "切换到此空间", onPress: () => onSelect(sp.id) },
-        {
-          text: "重命名",
-          onPress: () => {
-            setRenameTarget(sp);
-            setRenameDraft(sp.name);
-          },
-        },
-        {
-          text: "删除",
-          style: "destructive",
-          onPress: () => {
-            if (spaces.length <= 1) {
-              Alert.alert("无法删除", "至少需要保留一个空间");
-              return;
-            }
-            Alert.alert(
-              "删除空间",
-              `确认删除「${sp.name}」？该空间下的所有条目会迁移到其它空间。`,
-              [
-                { text: "取消", style: "cancel" },
-                {
-                  text: "删除",
-                  style: "destructive",
-                  onPress: async () => {
-                    const r = await onDelete(sp.id);
-                    if (!r.ok) Alert.alert("删除失败", r.message);
-                  },
-                },
-              ],
-            );
-          },
-        },
-        { text: "取消", style: "cancel" },
-      ],
-      { cancelable: true },
+  const handleRename = async (sp: Space) => {
+    const name = await dialog.prompt("重命名空间", {
+      placeholder: "新名称",
+      initial: sp.name,
+      maxLength: 32,
+    });
+    if (!name) return;
+    const r = await onRename(sp.id, name);
+    if (!r.ok) await dialog.alert("重命名失败", r.message);
+  };
+
+  const handleDelete = async (sp: Space) => {
+    if (spaces.length <= 1) {
+      await dialog.alert("无法删除", "至少需要保留一个空间");
+      return;
+    }
+    const ok = await dialog.confirm(
+      "删除空间",
+      `确认删除「${sp.name}」？该空间下的所有条目会迁移到其它空间。`,
+      { okLabel: "删除", destructive: true },
     );
+    if (!ok) return;
+    const r = await onDelete(sp.id);
+    if (!r.ok) await dialog.alert("删除失败", r.message);
   };
 
-  const handleRenameConfirm = async () => {
-    if (!renameTarget) return;
-    const trimmed = renameDraft.trim();
-    if (!trimmed) {
-      Alert.alert("名称不能为空");
-      return;
-    }
-    setBusy(true);
-    const r = await onRename(renameTarget.id, trimmed);
-    setBusy(false);
-    if (r.ok) {
-      setRenameTarget(null);
-      setRenameDraft("");
-    } else {
-      Alert.alert("重命名失败", r.message);
-    }
+  const handleRow = async (sp: Space) => {
+    const key = await actionSheet.show({
+      title: sp.name,
+      actions: [
+        { key: "select", label: "切换到此空间" },
+        { key: "rename", label: "重命名" },
+        { key: "delete", label: "删除", variant: "danger" },
+      ],
+    });
+    if (key === "select") onSelect(sp.id);
+    else if (key === "rename") handleRename(sp);
+    else if (key === "delete") handleDelete(sp);
   };
 
   return (
@@ -778,11 +712,11 @@ function SpacesModal({
       visible={visible}
       transparent
       animationType="fade"
-      onRequestClose={closeAll}
+      onRequestClose={onClose}
     >
       <TouchableOpacity
         activeOpacity={1}
-        onPress={closeAll}
+        onPress={onClose}
         style={spacesModalStyles.backdrop}
       >
         <TouchableOpacity
@@ -864,139 +798,20 @@ function SpacesModal({
             })
           )}
 
-          {createMode ? (
-            <View style={spacesModalStyles.createWrap}>
-              <TextInput
-                style={[
-                  spacesModalStyles.createInput,
-                  {
-                    color: c.text,
-                    backgroundColor: c.bg,
-                    borderColor: c.line,
-                  },
-                ]}
-                value={draftName}
-                onChangeText={setDraftName}
-                placeholder="空间名"
-                placeholderTextColor={c.text3}
-                autoFocus
-                autoCapitalize="none"
-                autoCorrect={false}
-                maxLength={32}
-              />
-              <View style={spacesModalStyles.createActions}>
-                <TouchableOpacity
-                  onPress={() => {
-                    setCreateMode(false);
-                    setDraftName("");
-                  }}
-                  style={[
-                    spacesModalStyles.btn,
-                    spacesModalStyles.btnGhost,
-                    { borderColor: c.line },
-                  ]}
-                  disabled={busy}
-                >
-                  <Text style={{ color: c.text2 }}>取消</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={handleCreate}
-                  style={[spacesModalStyles.btn, { backgroundColor: c.text }]}
-                  disabled={busy}
-                >
-                  {busy ? (
-                    <ActivityIndicator color={c.bg} />
-                  ) : (
-                    <Text style={{ color: c.bg, fontWeight: "700" }}>新建</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </View>
-          ) : (
-            <TouchableOpacity
-              activeOpacity={0.7}
-              onPress={() => setCreateMode(true)}
-              style={[
-                spacesModalStyles.addRow,
-                { borderTopColor: c.line },
-              ]}
-            >
-              <Text style={[spacesModalStyles.addText, { color: c.text2 }]}>
-                + 新建空间
-              </Text>
-            </TouchableOpacity>
-          )}
-        </TouchableOpacity>
-      </TouchableOpacity>
-
-      {/* 重命名 mini-modal */}
-      <Modal
-        visible={renameTarget !== null}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setRenameTarget(null)}
-      >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          style={modalStyles.backdrop}
-        >
-          <View
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={handleCreate}
             style={[
-              modalStyles.card,
-              { backgroundColor: c.bgElev, borderColor: c.line },
+              spacesModalStyles.addRow,
+              { borderTopColor: c.line },
             ]}
           >
-            <Text style={[modalStyles.title, { color: c.text }]}>
-              重命名空间
+            <Text style={[spacesModalStyles.addText, { color: c.text2 }]}>
+              + 新建空间
             </Text>
-            <TextInput
-              style={[
-                modalStyles.fieldInput,
-                {
-                  color: c.text,
-                  backgroundColor: c.bg,
-                  borderColor: c.line,
-                  marginBottom: 12,
-                },
-              ]}
-              value={renameDraft}
-              onChangeText={setRenameDraft}
-              autoCapitalize="none"
-              autoCorrect={false}
-              autoFocus
-              maxLength={32}
-            />
-            <View style={modalStyles.actions}>
-              <TouchableOpacity
-                onPress={() => setRenameTarget(null)}
-                style={[
-                  modalStyles.btn,
-                  modalStyles.btnGhost,
-                  { borderColor: c.line },
-                ]}
-                disabled={busy}
-              >
-                <Text style={[modalStyles.btnGhostText, { color: c.text2 }]}>
-                  取消
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={handleRenameConfirm}
-                style={[modalStyles.btn, { backgroundColor: c.text }]}
-                disabled={busy}
-              >
-                {busy ? (
-                  <ActivityIndicator color={c.bg} />
-                ) : (
-                  <Text style={[modalStyles.btnText, { color: c.bg }]}>
-                    确认
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </TouchableOpacity>
     </Modal>
   );
 }
@@ -1046,33 +861,6 @@ const spacesModalStyles = StyleSheet.create({
   },
   numText: { fontSize: 11, fontWeight: "700" },
   rowName: { flex: 1, fontSize: 14, fontWeight: "500" },
-  check: { fontSize: 16, fontWeight: "700" },
-  createWrap: {
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 10,
-  },
-  createInput: {
-    height: 40,
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    fontSize: 14,
-  },
-  createActions: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    gap: 8,
-  },
-  btn: {
-    minWidth: 72,
-    height: 36,
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  btnGhost: { borderWidth: 1, backgroundColor: "transparent" },
   addRow: {
     paddingVertical: 14,
     paddingHorizontal: 16,

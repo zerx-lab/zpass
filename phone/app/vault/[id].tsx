@@ -6,8 +6,8 @@ import {
   ScrollView,
   StyleSheet,
   Platform,
-  Alert,
 } from "react-native";
+import { dialog } from "@/components/ui/dialog";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, router } from "expo-router";
 import * as Haptics from "expo-haptics";
@@ -422,20 +422,17 @@ export default function VaultDetailScreen() {
 
   const item = getItem(id);
 
-  const handleDelete = useCallback(() => {
+  const handleDelete = useCallback(async () => {
     if (!item) return;
-    Alert.alert("删除条目", `确认删除「${item.name}」？此操作不可撤销。`, [
-      { text: "取消", style: "cancel" },
-      {
-        text: "删除",
-        style: "destructive",
-        onPress: () => {
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-          deleteItem(item.id);
-          router.back();
-        },
-      },
-    ]);
+    const ok = await dialog.confirm(
+      "删除条目",
+      `确认删除「${item.name}」？此操作不可撤销。`,
+      { okLabel: "删除", destructive: true },
+    );
+    if (!ok) return;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    deleteItem(item.id);
+    router.back();
   }, [item, deleteItem]);
 
   if (!item) {

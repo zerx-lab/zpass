@@ -1,0 +1,187 @@
+/* 内联自动填充菜单列表 iframe 样式 ——
+   遵循 ZPass 设计 token: 5/7/10/14 圆角、Geist 字体、描边优先。
+   不引入 emoji 或 Unicode 装饰符号。 */
+
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #14171a;
+  --muted: #6b7280;
+  --line: rgba(0, 0, 0, 0.08);
+  --hover: rgba(0, 0, 0, 0.045);
+  --active: rgba(0, 0, 0, 0.08);
+  --accent: #5b8def;
+  --shadow: 0 6px 20px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.06);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1f24;
+    --fg: #e7e9ec;
+    --muted: #9ba3ad;
+    --line: rgba(255, 255, 255, 0.08);
+    --hover: rgba(255, 255, 255, 0.06);
+    --active: rgba(255, 255, 255, 0.1);
+    --accent: #82a8ff;
+    --shadow: 0 6px 24px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  font-family:
+    Geist, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  font-size: 13px;
+  color: var(--fg);
+  line-height: 1.4;
+}
+
+#root[hidden] {
+  display: none !important;
+}
+
+.shell {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  padding: 8px 12px 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.header .title {
+  font-weight: 600;
+  color: var(--fg);
+}
+.header .origin {
+  margin-left: auto;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  padding: 8px 12px;
+  cursor: pointer;
+  color: var(--fg);
+  font: inherit;
+  outline: none;
+}
+.row:hover {
+  background: var(--hover);
+}
+.row:focus,
+.row[data-focused="true"] {
+  background: var(--active);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.row .badge {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.row .text {
+  min-width: 0;
+}
+.row .name {
+  display: block;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row .meta {
+  display: block;
+  font-size: 11.5px;
+  color: var(--muted);
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row .totp-tag {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding: 2px 5px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.placeholder {
+  padding: 16px 14px;
+  text-align: center;
+  color: var(--muted);
+}
+.placeholder strong {
+  display: block;
+  color: var(--fg);
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.placeholder p {
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+
+.unlock-cta {
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 7px;
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.unlock-cta:hover {
+  background: var(--accent);
+  color: white;
+}

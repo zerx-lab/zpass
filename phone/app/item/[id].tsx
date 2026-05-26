@@ -7,9 +7,9 @@ import {
   ScrollView,
   StyleSheet,
   Platform,
-  Alert,
   KeyboardAvoidingView,
 } from "react-native";
+import { toast } from "@/components/ui/dialog";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, router } from "expo-router";
 import * as Haptics from "expo-haptics";
@@ -239,7 +239,7 @@ export default function ItemEditorScreen() {
   const handleSave = useCallback(async () => {
     const name = (values.name ?? "").trim();
     if (!name) {
-      Alert.alert("缺少名称", "请填写条目名称");
+      toast.warn("缺少名称", "请填写条目名称");
       return;
     }
 
@@ -291,7 +291,7 @@ export default function ItemEditorScreen() {
     if (isNew) {
       const created = await addItem(draft);
       if (!created) {
-        Alert.alert("保存失败", "无法写入加密保险库，请重试");
+        toast.danger("保存失败", "无法写入加密保险库，请重试");
         return;
       }
     } else if (existing) {

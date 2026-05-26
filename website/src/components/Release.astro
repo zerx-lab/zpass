@@ -448,6 +448,8 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 		gap: 18px;
+		/* 让卡片高度各自独立：展开 details 时不会把同行其他卡片一起撑高 */
+		align-items: start;
 	}
 
 	.dl-card {
@@ -530,11 +532,24 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 		color: var(--text-3);
 		letter-spacing: 0.02em;
 	}
+	/* —— 统一 tag 视觉高度：固定 height + inline-flex 居中，
+	   避免 dl-badge / dl-arch / dl-card-tag 因字号、border、padding 差异参差不齐 —— */
+	.dl-card-tag,
+	.dl-badge,
+	.dl-arch {
+		display: inline-flex;
+		align-items: center;
+		box-sizing: border-box;
+		height: 22px;
+		padding: 0 8px;
+		line-height: 1;
+		border-radius: 4px;
+		white-space: nowrap;
+	}
+
 	.dl-card-tag {
 		font-size: 10px;
-		padding: 2px 7px;
 		border: 1px solid var(--line);
-		border-radius: 4px;
 		color: var(--text-2);
 		background: var(--bg);
 		text-transform: lowercase;
@@ -562,10 +577,8 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 	}
 	.dl-badge {
 		font-size: 10px;
-		padding: 2px 7px;
 		background: var(--accent);
 		color: var(--accent-ink);
-		border-radius: 4px;
 		font-weight: 600;
 		letter-spacing: 0.04em;
 		text-transform: uppercase;
@@ -573,9 +586,7 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 	.dl-arch {
 		font-size: 11px;
 		color: var(--text-2);
-		padding: 2px 7px;
 		border: 1px solid var(--line);
-		border-radius: 4px;
 		background: var(--bg);
 	}
 	.dl-size {

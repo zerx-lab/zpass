@@ -6,6 +6,11 @@ import {
   updateBadgeFromQueryResult,
 } from "../src/background/badge";
 import {
+  InlineMenuBridge,
+  isInlineMenuRequest,
+} from "../src/background/inline-menu-bridge";
+import { InlineMenuPort } from "../src/shared/inline-menu-enums";
+import {
   type ActiveTabInfo,
   getHttpOrigin,
   type ExtensionRequest,
@@ -19,6 +24,7 @@ import {
 } from "../src/shared/messages";
 
 const bridge = new NativeBridge();
+const inlineMenu = new InlineMenuBridge(bridge);
 
 // ============================================================================
 // 「保存登录」捕获 + 独立 popup 窗口调度
@@ -372,6 +378,14 @@ export default defineBackground(() => {
     return handleMessage(message, sender);
   });
 
+  // 内联菜单 list iframe 直接 runtime.connect 过来 —— 名字命中即转交 bridge,
+  // 不命中(扩展其他模块 / 异常) 静默忽略。
+  browser.runtime.onConnect.addListener((port) => {
+    if (port.name === InlineMenuPort.List) {
+      inlineMenu.attachPort(port);
+    }
+  });
+
   // popup 窗口被用户关掉 → 释放 registry，并丢掉该 capture（明文密码不再
   // 长留内存）。这里 forget 之后下一轮 unlock poll 不再考虑这条。
   browser.windows.onRemoved.addListener((windowId) => {
@@ -398,6 +412,7 @@ export default defineBackground(() => {
     void (async () => {
       await ensurePendingLoaded();
       forgetAllPendingForTab(tabId);
+      inlineMenu.forgetTab(tabId);
     })();
   });
 });
@@ -406,6 +421,49 @@ async function handleMessage(
   message: unknown,
   sender: Browser.runtime.MessageSender,
 ): Promise<ExtensionResponse> {
+  // 内联菜单消息走独立分支(非业务 RPC, 与 native bridge 解耦)。
+  // 不进入 try 块 —— bridge 内部自己吞错。
+  if (isInlineMenuRequest(message)) {
+    const tabId = sender.tab?.id;
+    if (typeof tabId !== "number") {
+      return { ok: false, error: "无法识别来源标签页。" };
+    }
+    // 关键:cipher 查询永远走 sender.tab.url 的 top-frame origin,
+    // 不信任 content 上报的 req.origin —— 阿里邮箱等会把登录表单
+    // 嵌在 cross-origin iframe 里, 子 frame 上报的 origin 不是
+    // 用户认知里的"当前网站"。
+    const tabUrl = sender.tab?.url ?? "";
+    const tabOrigin = getHttpOrigin(tabUrl);
+    if (!tabOrigin) {
+      return { ok: false, error: "当前页面不能使用 ZPass 自动填充。" };
+    }
+    if (message.type === "zpass.inlineMenu.open") {
+      await inlineMenu.handleOpen(tabId, {
+        ...message,
+        origin: tabOrigin,
+      });
+      return { ok: true };
+    }
+    if (message.type === "zpass.inlineMenu.subFrameOpen") {
+      // sub-frame 触发, rect 已是顶层 viewport 绝对坐标(content 链上累加完成);
+      // origin 信任 sender.tab.url 而非 sub-frame 自身 origin。
+      await inlineMenu.handleSubFrameOpen(tabId, message, tabOrigin);
+      return { ok: true };
+    }
+    if (message.type === "zpass.inlineMenu.close") {
+      inlineMenu.handleClose(tabId);
+      return { ok: true };
+    }
+    if (message.type === "zpass.inlineMenu.updatePosition") {
+      inlineMenu.handleUpdatePosition(tabId, {
+        ...message,
+        origin: tabOrigin,
+      });
+      return { ok: true };
+    }
+    return { ok: false, error: "未知 inline menu 请求。" };
+  }
+
   const req = message as ExtensionRequest;
   if (!req || typeof req !== "object" || typeof req.type !== "string") {
     return { ok: false, error: "无效的扩展请求。" };

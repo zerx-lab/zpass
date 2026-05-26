@@ -15,6 +15,13 @@ import {
   findLoginForms,
 } from "../src/content/forms";
 import { installLoginCapture } from "../src/content/capture-login";
+import { isTotpField } from "../src/content/totp-fields";
+import { InlineMenuController } from "../src/content/inline-menu-controller";
+import { InlineMenuInjector } from "../src/content/inline-menu-injector";
+import {
+  MAX_SUB_FRAME_DEPTH,
+  type InlineMenuPostMessageEnvelope,
+} from "../src/shared/inline-menu-enums";
 
 export default defineContentScript({
   matches: ["http://*/*", "https://*/*"],
@@ -29,8 +36,150 @@ export default defineContentScript({
     // 提交时提示保存登录 —— 与填充 UI 解耦，独立挂载。
     installLoginCapture();
 
-    // 唯一的填充入口：popup 选条目后由 background 广播 zpass.fillLogin。
-    // 不再有 inline 浮动按钮 / 自动菜单 / ArrowDown 触发等任何页内 UI 路径。
+    // 内联自动填充菜单(Bitwarden inline-menu 等价实现):
+    //   - 浮层唯一挂在**顶层 frame**(子 frame viewport 被父页 iframe
+    //     元素物理裁剪, sub-frame 内 popover 显示会被裁掉)
+    //   - sub-frame controller injector=null —— 仅做事件采集 + 通过
+    //     background sub-frame offset 协议把 rect 翻译成顶层坐标交给
+    //     顶层 frame 挂浮层
+    //   - 所有 frame 都接 measureChildIframe 消息, 协助 background 走
+    //     frame tree 累加 iframe element 偏移
+    //   - body 尚未就绪时(极少, runAt=document_idle) 延迟 init, 避免
+    //     InlineMenuInjector 构造里取 document.body 拿到 null。
+    //   - 与 popup toolbar 入口共存, 最终走同一个 zpass.fillLogin 通道。
+    const startInlineMenu = (): void => {
+      const injector =
+        window === window.top ? new InlineMenuInjector() : null;
+      new InlineMenuController(injector).init();
+    };
+    if (document.body) {
+      startInlineMenu();
+    } else {
+      document.addEventListener("DOMContentLoaded", startInlineMenu, {
+        once: true,
+      });
+    }
+
+    // sub-frame offset 协议:每个 frame 监听来自子 iframe 的 postMessage
+    // 累加链。这里用 `event.source === iframe.contentWindow` 严格匹配
+    // 自家 iframe element —— cross-origin 场景下这是唯一精确的定位方式,
+    // URL match 在多 iframe 共享 src 时会错配。
+    //
+    // 累加完成后:
+    //   - 自己是顶层 frame: sendMessage to background "subFrameOpen"
+    //     携 absoluteRect + inputKind, 走标准 open 流程
+    //   - 自己也是 sub-frame: 继续 window.parent.postMessage 上抛
+    window.addEventListener("message", (event) => {
+      const data = event.data as InlineMenuPostMessageEnvelope | null;
+      if (
+        !data ||
+        typeof data !== "object" ||
+        data.source !== "zpass-inline-menu" ||
+        data.command !== "calc-sub-frame-positioning" ||
+        !data.payload
+      ) {
+        return;
+      }
+      const payload = data.payload;
+      if (payload.depth >= MAX_SUB_FRAME_DEPTH) return;
+
+      // 找 event.source 严格匹配的 iframe element
+      let matched: HTMLIFrameElement | null = null;
+      const iframes = document.querySelectorAll<HTMLIFrameElement>("iframe");
+      for (const iframe of Array.from(iframes)) {
+        if (iframe.contentWindow === event.source) {
+          matched = iframe;
+          break;
+        }
+      }
+      if (!matched) return;
+
+      const rect = matched.getBoundingClientRect();
+      // iframe padding / border 也属于"内容到 iframe outer 边界的偏移",
+      // 累加进入 anchor 顶层坐标。
+      const cs = window.getComputedStyle(matched);
+      const padLeft = parseFloat(cs.paddingLeft) || 0;
+      const padTop = parseFloat(cs.paddingTop) || 0;
+      const borderLeft = parseFloat(cs.borderLeftWidth) || 0;
+      const borderTop = parseFloat(cs.borderTopWidth) || 0;
+
+      const nextPayload = {
+        ...payload,
+        top: payload.top + rect.top + padTop + borderTop,
+        left: payload.left + rect.left + padLeft + borderLeft,
+        depth: payload.depth + 1,
+      };
+
+      if (window === window.top) {
+        // 累加到顶层 viewport 绝对坐标 —— 上报 background。
+        void browser.runtime
+          .sendMessage({
+            type: "zpass.inlineMenu.subFrameOpen",
+            rect: {
+              top: nextPayload.top,
+              left: nextPayload.left,
+              width: nextPayload.width,
+              height: nextPayload.height,
+            },
+            inputKind: nextPayload.inputKind,
+          })
+          .catch(() => {});
+        return;
+      }
+
+      // 自己也是 sub-frame —— 继续向上递推
+      try {
+        window.parent.postMessage(
+          {
+            source: "zpass-inline-menu",
+            command: "calc-sub-frame-positioning",
+            payload: nextPayload,
+          },
+          "*",
+        );
+      } catch {
+        // 父 frame sandbox 阻挡, 静默。
+      }
+    });
+
+    // 仅填 OTP code:内联菜单在 OTP input 上触发时使用。
+    // background 通过 generateLoginTotp 拿到当前 code 后广播此消息,
+    // 由当前 frame 找到聚焦的 OTP input 并填入。不动 username / password。
+    browser.runtime.onMessage.addListener(async (message: unknown) => {
+      const msg = message as { type?: string; code?: string };
+      if (msg.type !== "zpass.fillTotpOnly" || !msg.code) return undefined;
+      try {
+        const active = document.activeElement;
+        let target: HTMLInputElement | null = null;
+        if (active instanceof HTMLInputElement && isTotpField(active)) {
+          target = active;
+        }
+        if (!target) {
+          // 没焦点 / 焦点不在 OTP input → 扫一遍本 frame 找第一个候选。
+          const candidates = document.querySelectorAll<HTMLInputElement>("input");
+          for (const candidate of Array.from(candidates)) {
+            if (isTotpField(candidate) && !candidate.disabled && !candidate.readOnly) {
+              target = candidate;
+              break;
+            }
+          }
+        }
+        if (!target) {
+          // 本 frame 没 OTP input —— allFrames:true 下让别的 frame 接手。
+          return undefined;
+        }
+        fillTotpInput(target, msg.code);
+        return { ok: true };
+      } catch (error) {
+        return {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    });
+
+    // 既有填充入口保持:popup 选条目 / 内联菜单选条目 都通过 background 广播
+    // zpass.fillLogin, 由本 listener 落到 simulateUserFill。
     browser.runtime.onMessage.addListener(async (message: unknown) => {
       const msg = message as { type?: string; secret?: LoginSecret };
       if (msg.type !== "zpass.fillLogin" || !msg.secret) return undefined;

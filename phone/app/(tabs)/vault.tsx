@@ -312,8 +312,11 @@ export default function VaultScreen() {
       <TouchableOpacity
         style={[styles.fab, { backgroundColor: c.text }]}
         activeOpacity={0.8}
-        onPress={() => {
+        // 触感放到 PressIn —— 按下瞬间立即反馈，掩盖随后 modal fade-in 的微小延迟
+        onPressIn={() => {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        }}
+        onPress={() => {
           router.push("/item/new" as any);
         }}
       >
