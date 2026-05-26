@@ -521,11 +521,18 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       const ok = await vaultService.tryUnlockWithTrustedDevice();
       if (ok) {
         setLocked(false);
-      } else {
-        // service 内部失败时已清行 —— 同步前端状态，避免锁屏页继续显示按钮
-        setTrustedDeviceEnabled(false);
+        return true;
       }
-      return ok;
+      // 失败时不能直接 setTrustedDeviceEnabled(false) —— service 内部对
+      // "用户取消生物识别"(transient) 不清行，对 "absent / 数据损坏" 清行。
+      // 用 isTrustedDeviceEnabled 查真实状态，确保 UI 与 vault 文件一致。
+      try {
+        const stillEnabled = await vaultService.isTrustedDeviceEnabled();
+        setTrustedDeviceEnabled(stillEnabled);
+      } catch {
+        // 读盘失败保持原状 —— 下次 hydrate 时会修正
+      }
+      return false;
     } catch {
       return false;
     } finally {

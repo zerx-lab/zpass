@@ -76,6 +76,10 @@ const MAPPING = {
   "text.alignleft": "text-fields",
   "switch.2": "toggle-on",
   link: "link",
+  // ── 信任设备 / 生物识别 ──────────────────────────────────────
+  // Material Icons 没有 face-id，用 fingerprint 兜底 —— 两端都映射成
+  // 指纹图标更通用（Android 多见指纹；iOS Face ID 用户也能理解为"生物识别"）
+  faceid: "fingerprint",
 } as IconMapping;
 
 /**

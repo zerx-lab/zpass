@@ -226,10 +226,15 @@ export default function MeScreen() {
     createSpace,
     renameSpace,
     deleteSpace,
+    trustedDeviceSupported,
+    trustedDeviceEnabled,
+    enableTrustedDevice,
+    disableTrustedDevice,
   } = useVault();
 
   const [pwModal, setPwModal] = useState(false);
   const [spacesModal, setSpacesModal] = useState(false);
+  const [trustedModal, setTrustedModal] = useState(false);
 
   const activeSpaceName = React.useMemo(() => {
     const sp = spaces.find((s) => s.id === activeSpaceId);
@@ -340,12 +345,56 @@ export default function MeScreen() {
     },
   ];
 
+  /* ── 在此设备上自动解锁（信任设备） ──
+   *
+   * UI 状态机：
+   *   - 平台不支持            → toast 提示，行可点但不进入弹窗
+   *   - 已启用                → 点击 confirm 后 disable
+   *   - 未启用                → 点击弹自定义 Modal 二次输入主密码
+   *
+   * 注：用自定义 TrustedDeviceEnableModal 而不是 dialog.prompt —— 后者会
+   * trim 输入，破坏含两端空格的主密码。
+   */
+  const handleToggleTrustedDevice = React.useCallback(async () => {
+    if (!trustedDeviceSupported) {
+      toast.info("当前平台不支持设备解锁", "需在 iOS / Android 真机上启用生物识别");
+      return;
+    }
+    if (trustedDeviceEnabled) {
+      const ok = await dialog.confirm(
+        "关闭设备解锁",
+        "下次启动 ZPass 需要重新输入主密码。",
+        { okLabel: "关闭", destructive: true },
+      );
+      if (!ok) return;
+      const r = await disableTrustedDevice();
+      if (!r.ok) {
+        await dialog.alert("关闭失败", r.message);
+        return;
+      }
+      toast.ok("已关闭设备解锁");
+      return;
+    }
+    setTrustedModal(true);
+  }, [trustedDeviceSupported, trustedDeviceEnabled, disableTrustedDevice]);
+
   const securityRows: MenuRowConfig[] = [
     {
       key: "change-pwd",
       label: "修改主密码",
       showChevron: true,
       onPress: () => setPwModal(true),
+    },
+    {
+      key: "trusted-device",
+      label: "在此设备上自动解锁",
+      value: !trustedDeviceSupported
+        ? "不支持"
+        : trustedDeviceEnabled
+          ? "已启用"
+          : "未启用",
+      showChevron: trustedDeviceSupported,
+      onPress: handleToggleTrustedDevice,
     },
     {
       key: "lock-now",
@@ -461,6 +510,12 @@ export default function MeScreen() {
         visible={pwModal}
         onClose={() => setPwModal(false)}
         onSubmit={changeMasterPassword}
+      />
+
+      <TrustedDeviceEnableModal
+        visible={trustedModal}
+        onClose={() => setTrustedModal(false)}
+        onSubmit={enableTrustedDevice}
       />
 
       <SpacesModal
@@ -582,6 +637,122 @@ function ChangePasswordModal({
                 <ActivityIndicator color={c.bg} />
               ) : (
                 <Text style={[modalStyles.btnText, { color: c.bg }]}>确认</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+/* ----- 启用信任设备 modal ----- */
+//
+// 与 ChangePasswordModal 同款结构，但只要单字段（主密码二次确认）。不复用
+// dialog.prompt 是因为后者会 trim 输入 —— 包含两端空格的主密码会被破坏。
+
+function TrustedDeviceEnableModal({
+  visible,
+  onClose,
+  onSubmit,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onSubmit: (
+    confirmPassword: string,
+  ) => Promise<{ ok: true } | { ok: false; code: string; message: string }>;
+}) {
+  const scheme = useColorScheme() ?? "dark";
+  const c = Colors[scheme];
+
+  const [pwd, setPwd] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const reset = () => {
+    setPwd("");
+    setError(null);
+  };
+  const close = () => {
+    if (busy) return; // 启用流程不可中断（已经在写 SecureStore + vault）
+    reset();
+    onClose();
+  };
+
+  const handleSubmit = async () => {
+    setError(null);
+    if (!pwd) {
+      setError("请输入主密码");
+      return;
+    }
+    setBusy(true);
+    const r = await onSubmit(pwd);
+    setBusy(false);
+    if (r.ok) {
+      reset();
+      onClose();
+      toast.ok("已启用设备解锁", "下次启动可使用生物识别");
+      return;
+    }
+    setError(
+      r.code === "trusted-unsupported"
+        ? "当前平台不支持设备解锁"
+        : r.message || "请稍后重试",
+    );
+  };
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={close}
+    >
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={modalStyles.backdrop}
+      >
+        <View
+          style={[
+            modalStyles.card,
+            { backgroundColor: c.bgElev, borderColor: c.line },
+          ]}
+        >
+          <Text style={[modalStyles.title, { color: c.text }]}>
+            启用设备解锁
+          </Text>
+          <Text
+            style={[
+              modalStyles.subtitle,
+              { color: c.text3, fontFamily: MONO },
+            ]}
+          >
+            启用后此设备可用生物识别 / 设备凭据解锁。请输入主密码以确认操作。
+          </Text>
+
+          <ModalField label="主密码" value={pwd} onChange={setPwd} c={c} />
+
+          {error ? (
+            <Text style={[modalStyles.error, { color: c.danger }]}>{error}</Text>
+          ) : null}
+
+          <View style={modalStyles.actions}>
+            <TouchableOpacity
+              onPress={close}
+              style={[modalStyles.btn, modalStyles.btnGhost, { borderColor: c.line }]}
+              disabled={busy}
+            >
+              <Text style={[modalStyles.btnGhostText, { color: c.text2 }]}>取消</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleSubmit}
+              style={[modalStyles.btn, { backgroundColor: c.text }]}
+              disabled={busy}
+            >
+              {busy ? (
+                <ActivityIndicator color={c.bg} />
+              ) : (
+                <Text style={[modalStyles.btnText, { color: c.bg }]}>启用</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -941,7 +1112,8 @@ const modalStyles = StyleSheet.create({
     borderRadius: 14,
     padding: 18,
   },
-  title: { fontSize: 17, fontWeight: "700", marginBottom: 14 },
+  title: { fontSize: 17, fontWeight: "700", marginBottom: 8 },
+  subtitle: { fontSize: 12, lineHeight: 18, marginBottom: 14 },
   field: { marginBottom: 12 },
   fieldLabel: { fontSize: 11, fontWeight: "600", marginBottom: 5 },
   fieldInput: {

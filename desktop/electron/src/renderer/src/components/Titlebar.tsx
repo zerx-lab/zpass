@@ -17,7 +17,13 @@ import { isMacOS } from "@/lib/platform";
  *
  * 设计约束（与 AGENTS.md 对齐）：
  *   - 高度 36px，属于设计系统内"紧凑头部"档位
- *   - 不使用品牌 accent 色，全部走 --text / --text-2 / --text-3 等中性 token
+ *   - 窗口控件 / 文字全部走 --text / --text-2 / --text-3 等中性 token；
+ *     唯一例外是左上角品牌点阵 Z —— 这是品牌标识本体，硬编码 #d4ff3a
+ *     (荧光黄绿)，与系统托盘/任务栏图标 (assets/logo/png/*.png 和 zpass.ico)
+ *     像素颜色严格一致，避免"任务栏绿、窗口标题栏黑"的视觉割裂。
+ *     注意：本端 --accent token 被刻意重定义为单色 (#ececec/#141416, 见
+ *     styles/tokens.css "黑白高级感主题")，所以这里不能走 var(--accent)
+ *     —— 要直接写品牌色 hex.
  *   - 圆角仅用 5/7/10/14；此处窗口按钮不带圆角（平切矩形，与系统控件一致）
  *   - 悬停色走 --titlebar-btn-hover / --titlebar-close-hover，对齐 Windows 11
  *     Fluent 规范（见 src/styles/tokens.css 里的注释）；按下态用更浅/更深的
@@ -264,13 +270,14 @@ export function Titlebar() {
 				  几何让 18×18px 渲染下点阵仍清晰可辨。
 				- 不画中部浅灰底纹：小尺寸下浅灰会变成视觉噪点，反而损害 Z 字辨识度；
 				  大尺寸 appicon 才保留底纹（颗粒底）。
-				- fill="currentColor" + 父级 text-(--text)：自动跟随明暗主题（亮主题黑色
-				  Z 字，暗主题白色 Z 字），无需切图。
+				- fill 直接写死 #d4ff3a（荧光黄绿品牌色）：与系统托盘 / 任务栏图标
+				  (assets/logo/png/*.png、zpass.ico) 像素颜色严格一致；不随主题切换。
+				  本端 --accent 已被改成单色，所以这里必须用 hex 而非 var()。
 				- 不做交互（无 hover / click），与原品牌标识一致。
 			*/}
       <div
         className={clsx(
-          "flex h-full items-center pr-2 text-(--text)",
+          "flex h-full items-center pr-2",
           // macOS 下外层已经用 paddingLeft 让出红绿灯位置，这里不再叠加 pl-3
           mac ? "pl-0" : "pl-3",
         )}
@@ -285,7 +292,7 @@ export function Titlebar() {
           aria-hidden="true"
           focusable="false"
         >
-          <g fill="currentColor">
+          <g fill="#d4ff3a">
             {/* 行 0 / 1：上横（7 列） */}
             <circle cx="0.5" cy="0.5" r="0.45" />
             <circle cx="1.5" cy="0.5" r="0.45" />

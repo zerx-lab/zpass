@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<!-- ZPass brandmark: 7x7 dotted Z. Mirrors extension/public/icon/icon.svg. -->
+<!-- ZPass brandmark: 7x7 dotted Z. Brand color #d4ff3a (荧光黄绿). -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 583 533" version="1.1">
-  <g fill="currentColor">
+  <g fill="#d4ff3a">
 
     <!-- ============ 背景颗粒：中间 3 行的非对角线位置（浅灰，构成 OTP 刻度感） ============ -->
     <g opacity="0.18">

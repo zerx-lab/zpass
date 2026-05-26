@@ -437,15 +437,22 @@ class VaultService {
       createdAt: this.nowMs(),
     };
     // 二次读取 vault 文件（中间 KDF 期间用户可能改了别的字段）—— 与 createItem
-    // 等其它写路径一致，永远基于最新快照写回
-    const latest = await readVaultFile();
-    if (!latest.meta) {
-      // 极端：刚做完 KDF 校验，vault 文件就被外部删了 → 清掉刚写的 WrapKey
+    // 等其它写路径一致，永远基于最新快照写回。
+    //
+    // 此时 SecureStore 里已经有 WrapKey，但 vault 文件里还没有对应行；任何
+    // 后续步骤抛错都必须清掉刚写的 WrapKey，避免孤儿——下次再启用会被覆盖
+    // 但表象上"启用按钮换了 WrapKey 却跟旧 blob 不匹配"是个隐 bug。
+    try {
+      const latest = await readVaultFile();
+      if (!latest.meta) {
+        throw new VaultError("not-initialized", "vault 未初始化");
+      }
+      latest.trustedDevice = row;
+      await writeVaultFile(latest);
+    } catch (e) {
       await this.deleteTrustedDeviceWrapKey();
-      throw new VaultError("not-initialized", "vault 未初始化");
+      throw e;
     }
-    latest.trustedDevice = row;
-    await writeVaultFile(latest);
   }
 
   /** 关闭「在此设备上自动解锁」
@@ -494,12 +501,17 @@ class VaultService {
     let wrapKey: Uint8Array | null = null;
     let dek: Uint8Array | null = null;
     try {
-      wrapKey = await this.readTrustedDeviceWrapKey();
-      if (!wrapKey) {
-        // SecureStore 里没有 / 已失效（生物识别变更）→ 静默清行
-        await this.clearTrustedDeviceArtifacts();
+      const r = await this.readTrustedDeviceWrapKey();
+      if (!r.ok) {
+        if (r.reason === "absent") {
+          // key 永久不可恢复（OS 凭据失效 / 备份恢复后 SecureStore 没回来）
+          // → 静默清行，下次启动直接进主密码界面
+          await this.clearTrustedDeviceArtifacts();
+        }
+        // transient（用户取消生物识别）→ 不清行，下次还能再点
         return false;
       }
+      wrapKey = r.key;
       try {
         dek = openAEAD(wrapKey, row.blob, utf8(AAD_TRUSTED_DEVICE));
       } catch {
@@ -585,9 +597,19 @@ class VaultService {
 
   /** 从 SecureStore 读 WrapKey；触发 iOS / Android 生物识别弹窗
    *
-   * 返回 null 表示 key 不存在或已被系统失效（用户改了生物识别配置）。
+   * 三态返回：
+   *   - { ok: true, key }                  成功拿到 WrapKey
+   *   - { ok: false, reason: "absent" }    key 不存在 / 已被系统永久失效
+   *   - { ok: false, reason: "transient" } 用户按取消 / 一次性失败
+   *
+   * 区分两种失败的目的：absent 表示数据已经实质不可恢复，调用方应清掉 vault
+   * 文件里的 trustedDevice 行；transient 表示这次没用上但下次还能再试，不能
+   * 让用户因一次 cancel 就被强制回主密码流程并需要重新启用（曾经的 bug）。
    */
-  private async readTrustedDeviceWrapKey(): Promise<Uint8Array | null> {
+  private async readTrustedDeviceWrapKey(): Promise<
+    | { ok: true; key: Uint8Array }
+    | { ok: false; reason: "absent" | "transient" }
+  > {
     let b64: string | null;
     try {
       b64 = await SecureStore.getItemAsync(TRUSTED_DEVICE_WRAPKEY_NAME, {
@@ -596,21 +618,26 @@ class VaultService {
         keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
       });
     } catch {
-      // 用户取消生物识别 / 多次失败 → 视为不可用
-      return null;
+      // expo-secure-store 在用户取消生物识别 / 多次失败时抛错；这种是 transient
+      // —— 用户能再点一次按钮重试。绝不当作 absent 清行。
+      return { ok: false, reason: "transient" };
     }
-    if (!b64) return null;
+    if (!b64) {
+      // getItemAsync 在 key 不存在 / key 被 OS 永久失效（用户改了生物识别配置）
+      // 时返回 null。这种是 absent —— vault 文件里的孤儿行该清。
+      return { ok: false, reason: "absent" };
+    }
     let bytes: Uint8Array;
     try {
       bytes = fromB64(b64);
     } catch {
-      return null;
+      return { ok: false, reason: "absent" };
     }
     if (bytes.length !== KEY_SIZE) {
       wipeBytes(bytes);
-      return null;
+      return { ok: false, reason: "absent" };
     }
-    return bytes;
+    return { ok: true, key: bytes };
   }
 
   /** 删 SecureStore 里的 WrapKey；幂等，删不存在的 key 也不抛 */

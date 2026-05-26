@@ -3,7 +3,7 @@
 // 走真实 Argon2id KDF + XChaCha20-Poly1305 校验：解锁失败时统一报"主密码错误"，
 // 不区分 KDF 失败 / verifier 不匹配等内部原因（与 desktop 一致，防止侧信道）。
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -26,11 +26,21 @@ const MONO = Platform.select({ ios: "Menlo", default: "monospace" });
 export function LockOverlay() {
   const scheme = useColorScheme() ?? "dark";
   const c = Colors[scheme];
-  const { unlock, activeSpace } = useVault();
+  const {
+    unlock,
+    activeSpace,
+    trustedDeviceSupported,
+    trustedDeviceEnabled,
+    trustedDeviceTrying,
+    tryUnlockWithTrustedDevice,
+  } = useVault();
 
   const [pw, setPw] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // 是否显示"使用设备解锁"按钮 —— 平台支持 + 当前 vault 启用
+  const showTrustedButton = trustedDeviceSupported && trustedDeviceEnabled;
 
   const handleUnlock = async () => {
     if (!pw) {
@@ -50,6 +60,30 @@ export function LockOverlay() {
       setError(res.message || "主密码错误");
     }
   };
+
+  const handleTrustedUnlock = async () => {
+    if (!showTrustedButton || trustedDeviceTrying) return;
+    setError(null);
+    const ok = await tryUnlockWithTrustedDevice();
+    if (ok) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setPw("");
+    } else {
+      // 失败不弹错误 —— context 已把 enabled 翻成 false（OS 凭据失效），
+      // 用户自然看到按钮消失，回落主密码输入即可（desktop 同行为）。
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    }
+  };
+
+  // 首次挂载时自动尝试一次信任设备解锁 —— 与 desktop LockSync 行为对齐。
+  // useRef 防 StrictMode 双调用。
+  const autoTriedRef = useRef(false);
+  useEffect(() => {
+    if (autoTriedRef.current) return;
+    if (!showTrustedButton) return;
+    autoTriedRef.current = true;
+    void tryUnlockWithTrustedDevice();
+  }, [showTrustedButton, tryUnlockWithTrustedDevice]);
 
   return (
     <View style={[styles.root, { backgroundColor: c.bg }]}>
@@ -114,6 +148,32 @@ export function LockOverlay() {
         )}
       </TouchableOpacity>
 
+      {showTrustedButton ? (
+        <TouchableOpacity
+          style={[
+            styles.trustedBtn,
+            {
+              borderColor: c.line,
+              opacity: trustedDeviceTrying || busy ? 0.6 : 1,
+            },
+          ]}
+          onPress={handleTrustedUnlock}
+          activeOpacity={0.8}
+          disabled={trustedDeviceTrying || busy}
+        >
+          {trustedDeviceTrying ? (
+            <ActivityIndicator color={c.text} />
+          ) : (
+            <>
+              <IconSymbol name="faceid" size={16} color={c.text} />
+              <Text style={[styles.trustedBtnText, { color: c.text }]}>
+                使用设备解锁
+              </Text>
+            </>
+          )}
+        </TouchableOpacity>
+      ) : null}
+
       <Text style={[styles.hint, { color: c.text4 }]}>
         零知识加密 · 主密码不会离开此设备
       </Text>
@@ -154,5 +214,17 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   btnText: { fontSize: 15, fontWeight: "600" },
+  trustedBtn: {
+    width: "100%",
+    height: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 10,
+  },
+  trustedBtnText: { fontSize: 14, fontWeight: "500" },
   hint: { fontSize: 11, marginTop: 24, textAlign: "center" },
 });
