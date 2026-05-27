@@ -245,13 +245,20 @@ const config: ForgeConfig = {
     }),
     // Recommended Electron hardening. See:
     // https://www.electronjs.org/docs/latest/tutorial/fuses
+    //
+    // EnableEmbeddedAsarIntegrityValidation 必须留 false: 它会把 ASAR hash
+    // 写回 Electron Framework 的 __TEXT 段, 之后必须用真正的 Apple Developer ID
+    // 重签才能让内核 page hash 校验过. 我们只有 ad-hoc 签名 (identity '-'),
+    // 在 macOS 14+ 上重签出来的 framework page hash 不稳定, 用户启动时会撞
+    // CODESIGNING / Invalid Page → SIGKILL, 表现为 "App 已损坏". 等接入付费
+    // Developer ID + notarization 后再打开这个 fuse.
     new FusesPlugin({
       version: FuseVersion.V1,
       [FuseV1Options.RunAsNode]: false,
       [FuseV1Options.EnableCookieEncryption]: true,
       [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
       [FuseV1Options.EnableNodeCliInspectArguments]: false,
-      [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true,
+      [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: false,
       [FuseV1Options.OnlyLoadAppFromAsar]: true,
     }),
   ],

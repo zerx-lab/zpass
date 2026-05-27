@@ -182,13 +182,18 @@ tasks:
   # hicolor icons matching the app_id "zpass" (see app.setName in main.ts).
 
   icons:
-    desc: Render assets/logo/zpass.svg into multi-size PNGs under assets/logo/png/
+    # 源用本目录的 assets/logo/zpass.png (512×512, 新 brand 跟 desktop/assets/logo/
+    # 一起 commit 进 git, 见 3780484). 早期指向 ../assets/logo.png 但那张图在
+    # brand 迁移里删掉了, CI 上 magick 找不到输入直接失败 -> 后续 icns 没生成
+    # -> Forge 在 darwin 找不到 zpass.icns -> 回退 Electron 默认图标. 改成
+    # in-repo 路径就不依赖根目录的 logo.png 是否存在.
+    desc: Render assets/logo/zpass.png into multi-size PNGs under assets/logo/png/
     cmds:
       - mkdir -p assets/logo/png
       - for: [16, 32, 48, 64, 128, 256, 512]
-        cmd: magick ../assets/logo.png -resize {{.ITEM}}x{{.ITEM}} -strip assets/logo/png/zpass-{{.ITEM}}.png
+        cmd: magick assets/logo/zpass.png -resize {{.ITEM}}x{{.ITEM}} -strip assets/logo/png/zpass-{{.ITEM}}.png
     sources:
-      - ../assets/logo.png
+      - assets/logo/zpass.png
     generates:
       - assets/logo/png/zpass-16.png
       - assets/logo/png/zpass-32.png
