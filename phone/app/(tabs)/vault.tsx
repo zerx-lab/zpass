@@ -402,12 +402,6 @@ export default function VaultScreen() {
             </Text>
           </View>
         </View>
-        <IconButton
-          icon="line.3.horizontal.decrease"
-          size={36}
-          iconSize={18}
-          variant="tinted"
-        />
       </View>
 
       {/* 搜索框（fill 风格，无 border） */}

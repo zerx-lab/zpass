@@ -181,26 +181,11 @@ export interface SiteStrings {
 	pricing_family: PriceTier;
 	pricing_team: PriceTier;
 
-	// changelog / roadmap
+	// changelog
 	section_changelog: string;
 	section_changelog_sub: string;
-	// 路线图标签文案（按语义键复用,顺序对应 Changelog.astro 中的 build/plan/next）
-	roadmap_tag_building: string;
-	roadmap_tag_planned: string;
-	roadmap_tag_review: string;
-	roadmap_tag_later: string;
-	// 时间窗口短语
-	roadmap_window_in_progress: string;
-	roadmap_window_next: string;
-	roadmap_window_before_launch: string;
-	roadmap_window_later: string;
-	// 路线图各阶段说明（M01..M06）
-	roadmap_m01_notes: string;
-	roadmap_m02_notes: string;
-	roadmap_m03_notes: string;
-	roadmap_m04_notes: string;
-	roadmap_m05_notes: string;
-	roadmap_m06_notes: string;
+	changelog_view_on_github: string;
+	changelog_view_all_releases: string;
 
 	// faq
 	section_faq: string;
@@ -504,32 +489,11 @@ const en: SiteStrings = {
 		cta: "Talk to us",
 	},
 
-	section_changelog: "Roadmap",
+	section_changelog: "Latest release",
 	section_changelog_sub:
-		"What we're building, and roughly when. Dates will move — we'd rather ship this right than ship it early.",
-
-	roadmap_tag_building: "Building",
-	roadmap_tag_planned: "Planned",
-	roadmap_tag_review: "Review",
-	roadmap_tag_later: "Later",
-
-	roadmap_window_in_progress: "in progress",
-	roadmap_window_next: "next",
-	roadmap_window_before_launch: "before launch",
-	roadmap_window_later: "later",
-
-	roadmap_m01_notes:
-		"Vault core: Argon2id key derivation, XChaCha20-Poly1305 record sealing, encrypted on-disk store. Local-only for now — no network path yet.",
-	roadmap_m02_notes:
-		"Desktop app for macOS, Windows and Linux. Keyboard-first, single-window, biometric unlock wherever the OS supports it.",
-	roadmap_m03_notes:
-		"iOS and Android apps with system-level autofill on both. Exactly the same encrypted core as the desktop build.",
-	roadmap_m04_notes:
-		"End-to-end encrypted sync across the public internet. CRDT-based merging means offline edits from multiple devices never clash.",
-	roadmap_m05_notes:
-		"Extensions for Chrome, Firefox and Safari. Protocol spec and threat model go public for external review at the same time.",
-	roadmap_m06_notes:
-		"Final QA pass and audit follow-up. Public release rolls out once the audit completes and any critical findings are resolved.",
+		"What changed in the most recent build. Notes are generated straight from the commit log when each version ships.",
+	changelog_view_on_github: "View on GitHub",
+	changelog_view_all_releases: "All releases",
 
 	section_faq: "FAQ",
 	faq_1_q: "What happens if I forget my master password?",
@@ -568,7 +532,7 @@ const en: SiteStrings = {
 	hero_stat_4_l: "first public release this year",
 
 	live_section_label: "LIVE DEMO",
-	changelog_section_label: "ROADMAP",
+	changelog_section_label: "CHANGELOG",
 	mobile_section_label: "MOBILE",
 
 	theme_label: "Theme",
@@ -822,32 +786,11 @@ const zh: SiteStrings = {
 		cta: "联系我们",
 	},
 
-	section_changelog: "路线图",
+	section_changelog: "更新日志",
 	section_changelog_sub:
-		"我们在做什么，以及大致什么时候能用上。时间节点会变——比起赶进度，我们更在乎把它做对。",
-
-	roadmap_tag_building: "进行中",
-	roadmap_tag_planned: "已规划",
-	roadmap_tag_review: "待审阅",
-	roadmap_tag_later: "后续",
-
-	roadmap_window_in_progress: "进行中",
-	roadmap_window_next: "下一步",
-	roadmap_window_before_launch: "发布前",
-	roadmap_window_later: "稍后",
-
-	roadmap_m01_notes:
-		"密码库核心：Argon2id 密钥派生、XChaCha20-Poly1305 记录封装、本地加密存储。现阶段仅在本地运行，尚不涉及任何网络同步。",
-	roadmap_m02_notes:
-		"macOS、Windows、Linux 桌面应用。键盘优先、单窗口设计，在支持的系统上启用生物识别解锁。",
-	roadmap_m03_notes:
-		"iOS 与 Android 应用，两端均接入系统级自动填充，与桌面端共用完全相同的加密内核。",
-	roadmap_m04_notes:
-		"基于公网的端到端加密同步。采用 CRDT 合并策略，即使多台设备离线编辑也不会出现冲突。",
-	roadmap_m05_notes:
-		"Chrome、Firefox、Safari 浏览器扩展上线。协议规范与威胁模型同步公开，接受外部研究者审阅。",
-	roadmap_m06_notes:
-		"发布前的最后一轮 QA 与审计复测。安全审计完成、关键问题修复之后，正式公开发布。",
+		"最近一次发布的改动一览。每次发版时由提交记录自动生成，避免人工漏写。",
+	changelog_view_on_github: "在 GitHub 查看",
+	changelog_view_all_releases: "查看全部版本",
 
 	section_faq: "常见问题",
 	faq_1_q: "如果忘记主密码怎么办？",
@@ -886,7 +829,7 @@ const zh: SiteStrings = {
 	hero_stat_4_l: "年内首个公开版本发布",
 
 	live_section_label: "实时演示",
-	changelog_section_label: "路线图",
+	changelog_section_label: "更新日志",
 	mobile_section_label: "移动端",
 
 	theme_label: "主题",

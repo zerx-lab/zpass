@@ -7,6 +7,7 @@
 
 import {
 	FALLBACK_ASSETS,
+	FALLBACK_RELEASE_BODY,
 	FALLBACK_TAG_URL,
 	FALLBACK_VERSION,
 } from "../data/release";
@@ -26,6 +27,8 @@ export interface ReleaseData {
 	tagUrl: string;
 	/** filename → { url, sizeBytes } */
 	assets: Map<string, ReleaseAssetData>;
+	/** GitHub Release body —— 由 .github/workflows/release-notes.yml 用 git-cliff 生成 */
+	body: string;
 	/** 数据来源，便于调试时判断是命中 API 还是兜底 */
 	source: "api" | "fallback" | "cache";
 	fetchedAt: number;
@@ -48,6 +51,7 @@ function buildFallback(): ReleaseData {
 		version: FALLBACK_VERSION,
 		tagUrl: FALLBACK_TAG_URL,
 		assets,
+		body: FALLBACK_RELEASE_BODY,
 		source: "fallback",
 		fetchedAt: Date.now(),
 	};
@@ -62,6 +66,7 @@ interface GhAsset {
 interface GhRelease {
 	tag_name: string;
 	html_url: string;
+	body: string | null;
 	assets: GhAsset[];
 }
 
@@ -91,6 +96,8 @@ async function fetchFromGithub(): Promise<ReleaseData> {
 			version: json.tag_name,
 			tagUrl: json.html_url,
 			assets,
+			// API 偶尔会返回 body 为 null（早期手工创建的 release），降级到兜底文案
+			body: json.body?.trim() ? json.body : FALLBACK_RELEASE_BODY,
 			source: "api",
 			fetchedAt: Date.now(),
 		};

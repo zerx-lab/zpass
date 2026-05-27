@@ -24,6 +24,7 @@ import { useTheme, type ThemeMode } from "@/contexts/theme-context";
 import { useVault } from "@/contexts/vault-context";
 import type { VaultItem, VaultItemType } from "@/data/vault";
 import { exportVault, pickAndParseImport } from "@/lib/transfer";
+import type { ItemPayload } from "@/lib/vault-service";
 import { sortSpaces, type Space } from "@/lib/spaces";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { SpaceAvatar } from "@/components/space-avatar";
@@ -97,6 +98,7 @@ export default function MeScreen() {
     lock,
     items,
     importItems,
+    listPayloads,
     clearAll,
     reset,
     changeMasterPassword,
@@ -135,12 +137,15 @@ export default function MeScreen() {
     );
     if (!ok) return;
     try {
-      const r = await exportVault(items);
+      // 拉原始 ItemPayload[]：envelope 与 desktop exportservice.go 1:1，
+      // 不能用 useVault().items（那是平铺的展示态 VaultItem）。
+      const payloads: ItemPayload[] = await listPayloads();
+      const r = await exportVault(payloads);
       if (!r.shared) toast.ok("已生成备份", r.path);
     } catch (e) {
       toast.danger("导出失败", e instanceof Error ? e.message : String(e));
     }
-  }, [items]);
+  }, [items.length, listPayloads]);
 
   /* ── 导入：选择 JSON ── */
   const handleImport = React.useCallback(async () => {
@@ -161,7 +166,7 @@ export default function MeScreen() {
       { okLabel: "导入" },
     );
     if (!ok) return;
-    const n = await importItems(res.items as VaultItem[]);
+    const n = await importItems(res.items);
     toast.ok("导入完成", `已导入 ${n} 个条目`);
   }, [importItems]);
 

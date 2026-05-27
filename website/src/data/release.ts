@@ -247,6 +247,23 @@ export const FALLBACK_TAG_URL =
 const FALLBACK_BASE_URL =
 	"https://github.com/zerx-lab/zpass/releases/download/v0.0.6";
 
+// GitHub Releases API 不可达时使用的占位 changelog。
+// 真实更新日志由 .github/workflows/release-notes.yml 在 tag 发布时通过
+// git-cliff 生成并写入 release body，再由 release-fetcher 读取展示。
+export const FALLBACK_RELEASE_BODY = `## v0.0.6
+
+### Features
+
+- Cross-platform parity across desktop, mobile, and browser extension
+- End-to-end encrypted, local-first vault
+- macOS Apple Silicon ad-hoc signed builds
+
+### CI / Build
+
+- Multi-arch Android APK pipeline
+- Cross-platform desktop installer pipeline
+`;
+
 interface FallbackAsset {
 	filename: string;
 	sizeBytes: number;

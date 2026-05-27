@@ -1,18 +1,20 @@
 ---
 // ============================================================================
-// Changelog → Roadmap — 路线图列表
-// 前期开发期：产品尚未公开发布,本区块改为展示"我们正在做什么、
-// 大致何时完成"的路线图,而非已发布版本的更新日志。
+// Changelog — 最近一次 release 的更新日志
+// ---------------------------------------------------------------------------
+// 内容来源：GitHub Releases API（src/lib/release-fetcher.ts），
+// 其中 release body 由 .github/workflows/release-notes.yml 在 tag 推送时
+// 通过 git-cliff（cliff.toml）生成 —— 单点产出，避免人工维护。
 //
 // 设计要点：
-//   - 复用原 changelog 的视觉结构(左侧编号 + 时间窗口,右侧标签 + 描述)
-//   - 标签语义：plan(强调色,规划中) / build(绿色,进行中) / next(灰色,后续)
-//   - 不出现任何具体已发布版本号、SHA256 哈希、Sigstore 签名、Cure53/Trail of Bits 等
-//     已完成事项措辞,避免误导用户以为产品已上线
-//   - 内容暂为静态数据,后续可改为从 markdown / CMS 读取
+//   - SSR 时直接拉取，并通过 24h 模块缓存复用；
+//   - body 字段是 git-cliff 输出的子集（## / ### / - 列表 + **scope** 加粗），
+//     用一个就地的小渲染器解析为安全 HTML，无需引入额外依赖；
+//   - API 失败或 body 为空时，data/release.ts 的兜底文案接管。
 // ============================================================================
 
 import type { SiteStrings } from "../i18n/strings";
+import { getLatestRelease } from "../lib/release-fetcher";
 
 export interface Props {
 	t: SiteStrings;
@@ -24,60 +26,74 @@ const { t, variant = "default" } = Astro.props;
 const sectionClass =
 	variant === "default" ? "section" : `section section--${variant}`;
 
-// 路线图条目类型
-type RoadmapTag = "build" | "plan" | "next";
-interface RoadmapItem {
-	/** 阶段编号(M01 / M02 ...),代替已发布版本号 */
-	phase: string;
-	/** 时间窗口(季度粒度),刻意不写具体月份避免承诺 */
-	window: string;
-	tags: Array<[RoadmapTag, string]>;
-	notes: string;
+const release = await getLatestRelease();
+
+// ---------------------------------------------------------------------------
+// 小型 markdown 渲染器
+// ---------------------------------------------------------------------------
+// 只覆盖 git-cliff 模板会用到的子集，刻意不引入第三方解析器：
+//   - `## text`  → 版本标题（h3）
+//   - `### text` → 分组标题（h4）
+//   - `- text`   → 列表项；连续 `-` 行自动合并为 <ul>
+//   - 行内：`**text**` → <strong>，`` `text` `` → <code>
+//
+// 安全考量：在做任何 markdown 替换前，先把整段文本里的 HTML 特殊字符整体转义。
+// 这样即使 release body 被人改成包含 `<script>` 也只会显示为文字，绝不会被
+// 当成 HTML 解析；之后的 `**` / 反引号替换只针对 markdown 语法，不会重新引入
+// HTML 注入面。
+function escapeHtml(s: string): string {
+	return s
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&#39;");
 }
 
-// ZPass 公开发布前路线图
-// 注:阶段编号固定,时间窗口/标签/说明全部走 i18n,根据当前 locale 切换语言
-const items: RoadmapItem[] = [
-	{
-		phase: "M01",
-		window: t.roadmap_window_in_progress,
-		tags: [["build", t.roadmap_tag_building]],
-		notes: t.roadmap_m01_notes,
-	},
-	{
-		phase: "M02",
-		window: t.roadmap_window_in_progress,
-		tags: [["build", t.roadmap_tag_building]],
-		notes: t.roadmap_m02_notes,
-	},
-	{
-		phase: "M03",
-		window: t.roadmap_window_next,
-		tags: [["plan", t.roadmap_tag_planned]],
-		notes: t.roadmap_m03_notes,
-	},
-	{
-		phase: "M04",
-		window: t.roadmap_window_next,
-		tags: [["plan", t.roadmap_tag_planned]],
-		notes: t.roadmap_m04_notes,
-	},
-	{
-		phase: "M05",
-		window: t.roadmap_window_before_launch,
-		tags: [
-			["plan", t.roadmap_tag_planned],
-			["next", t.roadmap_tag_review],
-		],
-		notes: t.roadmap_m05_notes,
-	},
-	{
-		phase: "M06",
-		window: t.roadmap_window_later,
-		tags: [["next", t.roadmap_tag_later]],
-		notes: t.roadmap_m06_notes,
-	},
-];
+function inline(s: string): string {
+	// 注意：先转义再处理 markdown 标记 —— 标记字符（*、`）不在转义集合里，
+	// 因此可以放心替换。
+	return escapeHtml(s)
+		.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+		.replace(/`([^`]+)`/g, "<code>$1</code>");
+}
+
+function renderCliffBody(md: string): string {
+	const lines = md.split("\n");
+	const out: string[] = [];
+	let inList = false;
+	const closeList = () => {
+		if (inList) {
+			out.push("</ul>");
+			inList = false;
+		}
+	};
+	for (const raw of lines) {
+		const line = raw.trimEnd();
+		if (line.startsWith("## ")) {
+			closeList();
+			out.push(`<h3 class="cl-version">${inline(line.slice(3))}</h3>`);
+		} else if (line.startsWith("### ")) {
+			closeList();
+			out.push(`<h4 class="cl-group">${inline(line.slice(4))}</h4>`);
+		} else if (line.startsWith("- ")) {
+			if (!inList) {
+				out.push('<ul class="cl-list">');
+				inList = true;
+			}
+			out.push(`<li>${inline(line.slice(2))}</li>`);
+		} else if (line === "") {
+			closeList();
+		} else {
+			closeList();
+			out.push(`<p class="cl-para">${inline(line)}</p>`);
+		}
+	}
+	closeList();
+	return out.join("\n");
+}
+
+const bodyHtml = renderCliffBody(release.body);
 ---
 
 <section class={sectionClass} id="changelog">
@@ -92,53 +108,193 @@ const items: RoadmapItem[] = [
 			</div>
 		</div>
 
-		<div class="changelog-list">
-			{
-				items.map((it) => (
-					<article class="change reveal">
-						<div class="ver mono">
-							<span>{it.phase}</span>
-							<span class="d">{it.window}</span>
-						</div>
-						<div class="notes">
-							{it.tags.map(([k, label]) => (
-								<span class={`tag mono ${k}`}>{label}</span>
-							))}
-							<p>{it.notes}</p>
-						</div>
-					</article>
-				))
-			}
-		</div>
+		<article class="changelog-card reveal">
+			<header class="changelog-card-head">
+				<span class="changelog-tag mono">{release.version}</span>
+				<a
+					class="changelog-link mono"
+					href={release.tagUrl}
+					target="_blank"
+					rel="noopener"
+				>
+					{t.changelog_view_on_github}
+					<span class="arrow" aria-hidden="true">→</span>
+				</a>
+			</header>
+
+			<div class="changelog-body" set:html={bodyHtml} />
+
+			<footer class="changelog-card-foot">
+				<a
+					class="changelog-all mono"
+					href="https://github.com/zerx-lab/zpass/releases"
+					target="_blank"
+					rel="noopener"
+				>
+					{t.changelog_view_all_releases}
+					<span class="arrow" aria-hidden="true">→</span>
+				</a>
+			</footer>
+		</article>
 	</div>
 </section>
 
 <style>
-	/* ----- 路线图标签语义色覆盖(复用原 .tag 基础样式) -----
-	 * 注意：tokens.css 中只定义了 --text / --text-2 / --text-3 / --text-4，
-	 * 不存在 --text-1。之前误用 var(--text-1, #f5f5f3) 导致 light 主题下
-	 * 回退为近白色文字，在白底上完全不可见。这里统一使用真实存在的 token，
-	 * 并用淡背景增强 light 主题下的对比度与区分度。
-	 */
-
-	/* build: 强调色,代表正在构建中 */
-	.changelog-list .tag.build {
-		color: var(--accent);
-		border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
-		background: color-mix(in srgb, var(--accent) 12%, transparent);
+	.changelog-card {
+		border: 1px solid var(--line);
+		border-radius: var(--radius-lg);
+		background: var(--bg-elev);
+		padding: 24px 26px;
+		display: flex;
+		flex-direction: column;
+		gap: 18px;
 	}
 
-	/* plan: 中性偏亮,代表已规划但尚未开工 */
-	.changelog-list .tag.plan {
-		color: var(--text);
-		border-color: color-mix(in srgb, var(--text) 25%, var(--line));
-		background: color-mix(in srgb, var(--text) 6%, transparent);
+	.changelog-card-head {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		flex-wrap: wrap;
+		padding-bottom: 14px;
+		border-bottom: 1px solid var(--line-soft);
 	}
 
-	/* next: 暗淡灰,代表更靠后的阶段 */
-	.changelog-list .tag.next {
+	.changelog-tag {
+		display: inline-flex;
+		align-items: center;
+		height: 24px;
+		padding: 0 10px;
+		font-size: 12px;
+		font-weight: 600;
+		color: var(--accent-ink);
+		background: var(--accent);
+		border-radius: 4px;
+		letter-spacing: 0.02em;
+	}
+
+	.changelog-link {
+		margin-left: auto;
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		font-size: 12px;
 		color: var(--text-2);
-		border-color: var(--line);
-		background: color-mix(in srgb, var(--text-3) 8%, transparent);
+		text-decoration: none;
+		padding: 4px 10px;
+		border: 1px solid var(--line);
+		border-radius: var(--radius);
+		background: var(--bg);
+		transition:
+			border-color 0.15s,
+			color 0.15s,
+			background 0.15s;
+	}
+	.changelog-link:hover {
+		color: var(--text);
+		border-color: var(--text-4);
+		background: var(--bg-hover);
+	}
+	.changelog-link .arrow {
+		opacity: 0.7;
+	}
+
+	.changelog-body {
+		font-size: 14px;
+		line-height: 1.7;
+		color: var(--text);
+	}
+	.changelog-body :global(.cl-version) {
+		font-size: 16px;
+		margin: 0 0 4px;
+		font-weight: 600;
+		letter-spacing: -0.01em;
+		color: var(--text-2);
+	}
+	.changelog-body :global(.cl-version:not(:first-child)) {
+		margin-top: 22px;
+	}
+	.changelog-body :global(.cl-group) {
+		margin: 18px 0 8px;
+		font-size: 12px;
+		font-weight: 600;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--text-3);
+	}
+	.changelog-body :global(.cl-list) {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	.changelog-body :global(.cl-list li) {
+		position: relative;
+		padding-left: 18px;
+		font-size: 13.5px;
+		line-height: 1.6;
+		color: var(--text);
+	}
+	.changelog-body :global(.cl-list li::before) {
+		content: "";
+		position: absolute;
+		left: 4px;
+		top: 0.7em;
+		width: 6px;
+		height: 1px;
+		background: var(--text-3);
+	}
+	.changelog-body :global(strong) {
+		color: var(--text);
+		font-weight: 600;
+		margin-right: 2px;
+	}
+	.changelog-body :global(code) {
+		font-family: var(--font-mono, ui-monospace, monospace);
+		font-size: 0.92em;
+		padding: 1px 5px;
+		border: 1px solid var(--line);
+		border-radius: 3px;
+		background: var(--bg);
+		color: var(--text-2);
+	}
+	.changelog-body :global(.cl-para) {
+		margin: 0 0 8px;
+		font-size: 13.5px;
+		color: var(--text-2);
+	}
+
+	.changelog-card-foot {
+		padding-top: 14px;
+		border-top: 1px solid var(--line-soft);
+		display: flex;
+		justify-content: flex-end;
+	}
+	.changelog-all {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		font-size: 12px;
+		color: var(--text-2);
+		text-decoration: none;
+		padding: 4px 10px;
+		border-radius: var(--radius);
+		transition: color 0.15s;
+	}
+	.changelog-all:hover {
+		color: var(--text);
+	}
+	.changelog-all .arrow {
+		opacity: 0.7;
+	}
+
+	@media (max-width: 720px) {
+		.changelog-card {
+			padding: 20px 18px;
+		}
+		.changelog-link {
+			margin-left: 0;
+		}
 	}
 </style>

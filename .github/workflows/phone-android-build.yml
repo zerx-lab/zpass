@@ -283,7 +283,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release_ctx.outputs.tag }}
-          name: ZPass ${{ steps.release_ctx.outputs.tag }}
-          generate_release_notes: true
+          # name / body 由 .github/workflows/release-notes.yml 用 git-cliff
+          # 统一写入，这里只负责把 Android APK 追加到对应 release。
+          generate_release_notes: false
           fail_on_unmatched_files: false
           files: phone/release/*

@@ -1,0 +1,58 @@
+# git-cliff 配置
+# ---------------------------------------------------------------------------
+# 给 ZPass 各端共享的 release notes 生成器用：
+#   - GitHub Release body 由 .github/workflows/release-notes.yml 在 push tag
+#     时跑 `git-cliff --latest` 生成，只总结当前 tag 与上一 tag 之间的提交
+#   - website 的首页 #changelog 板块在 SSR 时通过 GitHub Releases API
+#     读取该 body 并渲染（见 website/src/components/Changelog.astro）
+#
+# 提交解析遵循 conventional commits（feat / fix / refactor / ci / docs / ...）
+# 同时兼容仓库里历史上零散的非规范提交（落入 "其它变更" 分组而不是丢弃）。
+
+[changelog]
+header = ""
+trim = true
+# Markdown 模板。每个分组一个 `###` 小节，组内 `- subject` 列表。
+# scope 出现时以 `**scope**:` 前缀强调，方便扫读哪一端的改动。
+body = """
+{% if version %}\
+## {{ version }} — {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## 未发布
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}
+- {% if commit.scope %}**{{ commit.scope }}**: {% endif %}{{ commit.message | split(pat="\n") | first | upper_first | trim }}\
+{% endfor %}
+{% endfor %}\n
+"""
+footer = ""
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+split_commits = false
+# 把常见的 conventional type 映射到分组名（统一英文，方便英中双语站点共用）
+commit_parsers = [
+  { message = "^feat",     group = "Features" },
+  { message = "^fix",      group = "Bug Fixes" },
+  { message = "^perf",     group = "Performance" },
+  { message = "^refactor", group = "Refactor" },
+  { message = "^docs",     group = "Docs" },
+  { message = "^style",    group = "Style" },
+  { message = "^test",     group = "Tests" },
+  { message = "^ci",       group = "CI / Build" },
+  { message = "^build",    group = "CI / Build" },
+  { message = "^chore",    group = "Chore" },
+  { message = "^revert",   group = "Revert" },
+  # 兜底：非规范提交也保留，避免日志缺漏
+  { message = ".*",        group = "Misc" },
+]
+filter_commits = false
+protect_breaking_commits = true
+tag_pattern = "v[0-9].*"
+skip_tags = ""
+ignore_tags = ""
+topo_order = false
+sort_commits = "newest"

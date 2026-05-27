@@ -1,6 +1,9 @@
 <div align="center">
 
-<img src="./assets/logo.png" alt="ZPass" width="160" />
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./assets/logo-light.svg">
+  <img src="./assets/logo-dark.svg" alt="ZPass" width="120">
+</picture>
 
 # ZPass
 

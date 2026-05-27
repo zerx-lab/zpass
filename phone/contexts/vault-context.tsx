@@ -101,8 +101,18 @@ interface VaultContextValue {
   updateItem: (id: string, patch: ItemPatch) => Promise<void>;
   deleteItem: (id: string) => Promise<void>;
   toggleFavorite: (id: string) => Promise<void>;
-  /** 批量导入（重新分配 id），返回成功导入数量 */
-  importItems: (incoming: VaultItem[]) => Promise<number>;
+  /**
+   * 批量导入（重新分配 id），返回成功导入数量
+   *
+   * 入参形与 vaultService.importItems 一致：{type, name, fields}。
+   * 由 lib/transfer.ts 的 pickAndParseImport 把任意来源的 JSON
+   * normalize 成这个形（含 desktop ItemPayload 与旧版平铺 VaultItem）。
+   */
+  importItems: (
+    incoming: Pick<ItemPayload, "type" | "name" | "fields">[],
+  ) => Promise<number>;
+  /** 导出用：返回原始 ItemPayload[]，envelope 与 desktop 1:1 */
+  listPayloads: () => Promise<ItemPayload[]>;
   /** 清空所有条目（保留 vault meta，不需要重新设置主密码） */
   clearAll: () => Promise<void>;
   /** 彻底重置：删除 vault 文件并回到 onboarding */
@@ -335,15 +345,12 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   );
 
   const importItems = useCallback(
-    async (incoming: VaultItem[]): Promise<number> => {
+    async (
+      incoming: Pick<ItemPayload, "type" | "name" | "fields">[],
+    ): Promise<number> => {
       if (incoming.length === 0) return 0;
-      const drafts = incoming.map((it) => {
-        // 用导入数据的 type/name/fields，丢弃原 id（由 service 重新分配）
-        const { type, name, fields } = fromDraft(it as ItemDraft);
-        return { type, name, fields };
-      });
       try {
-        const n = await vaultService.importItems(drafts);
+        const n = await vaultService.importItems(incoming);
         await refresh();
         return n;
       } catch (e) {
@@ -353,6 +360,15 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     },
     [refresh],
   );
+
+  const listPayloads = useCallback(async (): Promise<ItemPayload[]> => {
+    try {
+      return await vaultService.listItems();
+    } catch (e) {
+      console.warn("listPayloads failed", e);
+      return [];
+    }
+  }, []);
 
   const clearAll = useCallback(async (): Promise<void> => {
     try {
@@ -615,6 +631,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       deleteItem,
       toggleFavorite,
       importItems,
+      listPayloads,
       clearAll,
       reset,
       initialize,
@@ -652,6 +669,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       deleteItem,
       toggleFavorite,
       importItems,
+      listPayloads,
       clearAll,
       reset,
       initialize,

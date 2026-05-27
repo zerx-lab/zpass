@@ -1,25 +1,35 @@
 // 保险库导入 / 导出 —— 纯本地文件操作。
 //
-// 导出格式与 desktop exportservice.go 对齐：顶层 schemaVersion 为
-// "zpass-export-v1"，items 直接承载条目数组，便于桌面端 / 移动端互导。
+// 与 desktop exportservice.go 的 envelope 完全 1:1：
+//   - 顶层：{ schemaVersion: "zpass-export-v1", exportedAt(unix ms int),
+//             appVersion, itemCount, items: ItemPayload[] }
+//   - items 元素是 ItemPayload 形（{id, type, name, fields, createdAt,
+//     updatedAt, deletedAt?, revision?}），与后端持久化结构一致，所有
+//     类型字段都在嵌套的 `fields` map 内。
+//
+// 旧版 phone 导出（< 2026-05）写的是平铺 VaultItem（字段直接挂在顶层），
+// import 时仍保留兼容路径：检测到没有 `fields` map 时把其它键 normalize
+// 回 fields；这样用户老备份也能继续读。
 
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import * as DocumentPicker from "expo-document-picker";
 
-import type { VaultItem, VaultItemType } from "@/data/vault";
+import type { ItemPayload, VaultItemType } from "@/lib/vault-service";
 
 export const EXPORT_SCHEMA = "zpass-export-v1";
 const APP_VERSION = "1.0.0";
 
+/** Envelope 与 desktop exportservice.go `exportEnvelope` 字段顺序对齐 */
 export interface ExportPayload {
   schemaVersion: string;
+  exportedAt: number;
   appVersion: string;
-  exportedAt: string;
   itemCount: number;
-  items: VaultItem[];
+  items: ItemPayload[];
 }
 
+/** desktop 端枚举的 7 种条目类型，import 校验用 */
 const VALID_TYPES: VaultItemType[] = [
   "login",
   "card",
@@ -27,6 +37,7 @@ const VALID_TYPES: VaultItemType[] = [
   "identity",
   "ssh",
   "passkey",
+  "totp",
 ];
 
 /* ----------------------------------------------------------------------------
@@ -43,17 +54,21 @@ export interface ExportOutcome {
 
 /**
  * 把整库条目写成明文 JSON 文件，并唤起系统分享面板让用户保存 / 发送。
- * 明文备份是用户的明确意图（与 desktop ExportDialog 一致），调用方需先做警告。
+ *
+ * 入参就是 vault-service.listItems() 的原始 ItemPayload，未做任何字段投影，
+ * 保证 envelope 与 desktop ExportService.ExportAllToFile 写出的字节序一致
+ * （除了 indent 风格 —— 都是两空格）。明文备份是用户的明确意图，调用方
+ * 必须先做警告。
  */
-export async function exportVault(items: VaultItem[]): Promise<ExportOutcome> {
-  const payload: ExportPayload = {
+export async function exportVault(payloads: ItemPayload[]): Promise<ExportOutcome> {
+  const envelope: ExportPayload = {
     schemaVersion: EXPORT_SCHEMA,
+    exportedAt: Date.now(),
     appVersion: APP_VERSION,
-    exportedAt: new Date().toISOString(),
-    itemCount: items.length,
-    items,
+    itemCount: payloads.length,
+    items: payloads,
   };
-  const json = JSON.stringify(payload, null, 2);
+  const json = JSON.stringify(envelope, null, 2);
 
   const stamp = new Date().toISOString().slice(0, 10);
   const path = `${FileSystem.cacheDirectory}zpass-export-${stamp}.json`;
@@ -70,50 +85,89 @@ export async function exportVault(items: VaultItem[]): Promise<ExportOutcome> {
     });
     shared = true;
   }
-  return { shared, path, itemCount: items.length };
+  return { shared, path, itemCount: payloads.length };
 }
 
 /* ----------------------------------------------------------------------------
  * 导入
  * -------------------------------------------------------------------------- */
 
+/** 给 vault-service.importItems 的草稿形：与 ItemPayload 同形但不带 id/时间戳 */
+export type ImportDraft = Omit<
+  ItemPayload,
+  "id" | "createdAt" | "updatedAt" | "revision" | "deletedAt"
+>;
+
 export type ImportResult =
-  | { ok: true; items: VaultItem[]; fileName: string }
+  | { ok: true; items: ImportDraft[]; fileName: string }
   | { ok: false; reason: "cancelled" | "parse_error" | "empty" };
 
-/** 判断一个对象是否像合法的 VaultItem */
-function looksLikeItem(o: unknown): o is VaultItem {
-  if (!o || typeof o !== "object") return false;
-  const r = o as Record<string, unknown>;
-  return (
-    typeof r.name === "string" &&
-    typeof r.type === "string" &&
-    VALID_TYPES.includes(r.type as VaultItemType)
-  );
+/** 旧版 phone 导出的平铺 VaultItem 元数据字段（不进 fields） */
+const FLAT_META_KEYS = new Set([
+  "id",
+  "type",
+  "name",
+  "modified",
+  "createdAt",
+  "updatedAt",
+  "revision",
+  "deletedAt",
+  "fields",
+]);
+
+function isObject(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === "object" && !Array.isArray(v);
+}
+
+/**
+ * 把任意来源的条目对象 normalize 成 ImportDraft：
+ *   - desktop / 新版 phone：已经是 ItemPayload 形，校验 fields 是 object 即可
+ *   - 旧版 phone：把除元数据外的 key 收拢进 fields；customFields 落到
+ *     `_customFields` 保留键（与 desktop CUSTOM_FIELDS_KEY 一致）
+ *
+ * 不在这里做字段语义翻译（如 desktop card.expiry ↔ phone card.exp），因为
+ * phone 端 vault-context.toVaultItem 已经按 phone 字段名读取；跨端如有字段
+ * 命名差异由两端的展示层自行兜底。
+ */
+function normalizeToDraft(o: unknown): ImportDraft | null {
+  if (!isObject(o)) return null;
+  const type = o.type;
+  const name = o.name;
+  if (typeof type !== "string" || !VALID_TYPES.includes(type as VaultItemType)) {
+    return null;
+  }
+  if (typeof name !== "string") return null;
+
+  // 已是 ItemPayload 形：直接取 fields
+  if (isObject(o.fields)) {
+    return {
+      type: type as VaultItemType,
+      name,
+      fields: { ...(o.fields as Record<string, unknown>) },
+    };
+  }
+
+  // 旧版平铺 VaultItem：把非元数据字段塞进 fields，customFields 走保留键
+  const fields: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(o)) {
+    if (FLAT_META_KEYS.has(k)) continue;
+    if (k === "customFields") {
+      if (Array.isArray(v) && v.length > 0) fields._customFields = v;
+      continue;
+    }
+    if (v === undefined || v === null || v === "") continue;
+    fields[k] = v;
+  }
+  return { type: type as VaultItemType, name, fields };
 }
 
 /** 从任意解析结果中提取条目数组（兼容 {items:[]} 与裸数组） */
-function extractItems(parsed: unknown): VaultItem[] {
-  let raw: unknown[];
-  if (Array.isArray(parsed)) {
-    raw = parsed;
-  } else if (
-    parsed &&
-    typeof parsed === "object" &&
-    Array.isArray((parsed as { items?: unknown }).items)
-  ) {
-    raw = (parsed as { items: unknown[] }).items;
-  } else {
-    raw = [];
+function extractRaw(parsed: unknown): unknown[] {
+  if (Array.isArray(parsed)) return parsed;
+  if (isObject(parsed) && Array.isArray(parsed.items)) {
+    return parsed.items as unknown[];
   }
-  return raw.filter(looksLikeItem).map((item) => {
-    // 补全 modified，保证后续排序 / 展示不出错
-    const it = item as VaultItem;
-    return {
-      ...it,
-      modified: typeof it.modified === "number" ? it.modified : Date.now(),
-    };
-  });
+  return [];
 }
 
 /** 唤起系统文件选择器，读取并解析一个 ZPass 导出文件 */
@@ -131,7 +185,10 @@ export async function pickAndParseImport(): Promise<ImportResult> {
       encoding: FileSystem.EncodingType.UTF8,
     });
     const parsed = JSON.parse(text);
-    const items = extractItems(parsed);
+    const raw = extractRaw(parsed);
+    const items = raw
+      .map(normalizeToDraft)
+      .filter((d): d is ImportDraft => d !== null);
     if (items.length === 0) return { ok: false, reason: "empty" };
     return { ok: true, items, fileName: asset.name ?? "import.json" };
   } catch {
