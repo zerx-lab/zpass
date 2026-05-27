@@ -5,6 +5,7 @@ name: Build Desktop
 # 目标矩阵:
 #   - Windows x64           Squirrel Setup .exe  + 便携 .zip
 #   - Linux   x64           AppImage + .deb + .rpm + .pkg.tar.zst + 便携 .zip
+#   - macOS   arm64         DMG (hdiutil) + 便携 .zip  (Apple Silicon, ad-hoc 签名)
 #   - Browser Extension     Chrome (MV3) zip + Firefox (MV2) zip + sources.zip
 #
 # 触发方式:
@@ -15,6 +16,13 @@ name: Build Desktop
 #   - Forge 通过 forge.config.ts 的 makers 配置在各 OS 上选用对应打包器
 #       linux  -> MakerAppImage / MakerDeb / MakerRpm (+ MakerZIP)
 #       win32  -> MakerSquirrel (+ MakerZIP)
+#       darwin -> MakerZIP; .dmg 由本 workflow 直接用 hdiutil 把签好名的 .app
+#                 打包, 不引入 @electron-forge/maker-dmg 依赖.
+#   - macOS Apple Silicon (arm64) 强制要求所有原生可执行通过 codesign, 哪怕只是
+#     ad-hoc (identity '-'), 否则用户首次打开会看到 "App 已损坏" 硬阻断. 我们没有
+#     付费的 Apple Developer ID, packagerConfig.osxSign 配 identity: '-' 即可让
+#     Forge 调 @electron/osx-sign 做 ad-hoc 自签. 仍需用户在 "系统设置 -> 隐私
+#     与安全性" 放行 (或 `xattr -dr com.apple.quarantine ...`), 但不会再撞 "已损坏".
 #   - Arch (.pkg.tar.zst) 没有 Forge maker, 用 desktop/scripts/make-arch.sh
 #     在 archlinux:latest 容器里调 makepkg 生成, 输入是 `task make` 已经产出
 #     的 out/zpass-linux-x64/ 目录, 避免重复构建.
@@ -416,6 +424,147 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: zpass-linux-x64
+          path: desktop/release/*
+          if-no-files-found: error
+
+      - name: Publish to GitHub Release
+        if: steps.release_ctx.outputs.publish == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_ctx.outputs.tag }}
+          name: ZPass Desktop ${{ steps.release_ctx.outputs.tag }}
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          files: desktop/release/*
+
+  # ===========================================================================
+  # macOS arm64 (Apple Silicon) - DMG (hdiutil) + 便携 zip, ad-hoc 自签名
+  # ===========================================================================
+  build-macos-arm64:
+    name: macOS arm64 (Apple Silicon - DMG + zip, ad-hoc signed)
+    # macos-14 / macos-latest 已经是 Apple Silicon (M1) runner, 这里钉死 macos-14
+    # 显式表达 arm64 意图, 避免某天 GitHub 把 latest 切回 Intel 时静默回归.
+    runs-on: macos-14
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+        working-directory: desktop
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: desktop/go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - name: Install Task
+        uses: arduino/setup-task@v2
+        with:
+          version: "3.x"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install pnpm dependencies
+        run: pnpm install --frozen-lockfile
+
+      # macos-14 runner 预装 ImageMagick 7 (`magick` 命令), 直接被 task icons 使用,
+      # 不再需要像 Linux 那样写 IM6 -> convert 的 wrapper shim.
+
+      # 显式钉死 GOOS / GOARCH 防 task build:go 在跨架构 runner 上判错;
+      # CGO_ENABLED=0 因为 Go 端依赖 modernc.org/sqlite (pure Go), 不需要链 system
+      # libsqlite, 也省掉跨编译时 CC/SDK 之类的 trouble.
+      #
+      # 真正的 ad-hoc 签名发生在 task make -> electron-forge make -> packager 阶段:
+      # forge.config.ts 里 packagerConfig.osxSign.identity = "-" 让 @electron/osx-sign
+      # 递归对 out/zpass-darwin-arm64/zpass.app 内的所有可执行 ad-hoc 签名.
+      - name: Build (task make → ad-hoc 签名 .app + zip)
+        env:
+          GOOS: darwin
+          GOARCH: arm64
+          CGO_ENABLED: "0"
+        run: task make
+
+      # 校验 ad-hoc 签名状态. 失败也只警告不阻塞 (`|| true`), 因为我们更关心
+      # 后续 dmg 能不能产出; 真正的最终验收靠用户机器上的 Gatekeeper.
+      - name: Verify ad-hoc signature on .app
+        run: |
+          APP="out/zpass-darwin-arm64/zpass.app"
+          if [ ! -d "$APP" ]; then
+            echo "::error::expected $APP not found"
+            ls -la out/ || true
+            exit 1
+          fi
+          codesign --verify --deep --strict --verbose=2 "$APP" || true
+          codesign -dvv "$APP" 2>&1 | head -n 20 || true
+
+      # forge.config.ts 里没启 MakerDMG (避免引新依赖), 直接用 macOS 自带的
+      # hdiutil 把已经 ad-hoc 签好名的 .app 包成只读压缩 dmg (UDZO).
+      # 跟 zip 同一个源 .app, 所以签名状态一致.
+      - name: Create DMG from signed .app
+        run: |
+          APP="out/zpass-darwin-arm64/zpass.app"
+          mkdir -p out/make/dmg
+          hdiutil create \
+            -volname "ZPass" \
+            -srcfolder "$APP" \
+            -ov -format UDZO \
+            out/make/dmg/ZPass-darwin-arm64.dmg
+
+      # Forge 输出布局:
+      #   out/zpass-darwin-arm64/zpass.app
+      #   out/make/zip/darwin/arm64/<name>-darwin-arm64-<version>.zip
+      # 加上我们刚 hdiutil 产出的:
+      #   out/make/dmg/ZPass-darwin-arm64.dmg
+      - name: Stage release assets
+        run: |
+          mkdir -p release
+          shopt -s nullglob
+
+          for f in out/make/dmg/*.dmg; do
+            cp "$f" "release/ZPass-darwin-arm64.dmg"
+          done
+          for f in out/make/zip/darwin/arm64/*.zip; do
+            cp "$f" "release/ZPass-darwin-arm64.zip"
+          done
+
+          echo "--- release/ contents ---"
+          ls -lah release/
+
+      - name: Resolve release context
+        id: release_ctx
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" \
+               && "${{ inputs.release }}" == "true" \
+               && -n "${{ inputs.tag_name }}" ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ inputs.tag_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zpass-darwin-arm64
           path: desktop/release/*
           if-no-files-found: error
 

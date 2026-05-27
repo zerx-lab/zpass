@@ -109,6 +109,22 @@ const config: ForgeConfig = {
       ProductName: "ZPass",
       InternalName: "zpass",
     },
+    // macOS ad-hoc 自签名. Apple Silicon (arm64) 强制要求所有原生可执行都必须
+    // 通过 codesign, 哪怕只是无证书的 ad-hoc 签名 (identity '-'), 否则 Gatekeeper /
+    // dyld 会拒绝加载, 表现为 Finder 弹 "App 已损坏, 无法打开". 我们没有付费的
+    // Apple Developer ID, 这里只做 ad-hoc 兜底: 用户首次打开仍要在 "系统设置 ->
+    // 隐私与安全性" 里手动放行 (或 `xattr -dr com.apple.quarantine /Applications/ZPass.app`),
+    // 但不会再撞上 "已损坏" 这种硬阻断.
+    //
+    // 配置只在 darwin 平台被 Electron Packager 读取, 其它平台静默忽略, 因此不需
+    // 要 if (process.platform === 'darwin') 包裹.
+    osxSign: {
+      identity: "-",
+      optionsForFile: () => ({
+        // 不传 entitlements: ad-hoc 签名跟 hardened runtime / notarization 不兼容,
+        // 走默认 (inherit) 即可.
+      }),
+    },
     // Strip ~65 MB of unused locale .pak files and the 20 MB Chromium
     // license dump from the packaged app. See trimElectronExtras above.
     afterExtract: [
