@@ -482,12 +482,16 @@ jobs:
       - name: Install pnpm dependencies
         run: pnpm install --frozen-lockfile
 
-      # macos-14 runner 预装 ImageMagick 7 (`magick` 命令), 直接被 task icons 使用,
-      # 不再需要像 Linux 那样写 IM6 -> convert 的 wrapper shim.
+      # macos-14 runner 不再预装 ImageMagick 7, 显式 brew install.
+      # `task icons` 依赖 `magick` 命令把 ../assets/logo.png 缩放成各尺寸 PNG.
+      - name: Install ImageMagick
+        run: brew install imagemagick
 
-      # 显式钉死 GOOS / GOARCH 防 task build:go 在跨架构 runner 上判错;
-      # CGO_ENABLED=0 因为 Go 端依赖 modernc.org/sqlite (pure Go), 不需要链 system
-      # libsqlite, 也省掉跨编译时 CC/SDK 之类的 trouble.
+      # 显式钉死 GOOS / GOARCH 防 task build:go 在跨架构 runner 上判错.
+      #
+      # CGO_ENABLED=1: cmd/zpass-agent/peer_darwin.go 用 cgo 调 libproc.proc_pidpath
+      # 拿对端进程路径 (macOS 没有 SO_PEERCRED). 这是 darwin→darwin native build,
+      # 没有跨编译工具链问题; modernc.org/sqlite 是 pure Go, 对 CGO_ENABLED 不敏感.
       #
       # 真正的 ad-hoc 签名发生在 task make -> electron-forge make -> packager 阶段:
       # forge.config.ts 里 packagerConfig.osxSign.identity = "-" 让 @electron/osx-sign
@@ -496,7 +500,7 @@ jobs:
         env:
           GOOS: darwin
           GOARCH: arm64
-          CGO_ENABLED: "0"
+          CGO_ENABLED: "1"
         run: task make
 
       # 校验 ad-hoc 签名状态. 失败也只警告不阻塞 (`|| true`), 因为我们更关心
