@@ -35,20 +35,24 @@ import {
   Animated,
   Easing,
   Modal,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 
-import { Colors, type Palette } from "@/constants/theme";
-import { useColorScheme } from "@/hooks/use-color-scheme";
+import { Fonts, Radius, Spacing, Type, type Palette } from "@/constants/theme";
+import { useTheme } from "@/contexts/theme-context";
 import { IconSymbol } from "@/components/ui/icon-symbol";
+import {
+  Badge,
+  Button,
+  Chip,
+  PressableScale,
+} from "@/components/ui/primitives";
 import {
   formatBase32Groups,
   parseOtpauth,
@@ -56,7 +60,7 @@ import {
   type OtpParseError,
 } from "@/lib/totp";
 
-const MONO = Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" });
+const MONO = Fonts?.mono ?? "monospace";
 
 /* ----------------------------------------------------------------------------
  * 状态机
@@ -82,8 +86,7 @@ export interface QrScannerProps {
  * -------------------------------------------------------------------------- */
 
 export function QrScanner({ visible, onClose, onApply }: QrScannerProps) {
-  const scheme = useColorScheme() ?? "dark";
-  const c = Colors[scheme];
+  const { colors: c } = useTheme();
 
   const [mode, setMode] = useState<Mode>("camera");
   const [state, setState] = useState<PanelState>({ kind: "idle" });
@@ -202,35 +205,37 @@ export function QrScanner({ visible, onClose, onApply }: QrScannerProps) {
     >
       <SafeAreaView style={[styles.safe, { backgroundColor: c.bg }]} edges={["top"]}>
         {/* NavBar */}
-        <View style={[styles.nav, { borderBottomColor: c.lineSoft }]}>
-          <TouchableOpacity onPress={onClose} hitSlop={10}>
+        <View style={styles.nav}>
+          <PressableScale
+            onPress={onClose}
+            haptic="light"
+            scale={0.96}
+            style={styles.navBtn}
+          >
             <Text style={[styles.navText, { color: c.text2 }]}>取消</Text>
-          </TouchableOpacity>
+          </PressableScale>
           <Text style={[styles.navTitle, { color: c.text }]}>添加验证码</Text>
-          <View style={{ width: 36 }} />
+          <View style={{ width: 56 }} />
         </View>
 
         {/* 模式切换 chip */}
         <View style={styles.modeRow}>
-          <ModeChip
+          <Chip
             label="扫码"
             icon="camera.fill"
             active={mode === "camera"}
-            c={c}
             onPress={() => switchMode("camera")}
           />
-          <ModeChip
+          <Chip
             label="相册"
             icon="photo.fill"
             active={mode === "pick"}
-            c={c}
             onPress={() => switchMode("pick")}
           />
-          <ModeChip
+          <Chip
             label="粘贴"
             icon="doc.on.clipboard"
             active={mode === "paste"}
-            c={c}
             onPress={() => switchMode("paste")}
           />
         </View>
@@ -271,45 +276,6 @@ export function QrScanner({ visible, onClose, onApply }: QrScannerProps) {
         </View>
       </SafeAreaView>
     </Modal>
-  );
-}
-
-/* ----------------------------------------------------------------------------
- * 模式切换 chip
- * -------------------------------------------------------------------------- */
-
-function ModeChip({
-  label,
-  icon,
-  active,
-  onPress,
-  c,
-}: {
-  label: string;
-  icon: React.ComponentProps<typeof IconSymbol>["name"];
-  active: boolean;
-  onPress: () => void;
-  c: Palette;
-}) {
-  return (
-    <TouchableOpacity
-      onPress={() => {
-        Haptics.selectionAsync();
-        onPress();
-      }}
-      activeOpacity={0.75}
-      style={[
-        styles.modeChip,
-        active
-          ? { backgroundColor: c.text, borderColor: c.text }
-          : { backgroundColor: c.bgElev, borderColor: c.line },
-      ]}
-    >
-      <IconSymbol name={icon} size={14} color={active ? c.bg : c.text2} />
-      <Text style={[styles.modeChipText, { color: active ? c.bg : c.text2 }]}>
-        {label}
-      </Text>
-    </TouchableOpacity>
   );
 }
 
@@ -369,13 +335,14 @@ function CameraScene({
           扫描身份验证器二维码需要使用相机。图像不会离开本机，不上传任何服务器。
         </Text>
         {canAskAgain ? (
-          <TouchableOpacity
+          <Button
+            label="授权相机"
+            icon="camera.fill"
+            variant="primary"
+            size="lg"
             onPress={onRequest}
-            activeOpacity={0.8}
-            style={[styles.permBtn, { backgroundColor: c.text }]}
-          >
-            <Text style={[styles.permBtnText, { color: c.bg }]}>授权相机</Text>
-          </TouchableOpacity>
+            style={{ marginTop: Spacing.md }}
+          />
         ) : (
           <Text style={[styles.permHint, { color: c.text3, marginTop: 8 }]}>
             请到系统设置中开启相机权限
@@ -421,26 +388,22 @@ function CameraScene({
 
 function PickScene({ onPick, c }: { onPick: () => void; c: Palette }) {
   return (
-    <View style={[styles.center, { padding: 24 }]}>
-      <View
-        style={[
-          styles.permIcon,
-          { backgroundColor: c.bgElev, borderColor: c.line },
-        ]}
-      >
+    <View style={[styles.center, { padding: Spacing.xl + 4 }]}>
+      <View style={[styles.permIcon, { backgroundColor: c.bgElev }]}>
         <IconSymbol name="photo.fill" size={26} color={c.text3} />
       </View>
       <Text style={[styles.permTitle, { color: c.text }]}>从相册选择截图</Text>
       <Text style={[styles.permHint, { color: c.text3 }]}>
-        选择一张含 otpauth:// 二维码的图片，会在本机解码并展示元信息预览。
+        选择一张含 otpauth:// 二维码的图片，会在本机解码并展示元信息预览
       </Text>
-      <TouchableOpacity
+      <Button
+        label="选择图片"
+        icon="photo.fill"
+        variant="primary"
+        size="lg"
         onPress={onPick}
-        activeOpacity={0.8}
-        style={[styles.permBtn, { backgroundColor: c.text }]}
-      >
-        <Text style={[styles.permBtnText, { color: c.bg }]}>选择图片</Text>
-      </TouchableOpacity>
+        style={{ marginTop: Spacing.md }}
+      />
     </View>
   );
 }
@@ -476,12 +439,7 @@ function PasteScene({
       >
         支持 totp / hotp / steam 三种协议，可指定 SHA1/256/512 与位数 / 周期等参数。
       </Text>
-      <View
-        style={[
-          styles.pasteWrap,
-          { backgroundColor: c.bgElev, borderColor: c.line },
-        ]}
-      >
+      <View style={[styles.pasteWrap, { backgroundColor: c.bgElev }]}>
         <TextInput
           value={value}
           onChangeText={onChange}
@@ -497,28 +455,16 @@ function PasteScene({
           ]}
         />
       </View>
-      <TouchableOpacity
+      <Button
+        label="解析"
+        icon="arrow.right"
+        variant="primary"
+        size="lg"
         onPress={onSubmit}
-        activeOpacity={0.8}
         disabled={!value.trim()}
-        style={[
-          styles.permBtn,
-          {
-            backgroundColor: value.trim() ? c.text : c.bgElev2,
-            marginTop: 16,
-            alignSelf: "stretch",
-          },
-        ]}
-      >
-        <Text
-          style={[
-            styles.permBtnText,
-            { color: value.trim() ? c.bg : c.text3 },
-          ]}
-        >
-          解析
-        </Text>
-      </TouchableOpacity>
+        fullWidth
+        style={{ marginTop: Spacing.lg }}
+      />
     </ScrollView>
   );
 }
@@ -572,16 +518,15 @@ function ResultOk({
 
   const maskedSecret = revealSecret
     ? formatBase32Groups(meta.secret)
-    : "•".repeat(Math.min(meta.secret.length, 20));
+    : null;
 
   return (
-    <ScrollView contentContainerStyle={{ padding: 20 }}>
-      <View style={[styles.okBadge, { borderColor: c.line, backgroundColor: c.bgElev }]}>
-        <IconSymbol name="checkmark.shield.fill" size={14} color={c.ok} />
-        <Text style={{ color: c.text, fontSize: 13, marginLeft: 6 }}>识别成功</Text>
+    <ScrollView contentContainerStyle={{ padding: Spacing.xl }}>
+      <View style={styles.okBadge}>
+        <Badge label="识别成功" tone="ok" icon="checkmark.seal.fill" />
       </View>
 
-      <View style={[styles.metaCard, { backgroundColor: c.bgElev, borderColor: c.line }]}>
+      <View style={[styles.metaCard, { backgroundColor: c.bgElev }]}>
         <MetaRow label="协议" value={typeLabel} c={c} />
         {meta.issuer ? (
           <>
@@ -601,48 +546,62 @@ function ResultOk({
         <View style={styles.secretRow}>
           <Text style={[styles.metaLabel, { color: c.text3 }]}>密钥</Text>
           <View style={{ flex: 1, alignItems: "flex-end" }}>
-            <Text
-              style={[
-                styles.metaValue,
-                { color: c.text, fontFamily: MONO, fontSize: 13 },
-              ]}
-              numberOfLines={2}
+            {maskedSecret ? (
+              <Text
+                style={[
+                  styles.metaValue,
+                  { color: c.text, fontFamily: MONO },
+                ]}
+                numberOfLines={2}
+              >
+                {maskedSecret}
+              </Text>
+            ) : (
+              <View style={styles.maskRow}>
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <View
+                    key={i}
+                    style={[styles.maskDot, { backgroundColor: c.text3 }]}
+                  />
+                ))}
+              </View>
+            )}
+            <PressableScale
+              onPress={onToggleReveal}
+              haptic="selection"
+              scale={0.96}
+              style={{ paddingVertical: 4 }}
             >
-              {maskedSecret}
-            </Text>
-            <TouchableOpacity onPress={onToggleReveal} hitSlop={8}>
-              <Text style={{ color: c.text3, fontSize: 11, marginTop: 4 }}>
+              <Text style={{ color: c.info, ...Type.footnote, marginTop: 4 }}>
                 {revealSecret ? "隐藏" : "显示"}
               </Text>
-            </TouchableOpacity>
+            </PressableScale>
           </View>
         </View>
       </View>
 
-      <Text style={{ color: c.text3, fontSize: 11, lineHeight: 16, marginTop: 12 }}>
-        请确认 issuer 与账户与你的预期一致，再选择使用。来源不明的二维码可能是钓鱼。
+      <Text style={{ color: c.text3, ...Type.footnote, marginTop: Spacing.md }}>
+        请确认 issuer 与账户与你的预期一致再使用。来源不明的二维码可能是钓鱼。
       </Text>
 
-      <View style={{ flexDirection: "row", gap: 10, marginTop: 18 }}>
-        <TouchableOpacity
+      <View style={{ flexDirection: "row", gap: Spacing.sm, marginTop: Spacing.lg }}>
+        <Button
+          label="重新扫"
+          variant="secondary"
+          size="lg"
           onPress={onCancel}
-          activeOpacity={0.8}
-          style={[
-            styles.actionBtn,
-            { backgroundColor: c.bgElev, borderColor: c.line, borderWidth: 1 },
-          ]}
-        >
-          <Text style={{ color: c.text2, fontSize: 14, fontWeight: "500" }}>重新扫</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
+          style={{ flex: 1 }}
+          fullWidth
+        />
+        <Button
+          label="使用此密钥"
+          icon="checkmark"
+          variant="primary"
+          size="lg"
           onPress={onConfirm}
-          activeOpacity={0.8}
-          style={[styles.actionBtn, { backgroundColor: c.text }]}
-        >
-          <Text style={{ color: c.bg, fontSize: 14, fontWeight: "600" }}>
-            使用此密钥
-          </Text>
-        </TouchableOpacity>
+          style={{ flex: 1 }}
+          fullWidth
+        />
       </View>
     </ScrollView>
   );
@@ -682,20 +641,26 @@ function ResultBad({
             : "请检查 URI 拼写是否正确。";
 
   return (
-    <View style={{ padding: 20 }}>
-      <View style={[styles.permIcon, { backgroundColor: c.bgElev, borderColor: c.line, alignSelf: "center" }]}>
-        <IconSymbol name="exclamationmark.triangle.fill" size={22} color={c.warn} />
+    <View style={{ padding: Spacing.xl }}>
+      <View
+        style={[
+          styles.permIcon,
+          { backgroundColor: c.warn + "1f", alignSelf: "center" },
+        ]}
+      >
+        <IconSymbol
+          name="exclamationmark.triangle.fill"
+          size={24}
+          color={c.warn}
+        />
       </View>
-      <Text style={[styles.permTitle, { color: c.text, marginTop: 14 }]}>{title}</Text>
+      <Text style={[styles.permTitle, { color: c.text, marginTop: Spacing.md }]}>
+        {title}
+      </Text>
       <Text style={[styles.permHint, { color: c.text3 }]}>{hint}</Text>
       {rawText ? (
-        <View
-          style={[
-            styles.rawBox,
-            { backgroundColor: c.bgElev, borderColor: c.line },
-          ]}
-        >
-          <Text style={[styles.rawLabel, { color: c.text4 }]}>识别到的内容</Text>
+        <View style={[styles.rawBox, { backgroundColor: c.bgElev }]}>
+          <Text style={[styles.rawLabel, { color: c.text3 }]}>识别到的内容</Text>
           <Text
             style={[styles.rawText, { color: c.text2, fontFamily: MONO }]}
             numberOfLines={4}
@@ -705,13 +670,15 @@ function ResultBad({
           </Text>
         </View>
       ) : null}
-      <TouchableOpacity
+      <Button
+        label="重试"
+        icon="arrow.clockwise"
+        variant="primary"
+        size="lg"
         onPress={onRetry}
-        activeOpacity={0.8}
-        style={[styles.permBtn, { backgroundColor: c.text, marginTop: 16, alignSelf: "stretch" }]}
-      >
-        <Text style={[styles.permBtnText, { color: c.bg }]}>重试</Text>
-      </TouchableOpacity>
+        fullWidth
+        style={{ marginTop: Spacing.lg }}
+      />
     </View>
   );
 }
@@ -758,63 +725,49 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.xs,
+    paddingBottom: Spacing.sm,
   },
-  navText: { fontSize: 15 },
-  navTitle: { fontSize: 16, fontWeight: "600" },
+  navBtn: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
+    minWidth: 56,
+  },
+  navText: { ...Type.body },
+  navTitle: { ...Type.title2 },
 
   modeRow: {
     flexDirection: "row",
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: Spacing.md,
     justifyContent: "center",
   },
-  modeChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-  },
-  modeChipText: { fontSize: 13, fontWeight: "500" },
 
   body: { flex: 1 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
 
   permIcon: {
-    width: 60,
-    height: 60,
-    borderRadius: 14,
-    borderWidth: 1,
+    width: 64,
+    height: 64,
+    borderRadius: Radius.xl,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 16,
+    marginBottom: Spacing.md,
   },
   permTitle: {
-    fontSize: 16,
-    fontWeight: "600",
+    ...Type.title2,
     textAlign: "center",
     marginBottom: 6,
   },
   permHint: {
-    fontSize: 13,
+    ...Type.footnote,
     lineHeight: 19,
     textAlign: "center",
     paddingHorizontal: 8,
-    marginBottom: 16,
+    marginBottom: Spacing.md,
   },
-  permBtn: {
-    borderRadius: 10,
-    paddingHorizontal: 22,
-    paddingVertical: 12,
-    alignItems: "center",
-  },
-  permBtnText: { fontSize: 14, fontWeight: "600" },
 
   cameraWrap: { flex: 1, backgroundColor: "#000" },
   viewfinderOverlay: {
@@ -865,69 +818,54 @@ const styles = StyleSheet.create({
   },
 
   pasteWrap: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    minHeight: 120,
+    borderRadius: Radius.lg,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
+    minHeight: 140,
   },
   pasteInput: {
-    fontSize: 13,
+    ...Type.subhead,
     lineHeight: 18,
     textAlignVertical: "top",
     padding: 0,
-    minHeight: 100,
+    minHeight: 110,
   },
 
   okBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    alignSelf: "flex-start",
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    marginBottom: 14,
+    alignItems: "flex-start",
+    marginBottom: Spacing.md,
   },
   metaCard: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 14,
+    borderRadius: Radius.xl,
+    paddingHorizontal: Spacing.lg,
   },
   secretRow: {
     flexDirection: "row",
     alignItems: "flex-start",
     justifyContent: "space-between",
-    paddingVertical: 12,
-    gap: 12,
+    paddingVertical: Spacing.md,
+    gap: Spacing.md,
   },
-  metaLabel: { fontSize: 13, paddingTop: 1 },
-  metaValue: { fontSize: 14, fontWeight: "500", flexShrink: 1, textAlign: "right" },
+  metaLabel: { ...Type.subhead, paddingTop: 1 },
+  metaValue: { ...Type.body, fontWeight: "500", flexShrink: 1, textAlign: "right" },
   divider: { height: StyleSheet.hairlineWidth, width: "100%" },
-
-  actionBtn: {
-    flex: 1,
-    height: 46,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  maskRow: { flexDirection: "row", gap: 5, paddingVertical: 4 },
+  maskDot: { width: 6, height: 6, borderRadius: 3 },
 
   rawBox: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginTop: 4,
+    borderRadius: Radius.lg,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    marginTop: Spacing.xs,
   },
   rawLabel: {
-    fontSize: 10.5,
+    ...Type.caption,
     fontWeight: "700",
     letterSpacing: 0.8,
     marginBottom: 4,
     textTransform: "uppercase",
   },
-  rawText: { fontSize: 12, lineHeight: 17 },
+  rawText: { ...Type.footnote, lineHeight: 17 },
 });
 
 export default QrScanner;

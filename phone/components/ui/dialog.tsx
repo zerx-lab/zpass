@@ -1,19 +1,14 @@
-// 统一弹层 / 提示组件 —— 取代 Alert.alert / ToastAndroid / 散落 Modal
+// 统一弹层 / 提示组件 —— iOS HIG 风格重构
 //
 // 设计目标：
 //   - 命令式 API（dialog.alert / dialog.confirm / dialog.prompt /
-//     actionSheet.show / toast.show），与既有调用点 1:1 替换 Alert.alert
-//   - 视觉与 ZPass 设计 token 对齐：bg / bgElev / line / radius 14
-//   - 动画：中央 fade + 轻微 scale；ActionSheet 底部滑入；Toast 顶部下滑
-//   - 不依赖 reanimated（用 RN Animated，避免 worklet 调度抖动）
-//   - 跨主题：内部消费 useColorScheme，调用方无需传 c
-//
-// 用法：
-//   await dialog.alert("标题", "正文")
-//   const ok = await dialog.confirm("删除", "无法撤销", { destructive: true })
-//   const r = await dialog.prompt("空间名", { placeholder: "输入名字" })
-//   const key = await actionSheet.show({ title: sp.name, actions: [...] })
-//   toast.show("已复制", { variant: "ok" })
+//     actionSheet.show / toast.show），保持原签名，无破坏性变更
+//   - 视觉对齐：iOS HIG sheet + dialog 风格
+//       Alert/Confirm/Prompt：居中卡片，圆角 22，无 border，shadow 强对比
+//       ActionSheet：底部 sheet，圆角顶 22，hairline 分组，无 border
+//       Toast：顶部胶囊，圆角 999，pill 风格
+//   - 按下态：scale + 背景色变化 + Haptics
+//   - 动画：进入用 spring，退出用 in cubic
 //
 // 全局只挂载一次 <DialogHost />（在 _layout.tsx 的根布局）。
 
@@ -29,13 +24,13 @@ import {
   Text,
   TextInput,
   View,
-  type ViewStyle,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 
-import { Colors, type Palette } from "@/constants/theme";
-import { useColorScheme } from "@/hooks/use-color-scheme";
+import { Elevation, Radius, Spacing, Type, type Palette } from "@/constants/theme";
+import { useTheme } from "@/contexts/theme-context";
+import { IconSymbol } from "@/components/ui/icon-symbol";
 
 /* ----------------------------------------------------------------------------
  * 类型
@@ -56,7 +51,6 @@ export interface DialogInputConfig {
   autoCapitalize?: "none" | "sentences" | "words" | "characters";
   autoCorrect?: boolean;
   maxLength?: number;
-  /** 输入框上方的提示（小灰字） */
   hint?: string;
 }
 
@@ -65,14 +59,11 @@ export interface DialogConfig {
   message?: string;
   actions?: DialogAction[];
   input?: DialogInputConfig;
-  /** 默认 true：点遮罩 / Android 返回键 = 取消（resolve null） */
   dismissOnBackdrop?: boolean;
 }
 
 export interface DialogResult {
-  /** 用户按下的按钮 key；null 表示从遮罩或返回键取消 */
   actionKey: string | null;
-  /** 仅 input 模式：用户输入值（已 trim 前的原值） */
   value?: string;
 }
 
@@ -82,7 +73,6 @@ export interface ToastConfig {
   message: string;
   description?: string;
   variant?: ToastVariant;
-  /** 显示时长 ms，默认 2200 */
   duration?: number;
 }
 
@@ -90,12 +80,11 @@ export interface ActionSheetConfig {
   title?: string;
   message?: string;
   actions: DialogAction[];
-  /** 是否在底部追加"取消"项（默认 true） */
   withCancel?: boolean;
 }
 
 /* ----------------------------------------------------------------------------
- * Dispatcher —— 模块级单例，被 DialogHost 订阅
+ * Dispatcher
  * -------------------------------------------------------------------------- */
 
 interface DialogState extends DialogConfig {
@@ -204,7 +193,6 @@ export const dialog = {
     return dispatcher.showDialog(cfg);
   },
 
-  /** 单按钮提示（默认按钮 "好"） */
   async alert(
     title: string,
     message?: string,
@@ -220,7 +208,6 @@ export const dialog = {
     });
   },
 
-  /** 二次确认 —— resolve true = 用户点了 OK */
   async confirm(
     title: string,
     message?: string,
@@ -246,7 +233,6 @@ export const dialog = {
     return r.actionKey === "ok";
   },
 
-  /** 输入框 —— resolve 字符串（trim 后非空）或 null（取消） */
   async prompt(
     title: string,
     opts?: {
@@ -312,12 +298,11 @@ export const actionSheet = {
 };
 
 /* ----------------------------------------------------------------------------
- * DialogHost —— 全局挂载，订阅 dispatcher
+ * DialogHost
  * -------------------------------------------------------------------------- */
 
 export function DialogHost() {
-  const scheme = useColorScheme();
-  const c = Colors[scheme];
+  const { colors: c } = useTheme();
 
   const [snap, setSnap] = useState<Snapshot>({
     dialogs: [],
@@ -341,12 +326,12 @@ export function DialogHost() {
 }
 
 /* ----------------------------------------------------------------------------
- * DialogView —— 中央卡片 fade + scale
+ * DialogView —— 中央卡片
  * -------------------------------------------------------------------------- */
 
 function DialogView({ state, c }: { state: DialogState; c: Palette }) {
   const opacity = useRef(new Animated.Value(0)).current;
-  const scale = useRef(new Animated.Value(0.96)).current;
+  const scale = useRef(new Animated.Value(0.94)).current;
   const [exited, setExited] = useState(false);
 
   const [value, setValue] = useState(state.input?.initial ?? "");
@@ -361,7 +346,7 @@ function DialogView({ state, c }: { state: DialogState; c: Palette }) {
           useNativeDriver: true,
         }),
         Animated.timing(scale, {
-          toValue: 0.97,
+          toValue: 0.96,
           duration: 130,
           easing: Easing.in(Easing.cubic),
           useNativeDriver: true,
@@ -388,7 +373,7 @@ function DialogView({ state, c }: { state: DialogState; c: Palette }) {
       Animated.spring(scale, {
         toValue: 1,
         speed: 22,
-        bounciness: 4,
+        bounciness: 6,
         useNativeDriver: true,
       }),
     ]).start();
@@ -415,10 +400,7 @@ function DialogView({ state, c }: { state: DialogState; c: Palette }) {
     >
       <Pressable style={StyleSheet.absoluteFill} onPress={onBackdrop}>
         <Animated.View
-          style={[
-            styles.backdrop,
-            { backgroundColor: c.overlay, opacity },
-          ]}
+          style={[styles.backdrop, { backgroundColor: c.overlay, opacity }]}
         />
       </Pressable>
 
@@ -431,11 +413,10 @@ function DialogView({ state, c }: { state: DialogState; c: Palette }) {
           style={[
             styles.card,
             {
-              backgroundColor: c.bgElev,
-              borderColor: c.line,
+              backgroundColor: c.bgElev2,
               opacity,
               transform: [{ scale }],
-              shadowColor: "#000",
+              ...Elevation.xl,
             },
           ]}
           onStartShouldSetResponder={() => true}
@@ -450,7 +431,7 @@ function DialogView({ state, c }: { state: DialogState; c: Palette }) {
                 {
                   color: c.text2,
                   marginTop: state.title ? 6 : 0,
-                  marginBottom: state.input ? 12 : 16,
+                  marginBottom: state.input ? 14 : 18,
                 },
               ]}
             >
@@ -474,6 +455,7 @@ function DialogView({ state, c }: { state: DialogState; c: Palette }) {
                 action={a}
                 c={c}
                 onPress={() => close(a.key)}
+                stacked={actions.length > 2}
               />
             ))}
           </View>
@@ -495,11 +477,11 @@ function DialogInput({
   c: Palette;
 }) {
   return (
-    <View style={{ marginBottom: 14 }}>
+    <View style={{ marginBottom: Spacing.md + 2 }}>
       {cfg.hint ? (
         <Text
           style={{
-            fontSize: 11,
+            ...Type.footnote,
             color: c.text3,
             marginBottom: 6,
           }}
@@ -510,7 +492,7 @@ function DialogInput({
       <TextInput
         style={[
           styles.input,
-          { color: c.text, backgroundColor: c.bg, borderColor: c.line },
+          { color: c.text, backgroundColor: c.bgElev },
         ]}
         value={value}
         onChangeText={onChange}
@@ -530,59 +512,92 @@ function DialogButton({
   action,
   c,
   onPress,
+  stacked,
 }: {
   action: DialogAction;
   c: Palette;
   onPress: () => void;
+  stacked: boolean;
 }) {
   const variant = action.variant ?? "default";
-  const style: ViewStyle =
+  const bg =
     variant === "primary"
-      ? { backgroundColor: c.text, borderColor: c.text }
+      ? c.accent
       : variant === "danger"
-        ? { backgroundColor: c.danger, borderColor: c.danger }
+        ? c.danger
         : variant === "ghost"
-          ? { backgroundColor: "transparent", borderColor: c.line }
-          : { backgroundColor: c.bgHover, borderColor: c.line };
+          ? "transparent"
+          : c.bgElev;
   const textColor =
     variant === "primary"
-      ? c.bg
+      ? c.accentInk
       : variant === "danger"
         ? "#fff"
         : variant === "ghost"
           ? c.text2
           : c.text;
+  const pressedBg =
+    variant === "primary"
+      ? c.text2
+      : variant === "danger"
+        ? c.danger
+        : c.bgHover;
+
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const onPressIn = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 0.97,
+      speed: 28,
+      bounciness: 2,
+      useNativeDriver: true,
+    }).start();
+  };
+  const onPressOut = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 1,
+      speed: 28,
+      bounciness: 2,
+      useNativeDriver: true,
+    }).start();
+  };
+
   return (
     <Pressable
       onPress={() => {
         Haptics.selectionAsync();
         onPress();
       }}
+      onPressIn={onPressIn}
+      onPressOut={onPressOut}
       style={({ pressed }) => [
-        styles.btn,
-        style,
-        { opacity: pressed ? 0.82 : 1 },
+        stacked ? styles.btnStacked : styles.btn,
+        { backgroundColor: pressed ? pressedBg : bg },
       ]}
     >
-      <Text
-        style={[
-          styles.btnText,
-          { color: textColor, fontWeight: variant === "ghost" ? "500" : "700" },
-        ]}
-      >
-        {action.label}
-      </Text>
+      <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+        <Text
+          style={[
+            styles.btnText,
+            {
+              color: textColor,
+              fontWeight: variant === "ghost" ? "500" : "700",
+            },
+          ]}
+        >
+          {action.label}
+        </Text>
+      </Animated.View>
     </Pressable>
   );
 }
 
 /* ----------------------------------------------------------------------------
- * SheetView —— 底部 ActionSheet（滑入 + fade backdrop）
+ * SheetView —— 底部 ActionSheet
  * -------------------------------------------------------------------------- */
 
 function SheetView({ state, c }: { state: SheetState; c: Palette }) {
   const opacity = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(40)).current;
+  const translateY = useRef(new Animated.Value(60)).current;
   const [exited, setExited] = useState(false);
 
   const close = useCallback(
@@ -590,13 +605,13 @@ function SheetView({ state, c }: { state: SheetState; c: Palette }) {
       Animated.parallel([
         Animated.timing(opacity, {
           toValue: 0,
-          duration: 140,
+          duration: 160,
           easing: Easing.in(Easing.cubic),
           useNativeDriver: true,
         }),
         Animated.timing(translateY, {
-          toValue: 30,
-          duration: 140,
+          toValue: 40,
+          duration: 160,
           easing: Easing.in(Easing.cubic),
           useNativeDriver: true,
         }),
@@ -612,14 +627,14 @@ function SheetView({ state, c }: { state: SheetState; c: Palette }) {
     Animated.parallel([
       Animated.timing(opacity, {
         toValue: 1,
-        duration: 200,
+        duration: 220,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
       Animated.spring(translateY, {
         toValue: 0,
-        speed: 18,
-        bounciness: 3,
+        speed: 16,
+        bounciness: 4,
         useNativeDriver: true,
       }),
     ]).start();
@@ -650,19 +665,16 @@ function SheetView({ state, c }: { state: SheetState; c: Palette }) {
           style={{
             opacity,
             transform: [{ translateY }],
+            ...Elevation.lg,
           }}
           onStartShouldSetResponder={() => true}
         >
           <SafeAreaView edges={["bottom"]}>
-            <View style={[styles.sheetGroup, { marginHorizontal: 12 }]}>
+            <View style={{ marginHorizontal: Spacing.sm }}>
               {/* 顶部 title / message */}
               {state.title || state.message ? (
-                <View
-                  style={[
-                    styles.sheetHeader,
-                    { backgroundColor: c.bgElev, borderColor: c.line },
-                  ]}
-                >
+                <View style={[styles.sheetHeader, { backgroundColor: c.bgElev2 }]}>
+                  <View style={[styles.sheetHandle, { backgroundColor: c.line }]} />
                   {state.title ? (
                     <Text
                       style={[styles.sheetTitle, { color: c.text }]}
@@ -675,7 +687,7 @@ function SheetView({ state, c }: { state: SheetState; c: Palette }) {
                     <Text
                       style={[
                         styles.sheetMessage,
-                        { color: c.text3, marginTop: state.title ? 3 : 0 },
+                        { color: c.text3, marginTop: state.title ? 4 : 0 },
                       ]}
                     >
                       {state.message}
@@ -685,12 +697,7 @@ function SheetView({ state, c }: { state: SheetState; c: Palette }) {
               ) : null}
 
               {/* 操作组 */}
-              <View
-                style={[
-                  styles.sheetCard,
-                  { backgroundColor: c.bgElev, borderColor: c.line },
-                ]}
-              >
+              <View style={[styles.sheetCard, { backgroundColor: c.bgElev2 }]}>
                 {actions.map((a, idx) => (
                   <SheetRow
                     key={a.key}
@@ -712,9 +719,8 @@ function SheetView({ state, c }: { state: SheetState; c: Palette }) {
                   style={({ pressed }) => [
                     styles.sheetCancel,
                     {
-                      backgroundColor: pressed ? c.bgActive : c.bgElev,
-                      borderColor: c.line,
-                      marginTop: 8,
+                      backgroundColor: pressed ? c.bgActive : c.bgElev2,
+                      marginTop: Spacing.sm,
                     },
                   ]}
                 >
@@ -747,7 +753,7 @@ function SheetRow({
     variant === "danger"
       ? c.danger
       : variant === "primary"
-        ? c.text
+        ? c.info
         : variant === "ghost"
           ? c.text3
           : c.text;
@@ -759,28 +765,40 @@ function SheetRow({
       }}
       style={({ pressed }) => ({
         backgroundColor: pressed ? c.bgActive : "transparent",
-        borderBottomColor: isLast ? "transparent" : c.lineSoft,
-        borderBottomWidth: isLast ? 0 : StyleSheet.hairlineWidth,
-        height: 52,
+        height: 56,
         alignItems: "center",
         justifyContent: "center",
       })}
     >
       <Text
         style={{
-          fontSize: 15,
+          ...Type.body,
+          fontSize: 17,
           color,
-          fontWeight: variant === "danger" ? "600" : "500",
+          fontWeight:
+            variant === "danger" || variant === "primary" ? "600" : "400",
         }}
       >
         {action.label}
       </Text>
+      {!isLast ? (
+        <View
+          style={{
+            position: "absolute",
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: StyleSheet.hairlineWidth,
+            backgroundColor: c.lineSoft,
+          }}
+        />
+      ) : null}
     </Pressable>
   );
 }
 
 /* ----------------------------------------------------------------------------
- * ToastStack —— 顶部下滑，自动消失
+ * ToastStack —— 顶部胶囊
  * -------------------------------------------------------------------------- */
 
 function ToastStack({ toasts, c }: { toasts: ToastState[]; c: Palette }) {
@@ -799,20 +817,20 @@ function ToastStack({ toasts, c }: { toasts: ToastState[]; c: Palette }) {
 
 function ToastItem({ state, c }: { state: ToastState; c: Palette }) {
   const opacity = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(-12)).current;
+  const translateY = useRef(new Animated.Value(-16)).current;
 
   useEffect(() => {
     Animated.parallel([
       Animated.timing(opacity, {
         toValue: 1,
-        duration: 200,
+        duration: 220,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
       Animated.spring(translateY, {
         toValue: 0,
         speed: 18,
-        bounciness: 4,
+        bounciness: 6,
         useNativeDriver: true,
       }),
     ]).start();
@@ -825,7 +843,7 @@ function ToastItem({ state, c }: { state: ToastState; c: Palette }) {
           useNativeDriver: true,
         }),
         Animated.timing(translateY, {
-          toValue: -12,
+          toValue: -16,
           duration: 180,
           easing: Easing.in(Easing.cubic),
           useNativeDriver: true,
@@ -846,22 +864,42 @@ function ToastItem({ state, c }: { state: ToastState; c: Palette }) {
             ? c.info
             : c.text2;
 
+  const iconName =
+    state.variant === "ok"
+      ? "checkmark.circle.fill"
+      : state.variant === "warn"
+        ? "exclamationmark.triangle.fill"
+        : state.variant === "danger"
+          ? "xmark.circle.fill"
+          : state.variant === "info"
+            ? "info.circle"
+            : undefined;
+
   return (
     <Animated.View
       style={[
         styles.toast,
         {
-          backgroundColor: c.bgElev,
-          borderColor: c.line,
+          backgroundColor: c.bgElev2,
           opacity,
           transform: [{ translateY }],
+          ...Elevation.lg,
         },
       ]}
     >
-      <View
-        style={[styles.toastDot, { backgroundColor: accent }]}
-      />
-      <View style={{ flex: 1 }}>
+      {iconName ? (
+        <View
+          style={[
+            styles.toastIcon,
+            { backgroundColor: accent + "26" },
+          ]}
+        >
+          <IconSymbol name={iconName as any} size={14} color={accent} />
+        </View>
+      ) : (
+        <View style={[styles.toastDot, { backgroundColor: accent }]} />
+      )}
+      <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={[styles.toastMsg, { color: c.text }]} numberOfLines={2}>
           {state.message}
         </Text>
@@ -885,110 +923,113 @@ function ToastItem({ state, c }: { state: ToastState; c: Palette }) {
 const styles = StyleSheet.create({
   backdrop: { ...StyleSheet.absoluteFillObject },
 
+  /* Dialog */
   centerWrap: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 28,
+    paddingHorizontal: Spacing.xxl + 4,
   },
   card: {
     width: "100%",
     maxWidth: 360,
-    borderWidth: 1,
-    borderRadius: 14,
-    padding: 20,
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.28,
-    shadowRadius: 24,
-    elevation: 18,
+    borderRadius: 22,
+    padding: Spacing.xl,
   },
-  title: { fontSize: 17, fontWeight: "700", letterSpacing: -0.2 },
-  message: { fontSize: 13.5, lineHeight: 19 },
+  title: { ...Type.title2 },
+  message: { ...Type.callout },
 
   input: {
-    height: 44,
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    fontSize: 15,
+    height: 46,
+    borderRadius: Radius.lg,
+    paddingHorizontal: Spacing.md,
+    ...Type.body,
   },
 
   actionsRow: {
     flexDirection: "row",
-    justifyContent: "flex-end",
-    gap: 8,
+    gap: Spacing.sm,
   },
   btn: {
-    minWidth: 76,
-    height: 40,
-    borderRadius: 10,
-    borderWidth: 1,
+    flex: 1,
+    height: 46,
+    borderRadius: Radius.lg,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 16,
+    paddingHorizontal: Spacing.md,
   },
-  btnText: { fontSize: 14 },
+  btnStacked: {
+    height: 48,
+    borderRadius: Radius.lg,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: Spacing.md,
+    marginBottom: 6,
+  },
+  btnText: { ...Type.body, fontSize: 15 },
 
-  /* sheet */
+  /* Sheet */
   sheetWrap: {
     flex: 1,
     justifyContent: "flex-end",
   },
-  sheetGroup: {},
   sheetHeader: {
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    marginBottom: 8,
+    borderRadius: 18,
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.md,
+    marginBottom: Spacing.sm,
     alignItems: "center",
   },
-  sheetTitle: { fontSize: 15, fontWeight: "600" },
-  sheetMessage: { fontSize: 12, textAlign: "center" },
+  sheetHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    marginBottom: Spacing.sm,
+  },
+  sheetTitle: { ...Type.subhead, fontWeight: "600" },
+  sheetMessage: { ...Type.footnote, textAlign: "center" },
 
   sheetCard: {
-    borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 18,
     overflow: "hidden",
   },
   sheetCancel: {
-    borderWidth: 1,
-    borderRadius: 14,
-    height: 52,
+    borderRadius: 18,
+    height: 56,
     alignItems: "center",
     justifyContent: "center",
   },
-  sheetCancelText: { fontSize: 15, fontWeight: "700" },
+  sheetCancelText: { ...Type.body, fontSize: 17, fontWeight: "700" },
 
-  /* toast */
+  /* Toast */
   toastStack: {
     ...StyleSheet.absoluteFillObject,
     pointerEvents: "box-none",
   },
   toast: {
     flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 10,
-    marginTop: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    borderWidth: 1,
-    borderRadius: 12,
+    alignItems: "center",
+    gap: Spacing.sm,
+    marginTop: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm + 2,
+    borderRadius: 999,
     maxWidth: 340,
     minWidth: 220,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.18,
-    shadowRadius: 12,
-    elevation: 8,
+  },
+  toastIcon: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: "center",
+    justifyContent: "center",
   },
   toastDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginTop: 7,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
-  toastMsg: { fontSize: 14, fontWeight: "600" },
-  toastDesc: { fontSize: 12, marginTop: 2 },
+  toastMsg: { ...Type.subhead, fontWeight: "600" },
+  toastDesc: { ...Type.footnote, marginTop: 2 },
 });
-

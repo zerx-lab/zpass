@@ -1,31 +1,33 @@
-// 锁定遮罩 —— 用户已设置主密码但 vault 处于锁定态时显示
+// 锁定遮罩 —— iOS HIG 风格重构
 //
-// 走真实 Argon2id KDF + XChaCha20-Poly1305 校验：解锁失败时统一报"主密码错误"，
-// 不区分 KDF 失败 / verifier 不匹配等内部原因（与 desktop 一致，防止侧信道）。
+// 用户已设置主密码但 vault 处于锁定态时显示。
+// 走真实 Argon2id KDF + XChaCha20-Poly1305 校验；失败统一报"主密码错误"，
+// 不区分 KDF 失败 / verifier 不匹配等内部原因（与 desktop 一致，防侧信道）。
 
 import React, { useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
   TextInput,
-  TouchableOpacity,
   StyleSheet,
-  Platform,
   ActivityIndicator,
 } from "react-native";
 import * as Haptics from "expo-haptics";
 
-import { Colors } from "@/constants/theme";
-import { useColorScheme } from "@/hooks/use-color-scheme";
+import { Fonts, Radius, Spacing, Type } from "@/constants/theme";
+import { useTheme } from "@/contexts/theme-context";
 import { useVault } from "@/contexts/vault-context";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { SpaceAvatar } from "@/components/space-avatar";
+import {
+  Button,
+  PressableScale,
+} from "@/components/ui/primitives";
 
-const MONO = Platform.select({ ios: "Menlo", default: "monospace" });
+const MONO = Fonts?.mono ?? "monospace";
 
 export function LockOverlay() {
-  const scheme = useColorScheme() ?? "dark";
-  const c = Colors[scheme];
+  const { colors: c } = useTheme();
   const {
     unlock,
     activeSpace,
@@ -39,7 +41,6 @@ export function LockOverlay() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // 是否显示"使用设备解锁"按钮 —— 平台支持 + 当前 vault 启用
   const showTrustedButton = trustedDeviceSupported && trustedDeviceEnabled;
 
   const handleUnlock = async () => {
@@ -69,14 +70,10 @@ export function LockOverlay() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setPw("");
     } else {
-      // 失败不弹错误 —— context 已把 enabled 翻成 false（OS 凭据失效），
-      // 用户自然看到按钮消失，回落主密码输入即可（desktop 同行为）。
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
     }
   };
 
-  // 首次挂载时自动尝试一次信任设备解锁 —— 与 desktop LockSync 行为对齐。
-  // useRef 防 StrictMode 双调用。
   const autoTriedRef = useRef(false);
   useEffect(() => {
     if (autoTriedRef.current) return;
@@ -90,17 +87,26 @@ export function LockOverlay() {
       <View style={styles.logoWrap}>
         <SpaceAvatar
           space={activeSpace}
-          size={56}
-          background={c.text}
-          foreground={c.bg}
-          fontSize={28}
-          borderRadius={14}
+          size={72}
+          background={c.accent}
+          foreground={c.accentInk}
+          fontSize={32}
+          borderRadius={Radius.xl + 4}
         />
+        <View
+          style={[
+            styles.lockBadge,
+            { backgroundColor: c.danger, borderColor: c.bg },
+          ]}
+        >
+          <IconSymbol name="lock.fill" size={11} color="#fff" />
+        </View>
       </View>
+
       <Text style={[styles.title, { color: c.text }]}>
-        {activeSpace ? `「${activeSpace.name}」已锁定` : "ZPass 已锁定"}
+        {activeSpace?.name ?? "ZPass"}
       </Text>
-      <Text style={[styles.sub, { color: c.text3, fontFamily: MONO }]}>
+      <Text style={[styles.sub, { color: c.text3 }]}>
         输入主密码以解锁保险库
       </Text>
 
@@ -109,7 +115,7 @@ export function LockOverlay() {
           styles.inputBox,
           {
             backgroundColor: c.bgElev,
-            borderColor: error ? c.danger : c.line,
+            borderColor: error ? c.danger : "transparent",
           },
         ]}
       >
@@ -132,50 +138,64 @@ export function LockOverlay() {
       </View>
 
       {error ? (
-        <Text style={[styles.error, { color: c.danger }]}>{error}</Text>
+        <View style={styles.errorRow}>
+          <IconSymbol
+            name="exclamationmark.circle.fill"
+            size={12}
+            color={c.danger}
+          />
+          <Text style={[styles.errorText, { color: c.danger }]}>{error}</Text>
+        </View>
+      ) : (
+        <View style={{ height: 16, marginBottom: Spacing.sm }} />
+      )}
+
+      <Button
+        label={busy ? "解锁中" : "解锁"}
+        icon={busy ? undefined : "lock.shield.fill"}
+        variant="primary"
+        size="lg"
+        onPress={handleUnlock}
+        disabled={busy}
+        fullWidth
+        style={{ width: "100%" }}
+      />
+
+      {busy ? (
+        <View style={styles.spinnerOverlay} pointerEvents="none">
+          <ActivityIndicator color={c.accentInk} />
+        </View>
       ) : null}
 
-      <TouchableOpacity
-        style={[styles.btn, { backgroundColor: c.text, opacity: busy ? 0.7 : 1 }]}
-        onPress={handleUnlock}
-        activeOpacity={0.8}
-        disabled={busy}
-      >
-        {busy ? (
-          <ActivityIndicator color={c.bg} />
-        ) : (
-          <Text style={[styles.btnText, { color: c.bg }]}>解锁</Text>
-        )}
-      </TouchableOpacity>
-
       {showTrustedButton ? (
-        <TouchableOpacity
+        <PressableScale
+          onPress={handleTrustedUnlock}
+          disabled={trustedDeviceTrying || busy}
+          scale={0.97}
+          haptic="medium"
+          pressedBg={c.bgHover}
           style={[
             styles.trustedBtn,
             {
-              borderColor: c.line,
               opacity: trustedDeviceTrying || busy ? 0.6 : 1,
             },
           ]}
-          onPress={handleTrustedUnlock}
-          activeOpacity={0.8}
-          disabled={trustedDeviceTrying || busy}
         >
           {trustedDeviceTrying ? (
-            <ActivityIndicator color={c.text} />
+            <ActivityIndicator color={c.text} size="small" />
           ) : (
             <>
-              <IconSymbol name="faceid" size={16} color={c.text} />
-              <Text style={[styles.trustedBtnText, { color: c.text }]}>
+              <IconSymbol name="faceid" size={18} color={c.info} />
+              <Text style={[styles.trustedBtnText, { color: c.info }]}>
                 使用设备解锁
               </Text>
             </>
           )}
-        </TouchableOpacity>
+        </PressableScale>
       ) : null}
 
-      <Text style={[styles.hint, { color: c.text4 }]}>
-        零知识加密 · 主密码不会离开此设备
+      <Text style={[styles.hint, { color: c.text4, fontFamily: MONO }]}>
+        零知识加密 · 主密码永不离开此设备
       </Text>
     </View>
   );
@@ -186,45 +206,68 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 36,
+    paddingHorizontal: Spacing.xxl + Spacing.md,
     zIndex: 1000,
   },
-  logoWrap: { marginBottom: 20 },
-  title: { fontSize: 20, fontWeight: "700", letterSpacing: -0.3 },
-  sub: { fontSize: 12, marginTop: 6, marginBottom: 28 },
+  logoWrap: {
+    marginBottom: Spacing.xl,
+    position: "relative",
+  },
+  lockBadge: {
+    position: "absolute",
+    bottom: -2,
+    right: -2,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  title: { ...Type.title },
+  sub: { ...Type.footnote, marginTop: 4, marginBottom: Spacing.xxl },
   inputBox: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: Spacing.sm,
     width: "100%",
-    height: 48,
+    height: 50,
+    borderRadius: Radius.lg,
     borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    marginBottom: 8,
+    paddingHorizontal: Spacing.md,
+    marginBottom: 4,
   },
-  input: { flex: 1, fontSize: 15, padding: 0 },
-  error: { fontSize: 12, alignSelf: "flex-start", marginBottom: 8 },
-  btn: {
-    width: "100%",
-    height: 48,
-    borderRadius: 12,
+  input: { flex: 1, ...Type.body, padding: 0 },
+  errorRow: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    marginTop: 4,
+    gap: 5,
+    alignSelf: "flex-start",
+    marginTop: Spacing.xs,
+    marginBottom: Spacing.sm,
+    height: 16,
   },
-  btnText: { fontSize: 15, fontWeight: "600" },
+  errorText: { ...Type.footnote, fontWeight: "500" },
+  spinnerOverlay: {
+    position: "absolute",
+    width: "100%",
+    bottom: 200,
+    alignItems: "center",
+  },
   trustedBtn: {
     width: "100%",
-    height: 44,
-    borderRadius: 12,
-    borderWidth: 1,
+    height: 48,
+    borderRadius: Radius.lg,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    marginTop: 10,
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
   },
-  trustedBtnText: { fontSize: 14, fontWeight: "500" },
-  hint: { fontSize: 11, marginTop: 24, textAlign: "center" },
+  trustedBtnText: { ...Type.subhead, fontWeight: "600" },
+  hint: {
+    ...Type.caption,
+    marginTop: Spacing.xxl,
+    textAlign: "center",
+  },
 });

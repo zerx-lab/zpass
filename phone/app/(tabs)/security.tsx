@@ -1,39 +1,31 @@
-// 安全中心 —— 对齐 desktop/electron HealthPage
+// 安全中心 —— iOS HIG 风格重构
 //
-// 三大模块（与 desktop 完全一致）：
-//   1. Hero 综合分：大字分数 + A/B/C/D 等级圈 + 三联统计（登录数 / 已泄露 / 立即修复）
-//   2. 二格 Stat Tiles：已泄露 + 弱密码
-//   3. 泄露监控（HIBP k-anonymity）：扫描按钮 + 4 态切换 + 结果列表
-//   4. 行动建议：breach > weak 合并，最多 12 条
-//   5. 强度分布直方图：5 桶
-//
-// 综合分模型（与 desktop computeStats + adjustedScore 对齐）：
-//   score = 平均强度（仅有密码的 login）
-//   adjustedScore = max(0, score - min(30, breachedCount * 5))
-//
-// 弱密码阈值：strength < 60（desktop 标准）
+// 三大模块：综合分 Hero + Stat Tiles + 泄露监控 + 行动建议 + 分布
 
 import React, { useMemo } from "react";
 import {
   ActivityIndicator,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 
-import { Colors } from "@/constants/theme";
-import { useColorScheme } from "@/hooks/use-color-scheme";
+import { Fonts, Radius, Spacing, Type, type ColorPalette } from "@/constants/theme";
+import { useTheme } from "@/contexts/theme-context";
 import { useVault } from "@/contexts/vault-context";
 import type { LoginItem, VaultItem } from "@/data/vault";
 import { estimateStrength } from "@/lib/password";
 import { IconSymbol } from "@/components/ui/icon-symbol";
+import {
+  Badge,
+  Button,
+  PressableScale,
+} from "@/components/ui/primitives";
 
-const MONO = Platform.select({ ios: "ui-monospace", default: "monospace" });
+const MONO = Fonts?.mono ?? "monospace";
 
 /* ── 类型与计算 ─────────────────────────────────────────────── */
 
@@ -44,7 +36,6 @@ interface LoginIssue {
   password: string;
   strength: number;
   severity: Severity;
-  /** breach 严重度专用：泄露次数 */
   breachCount?: number;
 }
 
@@ -53,7 +44,6 @@ interface HealthStats {
   withPassword: number;
   weak: LoginIssue[];
   score: number;
-  /** 5 桶：0-20 / 20-40 / 40-60 / 60-80 / 80-100 */
   histogram: number[];
 }
 
@@ -114,9 +104,9 @@ function gradeLabel(g: "A" | "B" | "C" | "D"): string {
         : "存在风险";
 }
 
-function colorForScore(c: typeof Colors.dark, score: number): string {
-  if (score >= 85) return c.text;
-  if (score >= 70) return c.ok;
+function colorForScore(c: ColorPalette, score: number): string {
+  if (score >= 85) return c.ok;
+  if (score >= 70) return c.info;
   if (score >= 50) return c.warn;
   return c.danger;
 }
@@ -126,43 +116,31 @@ function colorForScore(c: typeof Colors.dark, score: number): string {
 function StatTile({
   label,
   count,
-  severity,
   iconName,
   c,
+  tone,
 }: {
   label: string;
   count: number;
-  severity: "high" | "med" | "low";
   iconName: Parameters<typeof IconSymbol>[0]["name"];
-  c: typeof Colors.dark;
+  c: ColorPalette;
+  tone: "danger" | "warn" | "neutral";
 }) {
-  let valueColor = c.text3;
-  if (count > 0) {
-    valueColor =
-      severity === "high" ? c.danger : severity === "med" ? c.warn : c.text;
-  }
+  const accent =
+    count === 0
+      ? c.text2
+      : tone === "danger"
+        ? c.danger
+        : tone === "warn"
+          ? c.warn
+          : c.text;
   return (
-    <View
-      style={[
-        styles.statTile,
-        { borderColor: c.line, backgroundColor: c.bgElev },
-      ]}
-    >
-      <View
-        style={[
-          styles.statIconBox,
-          { borderColor: c.line, backgroundColor: c.bgElev2 },
-        ]}
-      >
-        <IconSymbol name={iconName} size={16} color={c.text2} />
+    <View style={[styles.statTile, { backgroundColor: c.bgElev }]}>
+      <View style={[styles.statIconBox, { backgroundColor: accent + "1f" }]}>
+        <IconSymbol name={iconName} size={16} color={accent} />
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
-        <Text
-          style={[
-            styles.statValue,
-            { color: valueColor, fontFamily: MONO },
-          ]}
-        >
+        <Text style={[styles.statValue, { color: accent, fontFamily: MONO }]}>
           {count}
         </Text>
         <Text style={[styles.statLabel, { color: c.text3 }]}>{label}</Text>
@@ -171,33 +149,31 @@ function StatTile({
   );
 }
 
-function SectionCardHeader({
+function SectionCard({
   title,
-  trailing,
-  c,
   iconName,
+  trailing,
+  children,
+  c,
 }: {
   title: string;
-  trailing?: React.ReactNode;
-  c: typeof Colors.dark;
   iconName?: Parameters<typeof IconSymbol>[0]["name"];
+  trailing?: React.ReactNode;
+  children?: React.ReactNode;
+  c: ColorPalette;
 }) {
   return (
-    <View
-      style={[
-        styles.sectionCardHeader,
-        { borderBottomColor: c.lineSoft },
-      ]}
-    >
-      <View style={styles.sectionCardHeaderLeft}>
-        {iconName ? (
-          <IconSymbol name={iconName} size={13} color={c.text3} />
-        ) : null}
-        <Text style={[styles.sectionCardHeaderTitle, { color: c.text }]}>
-          {title}
-        </Text>
+    <View style={[styles.sectionCard, { backgroundColor: c.bgElev }]}>
+      <View style={styles.sectionHeader}>
+        <View style={styles.sectionHeaderLeft}>
+          {iconName ? (
+            <IconSymbol name={iconName} size={14} color={c.text3} />
+          ) : null}
+          <Text style={[styles.sectionTitle, { color: c.text }]}>{title}</Text>
+        </View>
+        {trailing}
       </View>
-      {trailing}
+      <View style={styles.sectionBody}>{children}</View>
     </View>
   );
 }
@@ -206,28 +182,31 @@ function IssueRow({
   issue,
   onPress,
   c,
+  isLast,
 }: {
   issue: LoginIssue;
   onPress: () => void;
-  c: typeof Colors.dark;
+  c: ColorPalette;
+  isLast: boolean;
 }) {
-  const glyph = (Array.from(issue.item.name)[0] ?? "·").toUpperCase();
-  const sevLabel = issue.severity === "breach" ? "已泄露" : "弱";
-  // breach 与 weak 都是高危红
-  const sevColor = c.danger;
+  const glyph = (Array.from(issue.item.name)[0] ?? ".").toUpperCase();
   return (
-    <TouchableOpacity
-      activeOpacity={0.7}
+    <PressableScale
       onPress={onPress}
+      scale={0.99}
+      haptic="selection"
+      pressedBg={c.bgHover}
       style={styles.issueRow}
     >
       <View
         style={[
           styles.issueGlyph,
-          { borderColor: c.line, backgroundColor: c.bgElev2 },
+          { backgroundColor: c.danger + "1f" },
         ]}
       >
-        <Text style={[styles.issueGlyphText, { color: c.text, fontFamily: MONO }]}>
+        <Text
+          style={[styles.issueGlyphText, { color: c.danger, fontFamily: MONO }]}
+        >
           {glyph}
         </Text>
       </View>
@@ -241,25 +220,23 @@ function IssueRow({
         >
           {issue.severity === "breach"
             ? `已暴露 ${issue.breachCount ?? 0} 次`
-            : issue.password
-              ? `score ${issue.strength}`
-              : "—"}
+            : `强度 ${issue.strength}`}
         </Text>
       </View>
-      <View
-        style={[
-          styles.issueBadge,
-          { borderColor: sevColor },
-        ]}
-      >
-        <Text style={[styles.issueBadgeText, { color: sevColor, fontFamily: MONO }]}>
-          {sevLabel}
-        </Text>
-      </View>
-      <Text style={[styles.issueArrow, { color: c.text4, fontFamily: MONO }]}>
-        →
-      </Text>
-    </TouchableOpacity>
+      <Badge
+        label={issue.severity === "breach" ? "已泄露" : "弱"}
+        tone="danger"
+      />
+      <IconSymbol name="chevron.right" size={14} color={c.text4} />
+      {!isLast && (
+        <View
+          style={[
+            styles.rowHairline,
+            { backgroundColor: c.lineSoft, left: Spacing.lg + 28 + Spacing.md },
+          ]}
+        />
+      )}
+    </PressableScale>
   );
 }
 
@@ -268,20 +245,20 @@ function StrengthHistogram({
   c,
 }: {
   bins: number[];
-  c: typeof Colors.dark;
+  c: ColorPalette;
 }) {
   const max = Math.max(...bins, 1);
   const labels = ["0-20", "20-40", "40-60", "60-80", "80-100"];
-  const colors = [c.danger, c.danger, c.warn, c.text2, c.text];
+  const colors = [c.danger, c.danger, c.warn, c.info, c.ok];
   const BAR_AREA_H = 96;
 
   return (
-    <View style={{ gap: 12 }}>
+    <View style={{ gap: Spacing.md }}>
       <View
         style={{
           flexDirection: "row",
           alignItems: "flex-end",
-          gap: 8,
+          gap: Spacing.sm,
           height: BAR_AREA_H,
         }}
       >
@@ -295,7 +272,6 @@ function StrengthHistogram({
                 height: BAR_AREA_H,
                 justifyContent: "flex-end",
                 alignItems: "center",
-                position: "relative",
               }}
             >
               <Text
@@ -313,18 +289,17 @@ function StrengthHistogram({
                 style={{
                   width: "100%",
                   height: barH,
-                  borderTopLeftRadius: 3,
-                  borderTopRightRadius: 3,
+                  borderTopLeftRadius: Radius.sm,
+                  borderTopRightRadius: Radius.sm,
                   backgroundColor: colors[i],
-                  opacity: b === 0 ? 0.25 : 1,
+                  opacity: b === 0 ? 0.2 : 1,
                 }}
               />
             </View>
           );
         })}
       </View>
-      <View style={{ height: 1, backgroundColor: c.line }} />
-      <View style={{ flexDirection: "row", gap: 8 }}>
+      <View style={{ flexDirection: "row", gap: Spacing.sm }}>
         {labels.map((lbl) => (
           <View key={lbl} style={{ flex: 1, alignItems: "center" }}>
             <Text
@@ -347,8 +322,7 @@ function StrengthHistogram({
 /* ── 主屏 ───────────────────────────────────────────────────── */
 
 export default function SecurityScreen() {
-  const scheme = useColorScheme() ?? "dark";
-  const c = Colors[scheme];
+  const { colors: c } = useTheme();
   const {
     allItems,
     breachResults,
@@ -364,14 +338,11 @@ export default function SecurityScreen() {
     [breachResults],
   );
 
-  // 单条扫描失败（断网 / HIBP 拒绝）的数量。完全失败时绝对不能展示"无泄露"
-  // 绿盾，否则用户会误以为安全。
   const breachErrorCount = useMemo(
     () => (breachResults ?? []).filter((r) => r.error).length,
     [breachResults],
   );
 
-  // breach 结果转 LoginIssue（合并到行动建议）
   const breachIssues: LoginIssue[] = useMemo(() => {
     return breachedItems
       .map<LoginIssue | null>((r) => {
@@ -408,7 +379,6 @@ export default function SecurityScreen() {
     return ranked.slice(0, 12);
   }, [breachIssues, stats.weak]);
 
-  // adjustedScore = 平均强度 - min(30, breached*5)
   const adjustedScore = useMemo(() => {
     if (breachedItems.length === 0) return stats.score;
     const penalty = Math.min(30, breachedItems.length * 5);
@@ -424,8 +394,6 @@ export default function SecurityScreen() {
   };
 
   const formatTime = (ts: number) => {
-    // 手写 HH:MM 而不依赖 toLocaleTimeString —— Hermes 默认 build 不带完整 Intl，
-    // 不同设备 / locale 下行为不一致；自己格式化更可控
     const d = new Date(ts);
     const hh = String(d.getHours()).padStart(2, "0");
     const mm = String(d.getMinutes()).padStart(2, "0");
@@ -433,10 +401,7 @@ export default function SecurityScreen() {
   };
 
   return (
-    <SafeAreaView
-      style={[styles.safe, { backgroundColor: c.bg }]}
-      edges={["top", "bottom"]}
-    >
+    <SafeAreaView style={[styles.safe, { backgroundColor: c.bg }]} edges={["top"]}>
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={styles.scrollContent}
@@ -444,49 +409,34 @@ export default function SecurityScreen() {
       >
         {/* Header */}
         <View style={styles.header}>
-          <View style={styles.headerKicker}>
-            <IconSymbol name="checkmark.shield.fill" size={12} color={c.text4} />
-            <Text style={[styles.headerKickerText, { color: c.text4, fontFamily: MONO }]}>
-              安全
-            </Text>
-          </View>
           <Text style={[styles.pageTitle, { color: c.text }]}>安全中心</Text>
-          <Text style={[styles.pageLede, { color: c.text2 }]}>
-            保险库健康度一览。
-            <Text style={{ color: c.text }}>轮换弱密码、清理泄露项。</Text>
+          <Text style={[styles.pageLede, { color: c.text3 }]}>
+            保险库健康度一览 · 轮换弱密码、清理泄露项
           </Text>
         </View>
 
         {!hasLogins ? (
-          /* 空态：完全没有 login 条目 */
-          <View
-            style={[
-              styles.emptyState,
-              { borderColor: c.line, backgroundColor: c.bgElev },
-            ]}
-          >
-            <IconSymbol name="checkmark.shield.fill" size={32} color={c.text3} />
-            <Text style={[styles.emptyStateText, { color: c.text2 }]}>
-              添加一条登录开始追踪保险库健康度。
+          <View style={[styles.emptyState, { backgroundColor: c.bgElev }]}>
+            <View
+              style={[styles.emptyIcon, { backgroundColor: c.ok + "1f" }]}
+            >
+              <IconSymbol name="checkmark.shield.fill" size={28} color={c.ok} />
+            </View>
+            <Text style={[styles.emptyTitle, { color: c.text }]}>
+              暂无登录条目
+            </Text>
+            <Text style={[styles.emptyDesc, { color: c.text3 }]}>
+              添加一条登录开始追踪保险库健康度
             </Text>
           </View>
         ) : (
           <>
-            {/* ===================== Hero：综合分 ===================== */}
-            <View
-              style={[
-                styles.heroCard,
-                { borderColor: c.line, backgroundColor: c.bgElev },
-              ]}
-            >
-              <View style={styles.heroTopRow}>
-                {/* 大数字分 */}
+            {/* Hero */}
+            <View style={[styles.heroCard, { backgroundColor: c.bgElev }]}>
+              <View style={styles.heroTop}>
                 <View>
                   <Text
-                    style={[
-                      styles.heroKicker,
-                      { color: c.text4, fontFamily: MONO },
-                    ]}
+                    style={[styles.heroKicker, { color: c.text3 }]}
                   >
                     综合评分
                   </Text>
@@ -510,12 +460,11 @@ export default function SecurityScreen() {
                   </View>
                 </View>
 
-                {/* 等级圈 */}
-                <View style={{ alignItems: "center", gap: 4 }}>
+                <View style={{ alignItems: "center", gap: 6 }}>
                   <View
                     style={[
                       styles.gradeRing,
-                      { borderColor: scoreColor },
+                      { backgroundColor: scoreColor + "1f" },
                     ]}
                   >
                     <Text
@@ -527,37 +476,35 @@ export default function SecurityScreen() {
                       {grade}
                     </Text>
                   </View>
-                  <Text
-                    style={[
-                      styles.gradeLabel,
-                      { color: c.text3, fontFamily: MONO },
-                    ]}
-                  >
+                  <Text style={[styles.gradeLabel, { color: c.text3 }]}>
                     {gradeLabel(grade)}
                   </Text>
                 </View>
               </View>
 
-              {/* 关键统计行 */}
-              <View style={styles.heroStatsRow}>
-                <View>
-                  <Text style={[styles.heroStatKicker, { color: c.text4, fontFamily: MONO }]}>
-                    登录条目
+              <View
+                style={[styles.heroStatsRow, { borderTopColor: c.lineSoft }]}
+              >
+                <View style={styles.heroStatCol}>
+                  <Text style={[styles.heroStatLabel, { color: c.text3 }]}>
+                    登录
                   </Text>
-                  <Text style={[styles.heroStatValue, { color: c.text, fontFamily: MONO }]}>
+                  <Text
+                    style={[styles.heroStatValue, { color: c.text, fontFamily: MONO }]}
+                  >
                     {stats.totalLogins}
                   </Text>
                 </View>
-                <View>
-                  <Text style={[styles.heroStatKicker, { color: c.text4, fontFamily: MONO }]}>
+                <View style={[styles.heroStatDiv, { backgroundColor: c.lineSoft }]} />
+                <View style={styles.heroStatCol}>
+                  <Text style={[styles.heroStatLabel, { color: c.text3 }]}>
                     已泄露
                   </Text>
                   <Text
                     style={[
                       styles.heroStatValue,
                       {
-                        color:
-                          breachedItems.length > 0 ? c.danger : c.text,
+                        color: breachedItems.length > 0 ? c.danger : c.text,
                         fontFamily: MONO,
                       },
                     ]}
@@ -565,333 +512,273 @@ export default function SecurityScreen() {
                     {breachResults === null ? "—" : breachedItems.length}
                   </Text>
                 </View>
-                <View>
-                  <Text style={[styles.heroStatKicker, { color: c.text4, fontFamily: MONO }]}>
-                    立即修复
+                <View style={[styles.heroStatDiv, { backgroundColor: c.lineSoft }]} />
+                <View style={styles.heroStatCol}>
+                  <Text style={[styles.heroStatLabel, { color: c.text3 }]}>
+                    待修复
                   </Text>
-                  <Text style={[styles.heroStatValue, { color: c.text, fontFamily: MONO }]}>
+                  <Text
+                    style={[styles.heroStatValue, { color: c.text, fontFamily: MONO }]}
+                  >
                     {actionItems.length}
                   </Text>
                 </View>
               </View>
-
-              <Text style={[styles.heroDesc, { color: c.text3 }]}>
-                基于密码强度与 HIBP 泄露记录计算。
-              </Text>
             </View>
 
-            {/* ===================== 二格 Stat Tiles ===================== */}
+            {/* Stat tiles */}
             <View style={styles.statRow}>
               <StatTile
                 label="已泄露"
                 count={breachedItems.length}
-                severity="high"
                 iconName="shield.slash.fill"
+                tone="danger"
                 c={c}
               />
               <StatTile
                 label="弱密码"
                 count={stats.weak.length}
-                severity="high"
                 iconName="exclamationmark.triangle.fill"
+                tone="warn"
                 c={c}
               />
             </View>
 
-            {/* ===================== 泄露监控 ===================== */}
-            <View
-              style={[
-                styles.sectionCard,
-                { borderColor: c.line, backgroundColor: c.bgElev },
-              ]}
+            {/* 泄露监控 */}
+            <SectionCard
+              title="泄露监控"
+              iconName="magnifyingglass.circle"
+              c={c}
+              trailing={
+                <View style={styles.scanHeaderRight}>
+                  {breachLastScanAt != null ? (
+                    <Text
+                      style={[styles.scanLastAt, { color: c.text3, fontFamily: MONO }]}
+                    >
+                      {formatTime(breachLastScanAt)}
+                    </Text>
+                  ) : null}
+                  <Button
+                    label={
+                      breachScanning
+                        ? "扫描中"
+                        : breachResults !== null
+                          ? "重新扫描"
+                          : "扫描"
+                    }
+                    icon={breachScanning ? undefined : "magnifyingglass"}
+                    variant="secondary"
+                    size="sm"
+                    onPress={() => void runBreachScan(true)}
+                    disabled={breachScanning}
+                  />
+                </View>
+              }
             >
-              <SectionCardHeader
-                title="泄露监控"
-                iconName="magnifyingglass.circle"
-                c={c}
-                trailing={
-                  <View style={styles.scanHeaderRight}>
-                    {breachLastScanAt != null ? (
-                      <Text
-                        style={[
-                          styles.scanLastAt,
-                          { color: c.text4, fontFamily: MONO },
-                        ]}
-                      >
-                        上次 {formatTime(breachLastScanAt)}
-                      </Text>
-                    ) : null}
-                    <TouchableOpacity
-                      disabled={breachScanning}
-                      onPress={() => void runBreachScan(true)}
-                      activeOpacity={0.7}
-                      style={[
-                        styles.scanButton,
-                        {
-                          borderColor: c.line,
-                          backgroundColor: c.bgElev2,
-                          opacity: breachScanning ? 0.6 : 1,
-                        },
-                      ]}
-                    >
-                      {breachScanning ? (
-                        <ActivityIndicator size="small" color={c.text2} />
-                      ) : (
-                        <IconSymbol
-                          name="magnifyingglass.circle"
-                          size={14}
-                          color={c.text2}
-                        />
-                      )}
-                      <Text
-                        style={[
-                          styles.scanButtonText,
-                          { color: c.text2 },
-                        ]}
-                      >
-                        {breachScanning
-                          ? "正在扫描…"
-                          : breachResults !== null
-                            ? "重新扫描"
-                            : "扫描密码"}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                }
-              />
-              <View style={styles.sectionCardBody}>
-                {breachResults === null && !breachScanning ? (
-                  /* 从未扫描过 */
-                  <View style={styles.scanEmpty}>
-                    <IconSymbol
-                      name="magnifyingglass.circle"
-                      size={28}
-                      color={c.text3}
-                    />
-                    <Text
-                      style={[styles.scanEmptyText, { color: c.text3 }]}
-                    >
-                      仅发送密码 SHA-1 哈希的前 5 位 — HIBP 无法得知你的真实密码。
-                    </Text>
-                  </View>
-                ) : breachScanning ? (
-                  <View style={styles.scanRunning}>
-                    <ActivityIndicator size="small" color={c.text3} />
-                    <Text
-                      style={[
-                        styles.scanRunningText,
-                        { color: c.text3, fontFamily: MONO },
-                      ]}
-                    >
-                      正在扫描…
-                    </Text>
-                  </View>
-                ) : breachedItems.length === 0 && breachErrorCount === 0 ? (
-                  <View style={styles.scanClear}>
+              {breachResults === null && !breachScanning ? (
+                <View style={styles.scanEmpty}>
+                  <IconSymbol
+                    name="lock.shield.fill"
+                    size={28}
+                    color={c.text3}
+                  />
+                  <Text style={[styles.scanEmptyText, { color: c.text3 }]}>
+                    仅发送密码 SHA-1 哈希的前 5 位 — HIBP 无法得知你的真实密码
+                  </Text>
+                </View>
+              ) : breachScanning ? (
+                <View style={styles.scanRunning}>
+                  <ActivityIndicator size="small" color={c.text3} />
+                  <Text
+                    style={[styles.scanRunningText, { color: c.text3, fontFamily: MONO }]}
+                  >
+                    正在扫描…
+                  </Text>
+                </View>
+              ) : breachedItems.length === 0 && breachErrorCount === 0 ? (
+                <View style={styles.scanClear}>
+                  <View
+                    style={[styles.scanClearIcon, { backgroundColor: c.ok + "1f" }]}
+                  >
                     <IconSymbol
                       name="checkmark.shield.fill"
                       size={24}
                       color={c.ok}
                     />
-                    <Text style={[styles.scanClearText, { color: c.text2 }]}>
-                      未发现任何密码出现在已知泄露数据中
-                    </Text>
                   </View>
-                ) : breachedItems.length === 0 && breachErrorCount > 0 ? (
-                  /* 全部失败：没有 pwned，但 errorCount>0 —— 绝不能展示绿盾。
-                   * 多为断网或 HIBP 5xx；提示用户重试，避免误判为"安全"。 */
-                  <View style={styles.scanClear}>
+                  <Text style={[styles.scanClearText, { color: c.text }]}>
+                    未发现泄露
+                  </Text>
+                  <Text style={[styles.scanClearSub, { color: c.text3 }]}>
+                    所有密码均未出现在已知泄露数据中
+                  </Text>
+                </View>
+              ) : breachedItems.length === 0 && breachErrorCount > 0 ? (
+                <View style={styles.scanClear}>
+                  <View
+                    style={[styles.scanClearIcon, { backgroundColor: c.warn + "1f" }]}
+                  >
                     <IconSymbol
                       name="exclamationmark.triangle.fill"
                       size={24}
                       color={c.warn}
                     />
-                    <Text style={[styles.scanClearText, { color: c.text2 }]}>
-                      {breachErrorCount} 条扫描失败 · 请检查网络后重试
-                    </Text>
                   </View>
-                ) : (
-                  <View style={{ gap: 12 }}>
-                    <View style={styles.scanFoundHeader}>
-                      <IconSymbol
-                        name="shield.slash.fill"
-                        size={14}
-                        color={c.danger}
-                      />
-                      <Text style={[styles.scanFoundText, { color: c.danger }]}>
-                        发现 {breachedItems.length} 个密码出现在已知泄露数据中
-                      </Text>
-                    </View>
-                    {breachErrorCount > 0 ? (
-                      <Text
-                        style={[
-                          styles.scanPartialErrorText,
-                          { color: c.warn },
-                        ]}
-                      >
-                        另有 {breachErrorCount} 条扫描失败，建议重试
-                      </Text>
-                    ) : null}
-                    <View
-                      style={[
-                        styles.innerList,
-                        { borderColor: c.line, backgroundColor: c.bgElev },
-                      ]}
-                    >
-                      {breachedItems.map((r) => {
-                        const item = allItems.find((i) => i.id === r.itemId);
-                        const name = item?.name ?? r.itemName;
-                        const glyph = (Array.from(name)[0] ?? "·").toUpperCase();
-                        return (
-                          <TouchableOpacity
-                            key={r.itemId}
-                            activeOpacity={0.7}
-                            onPress={() => onOpenItem(r.itemId)}
-                            style={styles.issueRow}
-                          >
-                            <View
-                              style={[
-                                styles.issueGlyph,
-                                { borderColor: c.line, backgroundColor: c.bgElev2 },
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  styles.issueGlyphText,
-                                  { color: c.text, fontFamily: MONO },
-                                ]}
-                              >
-                                {glyph}
-                              </Text>
-                            </View>
-                            <View style={{ flex: 1, minWidth: 0 }}>
-                              <Text
-                                style={[styles.issueName, { color: c.text }]}
-                                numberOfLines={1}
-                              >
-                                {name}
-                              </Text>
-                              <Text
-                                style={[
-                                  styles.issueSub,
-                                  { color: c.text3, fontFamily: MONO },
-                                ]}
-                                numberOfLines={1}
-                              >
-                                已暴露 {r.count} 次
-                              </Text>
-                            </View>
-                            <View
-                              style={[styles.issueBadge, { borderColor: c.danger }]}
-                            >
-                              <Text
-                                style={[
-                                  styles.issueBadgeText,
-                                  { color: c.danger, fontFamily: MONO },
-                                ]}
-                              >
-                                已泄露
-                              </Text>
-                            </View>
-                            <Text
-                              style={[
-                                styles.issueArrow,
-                                { color: c.text4, fontFamily: MONO },
-                              ]}
-                            >
-                              →
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
-                  </View>
-                )}
-                <Text
-                  style={[
-                    styles.poweredBy,
-                    { color: c.text4, fontFamily: MONO },
-                  ]}
-                >
-                  由 Have I Been Pwned 提供支持
-                </Text>
-              </View>
-            </View>
-
-            {/* ===================== 行动建议 ===================== */}
-            <View
-              style={[
-                styles.sectionCard,
-                { borderColor: c.line, backgroundColor: c.bgElev },
-              ]}
-            >
-              <SectionCardHeader
-                title="行动建议"
-                c={c}
-                trailing={
-                  <Text
-                    style={[
-                      styles.sectionCardCount,
-                      { color: c.text3, fontFamily: MONO },
-                    ]}
-                  >
-                    {actionItems.length}
+                  <Text style={[styles.scanClearText, { color: c.text }]}>
+                    {breachErrorCount} 条扫描失败
                   </Text>
-                }
-              />
-              {actionItems.length === 0 ? (
-                <View style={styles.actionEmpty}>
-                  <IconSymbol
-                    name="checkmark.shield.fill"
-                    size={22}
-                    color={c.ok}
-                  />
-                  <Text
-                    style={[styles.actionEmptyText, { color: c.text3 }]}
-                  >
-                    全部清理 · 暂无紧急问题
+                  <Text style={[styles.scanClearSub, { color: c.text3 }]}>
+                    请检查网络后重试
                   </Text>
                 </View>
               ) : (
-                <View style={{ paddingHorizontal: 6, paddingVertical: 4 }}>
-                  {actionItems.map((issue) => (
+                <View style={{ gap: Spacing.md }}>
+                  <View style={styles.scanFoundHeader}>
+                    <IconSymbol
+                      name="shield.slash.fill"
+                      size={16}
+                      color={c.danger}
+                    />
+                    <Text style={[styles.scanFoundText, { color: c.danger }]}>
+                      发现 {breachedItems.length} 个密码已泄露
+                    </Text>
+                  </View>
+                  {breachErrorCount > 0 ? (
+                    <Text style={[styles.scanPartialErrorText, { color: c.warn }]}>
+                      另有 {breachErrorCount} 条扫描失败，建议重试
+                    </Text>
+                  ) : null}
+                  <View style={[styles.innerList, { backgroundColor: c.bgElev2 }]}>
+                    {breachedItems.map((r, idx) => {
+                      const item = allItems.find((i) => i.id === r.itemId);
+                      const name = item?.name ?? r.itemName;
+                      const glyph = (Array.from(name)[0] ?? ".").toUpperCase();
+                      return (
+                        <PressableScale
+                          key={r.itemId}
+                          onPress={() => onOpenItem(r.itemId)}
+                          scale={0.99}
+                          haptic="selection"
+                          pressedBg={c.bgHover}
+                          style={styles.issueRow}
+                        >
+                          <View
+                            style={[
+                              styles.issueGlyph,
+                              { backgroundColor: c.danger + "1f" },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.issueGlyphText,
+                                { color: c.danger, fontFamily: MONO },
+                              ]}
+                            >
+                              {glyph}
+                            </Text>
+                          </View>
+                          <View style={{ flex: 1, minWidth: 0 }}>
+                            <Text
+                              style={[styles.issueName, { color: c.text }]}
+                              numberOfLines={1}
+                            >
+                              {name}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.issueSub,
+                                { color: c.text3, fontFamily: MONO },
+                              ]}
+                              numberOfLines={1}
+                            >
+                              已暴露 {r.count} 次
+                            </Text>
+                          </View>
+                          <Badge label="已泄露" tone="danger" />
+                          <IconSymbol name="chevron.right" size={14} color={c.text4} />
+                          {idx !== breachedItems.length - 1 && (
+                            <View
+                              style={[
+                                styles.rowHairline,
+                                {
+                                  backgroundColor: c.lineSoft,
+                                  left: Spacing.lg + 28 + Spacing.md,
+                                },
+                              ]}
+                            />
+                          )}
+                        </PressableScale>
+                      );
+                    })}
+                  </View>
+                </View>
+              )}
+              <Text style={[styles.poweredBy, { color: c.text4, fontFamily: MONO }]}>
+                由 Have I Been Pwned 提供支持
+              </Text>
+            </SectionCard>
+
+            {/* 行动建议 */}
+            <SectionCard
+              title="行动建议"
+              c={c}
+              iconName="bolt.fill"
+              trailing={
+                actionItems.length > 0 ? (
+                  <Badge
+                    label={String(actionItems.length)}
+                    tone={actionItems.length > 5 ? "danger" : "warn"}
+                  />
+                ) : null
+              }
+            >
+              {actionItems.length === 0 ? (
+                <View style={styles.actionEmpty}>
+                  <View
+                    style={[styles.scanClearIcon, { backgroundColor: c.ok + "1f" }]}
+                  >
+                    <IconSymbol
+                      name="checkmark.shield.fill"
+                      size={24}
+                      color={c.ok}
+                    />
+                  </View>
+                  <Text style={[styles.actionEmptyText, { color: c.text }]}>
+                    全部清理
+                  </Text>
+                  <Text style={[styles.scanClearSub, { color: c.text3 }]}>
+                    暂无紧急问题
+                  </Text>
+                </View>
+              ) : (
+                <View style={[styles.innerList, { backgroundColor: c.bgElev2 }]}>
+                  {actionItems.map((issue, idx) => (
                     <IssueRow
                       key={`${issue.item.id}-${issue.severity}`}
                       issue={issue}
                       onPress={() => onOpenItem(issue.item.id)}
                       c={c}
+                      isLast={idx === actionItems.length - 1}
                     />
                   ))}
                 </View>
               )}
-            </View>
+            </SectionCard>
 
-            {/* ===================== 强度分布 ===================== */}
-            <View
-              style={[
-                styles.sectionCard,
-                { borderColor: c.line, backgroundColor: c.bgElev },
-              ]}
-            >
-              <SectionCardHeader
-                title="分布"
-                iconName="chart.bar.fill"
-                c={c}
-              />
-              <View style={styles.sectionCardBody}>
-                {stats.withPassword === 0 ? (
-                  <View style={styles.histEmpty}>
-                    <Text style={{ color: c.text3, fontSize: 12 }}>
-                      暂无登录条目可统计
-                    </Text>
-                  </View>
-                ) : (
-                  <StrengthHistogram bins={stats.histogram} c={c} />
-                )}
-              </View>
-            </View>
+            {/* 分布 */}
+            <SectionCard title="强度分布" iconName="chart.bar.fill" c={c}>
+              {stats.withPassword === 0 ? (
+                <View style={styles.histEmpty}>
+                  <Text style={{ color: c.text3, ...Type.footnote }}>
+                    暂无登录条目可统计
+                  </Text>
+                </View>
+              ) : (
+                <StrengthHistogram bins={stats.histogram} c={c} />
+              )}
+            </SectionCard>
 
-            <View style={{ height: 24 }} />
+            <View style={{ height: Spacing.xl }} />
           </>
         )}
       </ScrollView>
@@ -903,162 +790,147 @@ export default function SecurityScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
-  scrollContent: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 20 },
+  scrollContent: {
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.xl,
+  },
 
-  /* Header */
-  header: { paddingTop: 16, paddingBottom: 18, gap: 6 },
-  headerKicker: { flexDirection: "row", alignItems: "center", gap: 6 },
-  headerKickerText: {
-    fontSize: 11,
-    letterSpacing: 1.4,
-    textTransform: "uppercase",
+  header: {
+    paddingBottom: Spacing.lg,
+    gap: Spacing.xs,
   },
-  pageTitle: {
-    fontSize: 22,
-    fontWeight: "600",
-    letterSpacing: -0.3,
-  },
-  pageLede: { fontSize: 13, lineHeight: 18 },
+  pageTitle: { ...Type.title },
+  pageLede: { ...Type.footnote },
 
   /* Empty */
   emptyState: {
-    borderWidth: 1,
-    borderStyle: "dashed",
-    borderRadius: 12,
-    paddingHorizontal: 24,
-    paddingVertical: 48,
+    borderRadius: Radius.xl,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.xxxl,
     alignItems: "center",
-    gap: 12,
+    gap: Spacing.sm,
   },
-  emptyStateText: { fontSize: 13, textAlign: "center" },
+  emptyIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: Radius.xl,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: Spacing.sm,
+  },
+  emptyTitle: { ...Type.title2 },
+  emptyDesc: { ...Type.footnote },
 
   /* Hero */
   heroCard: {
-    borderWidth: 1,
-    borderRadius: 14,
-    padding: 20,
-    gap: 16,
-    marginBottom: 14,
+    borderRadius: Radius.xl,
+    padding: Spacing.xl,
+    gap: Spacing.lg,
+    marginBottom: Spacing.md,
   },
-  heroTopRow: {
+  heroTop: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
   heroKicker: {
-    fontSize: 10.5,
-    letterSpacing: 1.2,
+    ...Type.footnote,
     textTransform: "uppercase",
+    letterSpacing: 1.2,
   },
   heroScoreLine: {
     flexDirection: "row",
     alignItems: "flex-end",
-    gap: 4,
+    gap: Spacing.xs,
     marginTop: 4,
   },
-  heroScore: { fontSize: 52, fontWeight: "700", lineHeight: 56 },
-  heroScoreDenom: { fontSize: 14, paddingBottom: 6 },
+  heroScore: { fontSize: 56, fontWeight: "700", lineHeight: 60 },
+  heroScoreDenom: { fontSize: 15, paddingBottom: 8 },
   gradeRing: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    borderWidth: 2,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: "center",
     justifyContent: "center",
   },
-  gradeText: { fontSize: 18, fontWeight: "700" },
+  gradeText: { fontSize: 22, fontWeight: "700" },
   gradeLabel: {
-    fontSize: 10,
-    letterSpacing: 0.8,
+    ...Type.caption,
     textTransform: "uppercase",
+    letterSpacing: 0.8,
   },
   heroStatsRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    paddingTop: 2,
+    paddingTop: Spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
-  heroStatKicker: {
-    fontSize: 10,
-    letterSpacing: 1.2,
+  heroStatCol: { flex: 1, alignItems: "center", gap: 2 },
+  heroStatDiv: { width: StyleSheet.hairlineWidth },
+  heroStatLabel: {
+    ...Type.caption,
     textTransform: "uppercase",
-    marginBottom: 4,
+    letterSpacing: 1,
   },
-  heroStatValue: { fontSize: 20, fontWeight: "600" },
-  heroDesc: { fontSize: 12, lineHeight: 17 },
+  heroStatValue: { fontSize: 22, fontWeight: "600" },
 
   /* Stat Tiles */
-  statRow: { flexDirection: "row", gap: 10, marginBottom: 14 },
+  statRow: { flexDirection: "row", gap: Spacing.sm, marginBottom: Spacing.md },
   statTile: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 14,
+    gap: Spacing.md,
+    borderRadius: Radius.xl,
+    padding: Spacing.md,
   },
   statIconBox: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    borderWidth: 1,
+    width: 38,
+    height: 38,
+    borderRadius: Radius.lg,
     alignItems: "center",
     justifyContent: "center",
   },
   statValue: { fontSize: 22, fontWeight: "600", lineHeight: 26 },
-  statLabel: { fontSize: 11, marginTop: 1 },
+  statLabel: { ...Type.footnote, marginTop: 1 },
 
   /* Section Card */
   sectionCard: {
-    borderWidth: 1,
-    borderRadius: 14,
-    marginBottom: 14,
+    borderRadius: Radius.xl,
+    marginBottom: Spacing.md,
     overflow: "hidden",
   },
-  sectionCardHeader: {
+  sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing.sm,
   },
-  sectionCardHeaderLeft: {
+  sectionHeaderLeft: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: Spacing.sm,
     flexShrink: 1,
   },
-  sectionCardHeaderTitle: { fontSize: 13, fontWeight: "500" },
-  sectionCardCount: {
-    fontSize: 10.5,
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
-  },
-  sectionCardBody: { paddingHorizontal: 16, paddingVertical: 14, gap: 12 },
+  sectionTitle: { ...Type.headline },
+  sectionBody: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md, gap: Spacing.md },
 
   /* Scan controls */
-  scanHeaderRight: { flexDirection: "row", alignItems: "center", gap: 8 },
-  scanLastAt: { fontSize: 10.5 },
-  scanButton: {
+  scanHeaderRight: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderWidth: 1,
-    borderRadius: 8,
+    gap: Spacing.sm,
   },
-  scanButtonText: { fontSize: 11, fontWeight: "500" },
+  scanLastAt: { ...Type.caption },
   scanEmpty: {
-    paddingVertical: 24,
+    paddingVertical: Spacing.xl,
     alignItems: "center",
-    gap: 10,
+    gap: Spacing.sm,
   },
   scanEmptyText: {
-    fontSize: 12,
-    lineHeight: 17,
+    ...Type.footnote,
     textAlign: "center",
     maxWidth: 280,
   },
@@ -1066,78 +938,77 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
-    gap: 10,
-    paddingVertical: 24,
+    gap: Spacing.sm,
+    paddingVertical: Spacing.xl,
   },
-  scanRunningText: { fontSize: 12 },
+  scanRunningText: { ...Type.subhead },
   scanClear: {
-    paddingVertical: 24,
+    paddingVertical: Spacing.lg,
     alignItems: "center",
-    gap: 8,
+    gap: Spacing.xs,
   },
-  scanClearText: { fontSize: 12 },
+  scanClearIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: Radius.xl,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: Spacing.xs,
+  },
+  scanClearText: { ...Type.headline },
+  scanClearSub: { ...Type.footnote },
   scanFoundHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: Spacing.xs,
   },
-  scanFoundText: { fontSize: 12, fontWeight: "500" },
-  scanPartialErrorText: { fontSize: 11, lineHeight: 15 },
+  scanFoundText: { ...Type.subhead, fontWeight: "600" },
+  scanPartialErrorText: { ...Type.footnote },
   poweredBy: {
-    fontSize: 10,
+    ...Type.caption,
     textAlign: "center",
     letterSpacing: 0.8,
-    marginTop: 4,
+    marginTop: Spacing.xs,
   },
 
-  /* Inner list (within section card body) */
+  /* Inner list */
   innerList: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 6,
-    paddingVertical: 4,
+    borderRadius: Radius.lg,
+    overflow: "hidden",
   },
 
   /* Issue row */
   issueRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 10,
+    gap: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 11,
+  },
+  rowHairline: {
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+    height: StyleSheet.hairlineWidth,
   },
   issueGlyph: {
-    width: 28,
-    height: 28,
-    borderRadius: 7,
-    borderWidth: 1,
+    width: 32,
+    height: 32,
+    borderRadius: Radius.md,
     alignItems: "center",
     justifyContent: "center",
   },
-  issueGlyphText: { fontSize: 11, fontWeight: "600" },
-  issueName: { fontSize: 13, fontWeight: "500" },
-  issueSub: { fontSize: 10.5, marginTop: 2 },
-  issueBadge: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  issueBadgeText: {
-    fontSize: 10,
-    letterSpacing: 0.8,
-    textTransform: "uppercase",
-    fontWeight: "700",
-  },
-  issueArrow: { fontSize: 11 },
+  issueGlyphText: { fontSize: 13, fontWeight: "700" },
+  issueName: { ...Type.bodyEmph },
+  issueSub: { ...Type.footnote, marginTop: 2 },
 
-  /* Action / histogram empty */
+  /* Action empty */
   actionEmpty: {
-    paddingVertical: 36,
+    paddingVertical: Spacing.lg,
     alignItems: "center",
-    gap: 8,
+    gap: Spacing.xs,
   },
-  actionEmptyText: { fontSize: 13 },
+  actionEmptyText: { ...Type.headline },
   histEmpty: {
     height: 96,
     alignItems: "center",

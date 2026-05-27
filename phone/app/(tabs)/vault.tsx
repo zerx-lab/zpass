@@ -1,11 +1,16 @@
-import React, { useState, useMemo, useCallback } from "react";
+import React, {
+  useState,
+  useMemo,
+  useCallback,
+  useRef,
+  type ComponentProps,
+} from "react";
 import {
   View,
   Text,
   TextInput,
   FlatList,
   ScrollView,
-  TouchableOpacity,
   StyleSheet,
   Platform,
 } from "react-native";
@@ -13,10 +18,20 @@ import { StatusBar } from "expo-status-bar";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
+import ReanimatedSwipeable, {
+  type SwipeableMethods,
+} from "react-native-gesture-handler/ReanimatedSwipeable";
 
-import { Colors } from "@/constants/theme";
-import { useColorScheme } from "@/hooks/use-color-scheme";
+import { Radius, Spacing, Type, type ColorPalette } from "@/constants/theme";
+import { useTheme } from "@/contexts/theme-context";
 import { IconSymbol } from "@/components/ui/icon-symbol";
+import {
+  Badge,
+  Chip,
+  IconButton,
+  PressableScale,
+} from "@/components/ui/primitives";
+import { dialog } from "@/components/ui/dialog";
 import { SpaceAvatar } from "@/components/space-avatar";
 import { useVault } from "@/contexts/vault-context";
 import type { VaultItem, VaultItemType } from "@/data/vault";
@@ -44,7 +59,7 @@ const FILTER_CHIPS: { key: FilterKey; label: string }[] = [
 
 const MONO = Platform.select({ ios: "Menlo", default: "monospace" });
 
-function strengthColor(s: number, c: (typeof Colors)["dark"]) {
+function strengthColor(s: number, c: ColorPalette) {
   if (s >= 80) return c.ok;
   if (s >= 50) return c.warn;
   return c.danger;
@@ -52,7 +67,12 @@ function strengthColor(s: number, c: (typeof Colors)["dark"]) {
 
 function Favicon({ item }: { item: VaultItem }) {
   return (
-    <View style={[styles.favicon, { backgroundColor: faviconColor(item.name) }]}>
+    <View
+      style={[
+        styles.favicon,
+        { backgroundColor: faviconColor(item.name) },
+      ]}
+    >
       <Text style={styles.faviconText} numberOfLines={1}>
         {faviconInitials(item.name)}
       </Text>
@@ -66,7 +86,7 @@ function VaultRow({
   isLast,
 }: {
   item: VaultItem;
-  c: (typeof Colors)["dark"];
+  c: ColorPalette;
   isLast: boolean;
 }) {
   const onPress = useCallback(() => {
@@ -80,13 +100,12 @@ function VaultRow({
   const breached = isLogin && !!item.breached;
 
   return (
-    <TouchableOpacity
-      activeOpacity={0.6}
+    <PressableScale
       onPress={onPress}
-      style={[
-        styles.row,
-        { backgroundColor: c.bg, borderBottomColor: isLast ? "transparent" : c.lineSoft },
-      ]}
+      scale={0.985}
+      haptic="none"
+      pressedBg={c.bgHover}
+      style={styles.row}
     >
       <Favicon item={item} />
 
@@ -100,23 +119,14 @@ function VaultRow({
             {item.name}
           </Text>
           {item.favorite && (
-            <IconSymbol name="star.fill" size={11} color="#f5c518" />
+            <IconSymbol name="star.fill" size={11} color={c.warn} />
           )}
-          {hasTotp && (
-            <View style={[styles.pill, { borderColor: c.info, backgroundColor: c.info + "18" }]}>
-              <Text style={[styles.pillText, { color: c.info, fontFamily: MONO }]}>
-                2FA
-              </Text>
-            </View>
-          )}
+          {hasTotp && <Badge label="2FA" tone="info" />}
           {breached && (
-            <View style={[styles.pill, { borderColor: c.danger, backgroundColor: c.danger + "18" }]}>
-              <IconSymbol
-                name="exclamationmark.triangle.fill"
-                size={11}
-                color={c.danger}
-              />
-            </View>
+            <Badge
+              icon="exclamationmark.triangle.fill"
+              tone="danger"
+            />
           )}
         </View>
         <Text
@@ -148,13 +158,171 @@ function VaultRow({
           </View>
         )}
       </View>
-    </TouchableOpacity>
+
+      {!isLast && (
+        <View
+          style={[
+            styles.hairline,
+            { backgroundColor: c.lineSoft, left: Spacing.lg + 38 + Spacing.md },
+          ]}
+        />
+      )}
+    </PressableScale>
+  );
+}
+
+/* ── 左滑动作 ──────────────────────────────────────────────────── */
+
+const SWIPE_ACTION_WIDTH = 76;
+
+/**
+ * 全局单例:同一时间只允许一行展开。
+ * 新行展开时关闭上一行,符合 iOS 邮件/微信滑动删除的习惯。
+ */
+const openSwipeableRef: { current: SwipeableMethods | null } = {
+  current: null,
+};
+
+function SwipeAction({
+  icon,
+  label,
+  bg,
+  onPress,
+}: {
+  icon: ComponentProps<typeof IconSymbol>["name"];
+  label: string;
+  bg: string;
+  onPress: () => void;
+}) {
+  return (
+    <PressableScale
+      onPress={onPress}
+      scale={0.94}
+      haptic="light"
+      style={[styles.swipeAction, { backgroundColor: bg }]}
+    >
+      <IconSymbol name={icon} size={20} color="#fff" />
+      <Text style={styles.swipeActionLabel}>{label}</Text>
+    </PressableScale>
+  );
+}
+
+function SwipeableVaultRow({
+  item,
+  c,
+  isLast,
+}: {
+  item: VaultItem;
+  c: ColorPalette;
+  isLast: boolean;
+}) {
+  const { deleteItem, toggleFavorite } = useVault();
+  const swipeRef = useRef<SwipeableMethods>(null);
+
+  const handleSwipeableWillOpen = useCallback(() => {
+    if (
+      openSwipeableRef.current &&
+      openSwipeableRef.current !== swipeRef.current
+    ) {
+      openSwipeableRef.current.close();
+    }
+    openSwipeableRef.current = swipeRef.current;
+  }, []);
+
+  const handleSwipeableClose = useCallback(() => {
+    if (openSwipeableRef.current === swipeRef.current) {
+      openSwipeableRef.current = null;
+    }
+  }, []);
+
+  React.useEffect(() => {
+    return () => {
+      if (openSwipeableRef.current === swipeRef.current) {
+        openSwipeableRef.current = null;
+      }
+    };
+  }, []);
+
+  const handleEdit = useCallback(() => {
+    swipeRef.current?.close();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push(`/item/${item.id}` as any);
+  }, [item.id]);
+
+  const handleFavorite = useCallback(async () => {
+    swipeRef.current?.close();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    await toggleFavorite(item.id);
+  }, [item.id, toggleFavorite]);
+
+  const handleDelete = useCallback(async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const ok = await dialog.confirm(
+      "删除条目",
+      `确定要删除"${item.name}"吗?此操作无法撤销。`,
+      { okLabel: "删除", destructive: true },
+    );
+    if (ok) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      await deleteItem(item.id);
+    } else {
+      swipeRef.current?.close();
+    }
+  }, [item.id, item.name, deleteItem]);
+
+  const renderRightActions = useCallback(
+    () => (
+      <View style={styles.swipeActionsRow}>
+        <SwipeAction
+          icon="square.and.pencil"
+          label="编辑"
+          bg={c.info}
+          onPress={handleEdit}
+        />
+        <SwipeAction
+          icon={item.favorite ? "star" : "star.fill"}
+          label={item.favorite ? "取消" : "收藏"}
+          bg={c.warn}
+          onPress={handleFavorite}
+        />
+        <SwipeAction
+          icon="trash.fill"
+          label="删除"
+          bg={c.danger}
+          onPress={handleDelete}
+        />
+      </View>
+    ),
+    [
+      c.info,
+      c.warn,
+      c.danger,
+      item.favorite,
+      handleEdit,
+      handleFavorite,
+      handleDelete,
+    ],
+  );
+
+  return (
+    <ReanimatedSwipeable
+      ref={swipeRef}
+      friction={1}
+      rightThreshold={SWIPE_ACTION_WIDTH * 3 * 0.7}
+      dragOffsetFromRightEdge={24}
+      overshootRight={false}
+      enableTrackpadTwoFingerGesture
+      renderRightActions={renderRightActions}
+      onSwipeableWillOpen={handleSwipeableWillOpen}
+      onSwipeableClose={handleSwipeableClose}
+    >
+      <VaultRow item={item} c={c} isLast={isLast} />
+    </ReanimatedSwipeable>
   );
 }
 
 export default function VaultScreen() {
-  const scheme = useColorScheme() ?? "dark";
-  const c = Colors[scheme];
+  const { scheme, colors: c } = useTheme();
   const { items, activeSpace } = useVault();
 
   const [search, setSearch] = useState("");
@@ -198,109 +366,116 @@ export default function VaultScreen() {
 
   const renderItem = useCallback(
     ({ item, index }: { item: VaultItem; index: number }) => (
-      <VaultRow item={item} c={c} isLast={index === filtered.length - 1} />
+      <SwipeableVaultRow
+        item={item}
+        c={c}
+        isLast={index === filtered.length - 1}
+      />
     ),
     [c, filtered.length],
   );
 
   return (
-    <SafeAreaView style={[styles.root, { backgroundColor: c.bg }]} edges={["top"]}>
+    <SafeAreaView
+      style={[styles.root, { backgroundColor: c.bg }]}
+      edges={["top"]}
+    >
       <StatusBar style={scheme === "dark" ? "light" : "dark"} />
 
-      <View style={[styles.header, { borderBottomColor: c.lineSoft }]}>
+      {/* 顶部大标题（iOS HIG largeTitle 风格） */}
+      <View style={styles.header}>
         <View style={styles.headerLeft}>
           <SpaceAvatar
             space={activeSpace}
-            size={26}
-            background={c.text}
-            foreground={c.bg}
-            fontSize={13}
-            borderRadius={6}
+            size={30}
+            background={c.bgElev}
+            foreground={c.text}
+            fontSize={14}
+            borderRadius={Radius.md}
           />
-          <Text style={[styles.appName, { color: c.text }]} numberOfLines={1}>
-            {activeSpace?.name ?? "ZPass"}
-          </Text>
-        </View>
-        <View style={[styles.countBadge, { borderColor: c.line }]}>
-          <Text style={[styles.countText, { color: c.text3, fontFamily: MONO }]}>
-            {filtered.length}/{items.length}
-          </Text>
-        </View>
-      </View>
-
-      <View style={{ flexShrink: 0, flexGrow: 0 }}>
-        <View style={[styles.searchRow, { backgroundColor: c.bg }]}>
-          <View style={[styles.searchBox, { backgroundColor: c.bgElev, borderColor: c.line }]}>
-            <IconSymbol name="magnifyingglass" size={16} color={c.text3} />
-            <TextInput
-              style={[styles.searchInput, { color: c.text }]}
-              placeholder="搜索"
-              placeholderTextColor={c.text3}
-              value={search}
-              onChangeText={setSearch}
-              returnKeyType="search"
-              clearButtonMode="while-editing"
-              autoCorrect={false}
-              autoCapitalize="none"
-            />
+          <View style={{ minWidth: 0, flexShrink: 1 }}>
+            <Text style={[styles.appName, { color: c.text }]} numberOfLines={1}>
+              {activeSpace?.name ?? "ZPass"}
+            </Text>
+            <Text style={[styles.headerSub, { color: c.text3 }]}>
+              {filtered.length} / {items.length} 项
+            </Text>
           </View>
         </View>
-
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chips}
-          style={{ backgroundColor: c.bg, flexGrow: 0, flexShrink: 0 }}
-        >
-          {FILTER_CHIPS.map((chip) => {
-            const active = activeFilter === chip.key;
-            const cnt = counts[chip.key] ?? 0;
-            return (
-              <TouchableOpacity
-                key={chip.key}
-                activeOpacity={0.7}
-                onPress={() => {
-                  Haptics.selectionAsync();
-                  setActiveFilter(chip.key);
-                }}
-                style={[
-                  styles.chip,
-                  active
-                    ? { backgroundColor: c.text, borderColor: c.text }
-                    : { backgroundColor: "transparent", borderColor: c.line },
-                ]}
-              >
-                <Text style={[styles.chipLabel, { color: active ? c.bg : c.text2 }]}>
-                  {chip.label}
-                </Text>
-                <Text
-                  style={[
-                    styles.chipCount,
-                    { color: active ? c.bg + "cc" : c.text3, fontFamily: MONO },
-                  ]}
-                >
-                  {cnt}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-
-        <View style={[styles.divider, { backgroundColor: c.lineSoft }]} />
+        <IconButton
+          icon="line.3.horizontal.decrease"
+          size={36}
+          iconSize={18}
+          variant="tinted"
+        />
       </View>
 
+      {/* 搜索框（fill 风格，无 border） */}
+      <View style={styles.searchRow}>
+        <View style={[styles.searchBox, { backgroundColor: c.bgElev }]}>
+          <IconSymbol name="magnifyingglass" size={16} color={c.text3} />
+          <TextInput
+            style={[styles.searchInput, { color: c.text }]}
+            placeholder="搜索"
+            placeholderTextColor={c.text3}
+            value={search}
+            onChangeText={setSearch}
+            returnKeyType="search"
+            clearButtonMode="while-editing"
+            autoCorrect={false}
+            autoCapitalize="none"
+          />
+        </View>
+      </View>
+
+      {/* Filter chips */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.chips}
+        style={{ flexGrow: 0, flexShrink: 0 }}
+      >
+        {FILTER_CHIPS.map((chip) => (
+          <Chip
+            key={chip.key}
+            label={chip.label}
+            active={activeFilter === chip.key}
+            count={counts[chip.key] ?? 0}
+            onPress={() => setActiveFilter(chip.key)}
+          />
+        ))}
+      </ScrollView>
+
+      {/* 列表组（insetGrouped 风格：bgElev2 大块 + hairline 分隔） */}
       <FlatList
         data={filtered}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
-        style={[styles.list, { backgroundColor: c.bg }]}
-        contentContainerStyle={styles.listContent}
+        style={styles.list}
+        contentContainerStyle={[
+          styles.listContent,
+          filtered.length > 0 && {
+            backgroundColor: c.bgElev,
+            borderRadius: Radius.xl,
+            marginHorizontal: Spacing.lg,
+            marginTop: Spacing.sm,
+            overflow: "hidden",
+          },
+        ]}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={[styles.emptyText, { color: c.text3 }]}>
+            <View style={[styles.emptyIcon, { backgroundColor: c.bgElev }]}>
+              <IconSymbol name="key.fill" size={28} color={c.text3} />
+            </View>
+            <Text style={[styles.emptyTitle, { color: c.text }]}>
               {search.trim() || activeFilter !== "all"
                 ? "无匹配项"
-                : "保险库为空，点击 ＋ 新建"}
+                : "保险库为空"}
+            </Text>
+            <Text style={[styles.emptyDesc, { color: c.text3 }]}>
+              {search.trim() || activeFilter !== "all"
+                ? "调整搜索或筛选条件"
+                : "点击右下角按钮新建条目"}
             </Text>
           </View>
         }
@@ -309,19 +484,18 @@ export default function VaultScreen() {
         keyboardDismissMode="on-drag"
       />
 
-      <TouchableOpacity
-        style={[styles.fab, { backgroundColor: c.text }]}
-        activeOpacity={0.8}
-        // 触感放到 PressIn —— 按下瞬间立即反馈，掩盖随后 modal fade-in 的微小延迟
-        onPressIn={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        }}
-        onPress={() => {
-          router.push("/item/new" as any);
-        }}
-      >
-        <Text style={[styles.fabPlus, { color: c.bg }]}>＋</Text>
-      </TouchableOpacity>
+      {/* FAB —— 用真图标，不是 Unicode */}
+      <View style={styles.fabWrap} pointerEvents="box-none">
+        <IconButton
+          icon="plus"
+          size={56}
+          iconSize={22}
+          variant="solid"
+          haptic="medium"
+          onPress={() => router.push("/item/new" as any)}
+          style={styles.fab}
+        />
+      </View>
     </SafeAreaView>
   );
 }
@@ -329,125 +503,155 @@ export default function VaultScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
 
+  /* Header */
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingTop: 4,
-    paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.xs,
+    paddingBottom: Spacing.sm,
   },
-  headerLeft: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1 },
-  appName: { fontSize: 16, fontWeight: "600", letterSpacing: -0.3, flexShrink: 1 },
-  countBadge: {
-    borderWidth: 1,
-    borderRadius: 5,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+  headerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.md,
+    flexShrink: 1,
   },
-  countText: { fontSize: 11 },
+  appName: {
+    ...Type.title,
+    letterSpacing: -0.4,
+  },
+  headerSub: {
+    ...Type.footnote,
+    marginTop: 1,
+  },
 
-  searchRow: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 6 },
+  /* Search */
+  searchRow: {
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.xs,
+    paddingBottom: Spacing.xs,
+  },
   searchBox: {
     flexDirection: "row",
     alignItems: "center",
-    borderWidth: 1,
-    borderRadius: 9,
-    paddingHorizontal: 10,
+    borderRadius: Radius.lg,
+    paddingHorizontal: Spacing.md,
     height: 38,
-    gap: 8,
+    gap: Spacing.sm,
   },
   searchInput: {
     flex: 1,
-    fontSize: 14,
+    ...Type.body,
     paddingVertical: 0,
     includeFontPadding: false,
   },
 
+  /* Chips */
   chips: {
-    paddingHorizontal: 16,
-    paddingTop: 4,
-    paddingBottom: 8,
-    gap: 6,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
+    gap: Spacing.sm,
     flexDirection: "row",
     alignItems: "center",
   },
-  chip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    marginRight: 2,
-  },
-  chipLabel: { fontSize: 12, fontWeight: "500" },
-  chipCount: { fontSize: 11 },
 
-  divider: { height: StyleSheet.hairlineWidth },
-
+  /* List */
   list: { flex: 1 },
-  listContent: { paddingBottom: 100 },
+  listContent: { paddingBottom: 120 },
 
+  /* Row */
   row: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 11,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: 12,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: 12,
+    gap: Spacing.md,
+  },
+  hairline: {
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+    height: StyleSheet.hairlineWidth,
   },
   favicon: {
     width: 38,
     height: 38,
-    borderRadius: 9,
+    borderRadius: Radius.lg,
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
   },
   faviconText: { color: "#fff", fontSize: 13, fontWeight: "600" },
-  rowMid: { flex: 1, gap: 3, minWidth: 0 },
+  rowMid: { flex: 1, gap: 2, minWidth: 0 },
   rowNameLine: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
+    gap: Spacing.xs + 1,
     flexShrink: 1,
   },
-  rowName: { fontSize: 14, fontWeight: "500", flexShrink: 1 },
-  pill: {
-    borderWidth: 1,
-    borderRadius: 4,
-    paddingHorizontal: 4,
-    paddingVertical: 1,
+  rowName: { ...Type.bodyEmph, flexShrink: 1 },
+  rowSub: { ...Type.footnote },
+  rowRight: {
+    alignItems: "flex-end",
+    gap: 5,
     flexShrink: 0,
+    minWidth: 52,
   },
-  pillText: { fontSize: 9, fontWeight: "600", lineHeight: 13 },
-  rowSub: { fontSize: 11 },
-  rowRight: { alignItems: "flex-end", gap: 5, flexShrink: 0, minWidth: 52 },
-  rowTime: { fontSize: 10 },
+  rowTime: { ...Type.caption, fontSize: 10 },
   barWrap: { width: 36 },
   barTrack: { height: 3, borderRadius: 2, overflow: "hidden" },
   barFill: { height: 3, borderRadius: 2 },
 
-  fab: {
-    position: "absolute",
-    right: 20,
-    bottom: 24,
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+  /* Swipe actions */
+  swipeActionsRow: {
+    flexDirection: "row",
+    alignItems: "stretch",
+  },
+  swipeAction: {
+    width: SWIPE_ACTION_WIDTH,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.18,
-    shadowRadius: 8,
-    elevation: 6,
+    gap: 4,
+    paddingVertical: Spacing.sm,
   },
-  fabPlus: { fontSize: 26, lineHeight: 30, marginTop: -1 },
+  swipeActionLabel: {
+    ...Type.caption,
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#fff",
+  },
 
-  empty: { paddingVertical: 48, alignItems: "center" },
-  emptyText: { fontSize: 14 },
+  /* FAB */
+  fabWrap: {
+    position: "absolute",
+    right: Spacing.xl,
+    bottom: Spacing.xl + 8,
+  },
+  fab: {
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.22,
+    shadowRadius: 14,
+    elevation: 8,
+  },
+
+  /* Empty */
+  empty: {
+    paddingTop: 80,
+    paddingHorizontal: Spacing.xl,
+    alignItems: "center",
+    gap: Spacing.sm,
+  },
+  emptyIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: Radius.xl,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: Spacing.sm,
+  },
+  emptyTitle: { ...Type.title2 },
+  emptyDesc: { ...Type.footnote },
 });

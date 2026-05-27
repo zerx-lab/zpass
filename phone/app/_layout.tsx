@@ -7,6 +7,7 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useMemo } from "react";
 import { Platform, StyleSheet, Text, View } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "react-native-reanimated";
 
 import { Colors } from "@/constants/theme";
@@ -127,10 +128,12 @@ function RootLayoutNav() {
 
 export default function RootLayout() {
   return (
-    <ThemeProvider initialMode="system">
-      <VaultProvider>
-        <RootLayoutNav />
-      </VaultProvider>
-    </ThemeProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ThemeProvider initialMode="system">
+        <VaultProvider>
+          <RootLayoutNav />
+        </VaultProvider>
+      </ThemeProvider>
+    </GestureHandlerRootView>
   );
 }

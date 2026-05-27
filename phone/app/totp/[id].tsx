@@ -3,19 +3,20 @@ import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   ScrollView,
   Animated,
   Easing,
-  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, router } from "expo-router";
 import * as Haptics from "expo-haptics";
 
-import { useColorScheme } from "@/hooks/use-color-scheme";
-import { Colors } from "@/constants/theme";
-import { IconSymbol } from "@/components/ui/icon-symbol";
+import { useTheme } from "@/contexts/theme-context";
+import { Fonts, Radius, Spacing, Type } from "@/constants/theme";
+import {
+  Button,
+  IconButton,
+} from "@/components/ui/primitives";
 import { useVault } from "@/contexts/vault-context";
 import { faviconColor, faviconInitials } from "@/lib/format";
 import {
@@ -27,21 +28,16 @@ import {
   type OtpMeta,
 } from "@/lib/totp";
 import { copyEphemeral } from "@/lib/clipboard";
+import type { ColorPalette } from "@/constants/theme";
 
-const MONO = Platform.select({
-  ios: "Menlo",
-  android: "monospace",
-  default: "monospace",
-});
+const MONO = Fonts?.mono ?? "monospace";
 
 export default function TotpDetailScreen() {
-  const scheme = useColorScheme() ?? "dark";
-  const C = Colors[scheme];
+  const { colors: C } = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { getItem } = useVault();
 
   const item = getItem(id);
-  // 支持两类来源：login 条目的 totp 字段，或独立 totp 条目的 secret 字段
   const secret =
     item?.type === "login"
       ? item.totp
@@ -49,14 +45,11 @@ export default function TotpDetailScreen() {
         ? item.secret
         : undefined;
 
-  // 把 secret（可能是 otpauth:// URI 或裸 base32）解析成完整元信息
-  // —— 顺带从 URI 中拿到 issuer / account / 算法 / 位数 / 周期。
   const meta: OtpMeta | null = useMemo(
     () => (secret ? resolveOtpMeta(secret) : null),
     [secret],
   );
 
-  // 优先展示 URI 中的 issuer / account；其次退回到条目本身字段。
   const usernameDisplay =
     item?.type === "login"
       ? item.username
@@ -142,15 +135,11 @@ export default function TotpDetailScreen() {
   if (!item || !secret) {
     return (
       <SafeAreaView style={[styles.safe, { backgroundColor: C.bg }]} edges={["top"]}>
-        <View style={[styles.navBar, { borderBottomColor: C.lineSoft }]}>
-          <TouchableOpacity style={styles.navBtn} onPress={() => router.back()}>
-            <IconSymbol name="chevron.left" size={22} color={C.text} />
-          </TouchableOpacity>
-          <Text style={[styles.navTitle, { color: C.text }]}>验证码</Text>
-          <View style={styles.navBtn} />
-        </View>
+        <NavBar c={C} title="验证码" onBack={() => router.back()} />
         <View style={styles.notFound}>
-          <Text style={{ color: C.text3 }}>该条目没有 TOTP 验证码</Text>
+          <Text style={{ color: C.text3, ...Type.body }}>
+            该条目没有 TOTP 验证码
+          </Text>
         </View>
       </SafeAreaView>
     );
@@ -164,51 +153,40 @@ export default function TotpDetailScreen() {
       style={[styles.safe, { backgroundColor: C.bg }]}
       edges={["top", "left", "right"]}
     >
-      <View style={[styles.navBar, { borderBottomColor: C.lineSoft }]}>
-        <TouchableOpacity
-          style={styles.navBtn}
-          onPress={() => router.back()}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          activeOpacity={0.6}
-        >
-          <IconSymbol name="chevron.left" size={22} color={C.text} />
-        </TouchableOpacity>
-        <Text style={[styles.navTitle, { color: C.text }]} numberOfLines={1}>
-          验证码
-        </Text>
-        <TouchableOpacity
-          style={styles.navBtn}
-          onPress={() => router.push(`/item/${item.id}` as any)}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          activeOpacity={0.6}
-        >
-          <IconSymbol name="square.and.pencil" size={19} color={C.text} />
-        </TouchableOpacity>
-      </View>
+      <NavBar
+        c={C}
+        title="验证码"
+        onBack={() => router.back()}
+        onEdit={() => router.push(`/item/${item.id}` as any)}
+      />
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <View style={[styles.chip, { borderColor: C.line, backgroundColor: C.bgElev }]}>
-          <View style={[styles.chipFavicon, { backgroundColor: faviconColor(item.name) }]}>
-            <Text style={styles.chipFaviconText}>{faviconInitials(item.name)}</Text>
+        {/* 服务标签 */}
+        <View style={[styles.chip, { backgroundColor: C.bgElev }]}>
+          <View
+            style={[styles.chipFavicon, { backgroundColor: faviconColor(item.name) }]}
+          >
+            <Text style={styles.chipFaviconText}>
+              {faviconInitials(item.name)}
+            </Text>
           </View>
-          <Text style={[styles.chipName, { color: C.text }]}>{item.name}</Text>
+          <Text style={[styles.chipName, { color: C.text }]} numberOfLines={1}>
+            {item.name}
+          </Text>
           {usernameDisplay ? (
-            <>
-              <Text style={[styles.chipDot, { color: C.text3 }]}> · </Text>
-              <Text
-                style={[styles.chipUsername, { color: C.text3 }]}
-                numberOfLines={1}
-              >
-                {usernameDisplay}
-              </Text>
-            </>
+            <Text style={[styles.chipUsername, { color: C.text3 }]} numberOfLines={1}>
+              {usernameDisplay}
+            </Text>
           ) : null}
         </View>
 
-        <Text style={[styles.codeText, { color: codeColor }]}>
+        {/* 大号代码 */}
+        <Text
+          style={[styles.codeText, { color: codeColor, fontFamily: MONO }]}
+        >
           {formatTotpCode(code)}
         </Text>
 
@@ -223,7 +201,9 @@ export default function TotpDetailScreen() {
               {remaining}s
             </Text>
             <View style={styles.progressOuter}>
-              <View style={[styles.progressTrack, { backgroundColor: C.bgElev2 }]}>
+              <View
+                style={[styles.progressTrack, { backgroundColor: C.bgActive }]}
+              >
                 <Animated.View
                   style={[
                     styles.progressBar,
@@ -235,24 +215,29 @@ export default function TotpDetailScreen() {
           </>
         )}
 
-        <TouchableOpacity
-          style={[styles.copyBtn, { borderColor: C.line, backgroundColor: C.bgElev }]}
+        <Button
+          label="复制验证码"
+          icon="doc.on.doc.fill"
+          variant="primary"
+          size="lg"
           onPress={handleCopy}
-          activeOpacity={0.7}
-        >
-          <IconSymbol name="doc.on.doc.fill" size={16} color={C.text} />
-          <Text style={[styles.copyBtnText, { color: C.text }]}>复制验证码</Text>
-        </TouchableOpacity>
+          style={{ marginBottom: Spacing.xxl }}
+        />
 
-        <View style={[styles.metaCard, { borderColor: C.line, backgroundColor: C.bgElev }]}>
+        {/* 元信息卡 */}
+        <View style={[styles.metaCard, { backgroundColor: C.bgElev }]}>
           <MetaRow label="服务" value={item.name} c={C} />
           {usernameDisplay ? (
             <>
-              <View style={[styles.metaDivider, { backgroundColor: C.lineSoft }]} />
+              <View
+                style={[styles.metaDivider, { backgroundColor: C.lineSoft }]}
+              />
               <MetaRow label="账号" value={usernameDisplay} c={C} />
             </>
           ) : null}
-          <View style={[styles.metaDivider, { backgroundColor: C.lineSoft }]} />
+          <View
+            style={[styles.metaDivider, { backgroundColor: C.lineSoft }]}
+          />
           <MetaRow label="算法" value={algoLine} c={C} mono />
         </View>
 
@@ -266,6 +251,44 @@ export default function TotpDetailScreen() {
   );
 }
 
+function NavBar({
+  c,
+  title,
+  onBack,
+  onEdit,
+}: {
+  c: ColorPalette;
+  title: string;
+  onBack: () => void;
+  onEdit?: () => void;
+}) {
+  return (
+    <View style={styles.navBar}>
+      <IconButton
+        icon="chevron.left"
+        size={36}
+        iconSize={20}
+        variant="ghost"
+        onPress={onBack}
+      />
+      <Text style={[styles.navTitle, { color: c.text }]} numberOfLines={1}>
+        {title}
+      </Text>
+      {onEdit ? (
+        <IconButton
+          icon="square.and.pencil"
+          size={36}
+          iconSize={18}
+          variant="ghost"
+          onPress={onEdit}
+        />
+      ) : (
+        <View style={{ width: 36 }} />
+      )}
+    </View>
+  );
+}
+
 function MetaRow({
   label,
   value,
@@ -274,7 +297,7 @@ function MetaRow({
 }: {
   label: string;
   value: string;
-  c: (typeof Colors)["dark"];
+  c: ColorPalette;
   mono?: boolean;
 }) {
   return (
@@ -284,7 +307,7 @@ function MetaRow({
         style={[
           styles.metaValue,
           { color: c.text },
-          mono && { fontFamily: MONO, fontSize: 13 },
+          mono && { fontFamily: MONO, ...Type.subhead },
         ]}
         numberOfLines={1}
       >
@@ -301,19 +324,18 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: Spacing.sm,
+    paddingTop: Spacing.xs,
+    paddingBottom: Spacing.xs,
   },
-  navBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
-  navTitle: { fontSize: 16, fontWeight: "600", flex: 1, textAlign: "center" },
+  navTitle: { ...Type.title2, flex: 1, textAlign: "center" },
 
   notFound: { flex: 1, alignItems: "center", justifyContent: "center" },
 
   scrollContent: {
-    paddingHorizontal: 28,
-    paddingTop: 32,
-    paddingBottom: 48,
+    paddingHorizontal: Spacing.xl + 4,
+    paddingTop: Spacing.xxxl,
+    paddingBottom: Spacing.xxxl + Spacing.lg,
     alignItems: "center",
   },
 
@@ -321,19 +343,18 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 6,
     maxWidth: "100%",
-    marginBottom: 36,
+    gap: Spacing.sm,
+    marginBottom: Spacing.xxxl,
   },
   chipFavicon: {
     width: 22,
     height: 22,
-    borderRadius: 4,
+    borderRadius: Radius.sm,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 7,
   },
   chipFaviconText: {
     fontSize: 10,
@@ -341,55 +362,50 @@ const styles = StyleSheet.create({
     color: "#ffffff",
     includeFontPadding: false,
   },
-  chipName: { fontSize: 13, fontWeight: "500" },
-  chipDot: { fontSize: 13 },
-  chipUsername: { fontSize: 12, flexShrink: 1 },
+  chipName: { ...Type.subhead, fontWeight: "600", flexShrink: 1 },
+  chipUsername: { ...Type.footnote, flexShrink: 1 },
 
   codeText: {
-    fontSize: 56,
+    fontSize: 60,
     fontWeight: "300",
     letterSpacing: 4,
     fontVariant: ["tabular-nums"],
-    fontFamily: MONO,
     includeFontPadding: false,
-    marginBottom: 10,
+    marginBottom: Spacing.sm,
     textAlign: "center",
   },
-  expiresText: { fontSize: 13, marginBottom: 20 },
+  expiresText: { ...Type.subhead, marginBottom: Spacing.lg },
 
-  progressOuter: { width: "100%", marginBottom: 32 },
-  progressTrack: { width: "100%", height: 4, borderRadius: 2, overflow: "hidden" },
-  progressBar: { height: "100%", borderRadius: 2 },
-
-  copyBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    marginBottom: 32,
+  progressOuter: { width: "100%", marginBottom: Spacing.xxl },
+  progressTrack: {
+    width: "100%",
+    height: 4,
+    borderRadius: 2,
+    overflow: "hidden",
   },
-  copyBtnText: { fontSize: 15, fontWeight: "500" },
+  progressBar: { height: "100%", borderRadius: 2 },
 
   metaCard: {
     width: "100%",
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    marginBottom: 16,
+    borderRadius: Radius.xl,
+    paddingHorizontal: Spacing.lg,
+    marginBottom: Spacing.lg,
   },
   metaRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingVertical: 12,
-    gap: 12,
+    paddingVertical: Spacing.md,
+    gap: Spacing.md,
   },
-  metaLabel: { fontSize: 13 },
-  metaValue: { fontSize: 14, fontWeight: "500", flexShrink: 1, textAlign: "right" },
+  metaLabel: { ...Type.subhead },
+  metaValue: {
+    ...Type.body,
+    fontWeight: "500",
+    flexShrink: 1,
+    textAlign: "right",
+  },
   metaDivider: { height: StyleSheet.hairlineWidth, width: "100%" },
 
-  hint: { fontSize: 11, textAlign: "center", paddingHorizontal: 16 },
+  hint: { ...Type.footnote, textAlign: "center", paddingHorizontal: Spacing.lg },
 });

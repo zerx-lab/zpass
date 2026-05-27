@@ -2,19 +2,24 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   View,
   Text,
-  TouchableOpacity,
   ScrollView,
   StyleSheet,
-  Platform,
+  Animated,
+  Easing,
 } from "react-native";
 import { dialog } from "@/components/ui/dialog";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, router } from "expo-router";
 import * as Haptics from "expo-haptics";
 
-import { Colors } from "@/constants/theme";
-import { useColorScheme } from "@/hooks/use-color-scheme";
+import { Fonts, Radius, Spacing, Type, type ColorPalette } from "@/constants/theme";
+import { useTheme } from "@/contexts/theme-context";
 import { IconSymbol } from "@/components/ui/icon-symbol";
+import {
+  Badge,
+  Button,
+  IconButton,
+} from "@/components/ui/primitives";
 import { useVault } from "@/contexts/vault-context";
 import type { VaultItem } from "@/data/vault";
 import {
@@ -33,56 +38,72 @@ import {
 import { copyText, copyEphemeral } from "@/lib/clipboard";
 import type { CustomField } from "@/lib/custom-fields";
 
-const MONO = Platform.select({ ios: "Menlo", default: "monospace" });
+const MONO = Fonts?.mono ?? "monospace";
+
+/** 用 6 个圆点表示已遮罩，统一视觉宽度（不再用 `•` 字符乱长） */
+function maskDots(c: ColorPalette) {
+  return (
+    <View style={maskStyles.row}>
+      {Array.from({ length: 6 }).map((_, i) => (
+        <View
+          key={i}
+          style={[maskStyles.dot, { backgroundColor: c.text3 }]}
+        />
+      ))}
+    </View>
+  );
+}
+
+const maskStyles = StyleSheet.create({
+  row: { flexDirection: "row", gap: 4, paddingVertical: 3 },
+  dot: { width: 6, height: 6, borderRadius: 3 },
+});
 
 /* ── NavBar ─────────────────────────────────────────────────── */
 
 function NavBar({
   title,
-  c,
   favorited,
   onBack,
   onFav,
   onEdit,
 }: {
   title: string;
-  c: (typeof Colors)["dark"];
   favorited: boolean;
   onBack: () => void;
   onFav: () => void;
   onEdit: () => void;
 }) {
+  const { colors: c } = useTheme();
   return (
-    <View style={[navStyles.wrap, { borderBottomColor: c.lineSoft }]}>
-      <TouchableOpacity
-        style={navStyles.btn}
+    <View style={navStyles.wrap}>
+      <IconButton
+        icon="chevron.left"
+        size={36}
+        iconSize={20}
+        variant="ghost"
         onPress={onBack}
-        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-      >
-        <IconSymbol name="chevron.left" size={22} color={c.text} />
-      </TouchableOpacity>
+      />
       <Text style={[navStyles.title, { color: c.text }]} numberOfLines={1}>
         {title}
       </Text>
       <View style={navStyles.right}>
-        <TouchableOpacity
-          style={navStyles.btn}
+        <IconButton
+          icon={favorited ? "star.fill" : "star"}
+          color={favorited ? c.warn : c.text3}
+          size={36}
+          iconSize={19}
+          variant="ghost"
+          haptic="selection"
           onPress={onFav}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <IconSymbol
-            name={favorited ? "star.fill" : "star"}
-            size={21}
-            color={favorited ? "#f5c518" : c.text3}
-          />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={navStyles.btn}
+        />
+        <IconButton
+          icon="square.and.pencil"
+          size={36}
+          iconSize={18}
+          variant="ghost"
           onPress={onEdit}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <IconSymbol name="square.and.pencil" size={19} color={c.text} />
-        </TouchableOpacity>
+        />
       </View>
     </View>
   );
@@ -93,18 +114,15 @@ const navStyles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: Spacing.sm,
+    paddingTop: Spacing.xs,
+    paddingBottom: Spacing.xs,
   },
-  btn: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
-  right: { flexDirection: "row" },
+  right: { flexDirection: "row", alignItems: "center" },
   title: {
     flex: 1,
     textAlign: "center",
-    fontSize: 16,
-    fontWeight: "600",
-    letterSpacing: -0.2,
+    ...Type.title2,
   },
 });
 
@@ -113,21 +131,15 @@ const navStyles = StyleSheet.create({
 function Section({
   title,
   children,
-  c,
 }: {
   title: string;
   children: React.ReactNode;
-  c: (typeof Colors)["dark"];
 }) {
+  const { colors: c } = useTheme();
   return (
     <View style={sectionStyles.wrap}>
       <Text style={[sectionStyles.title, { color: c.text3 }]}>{title}</Text>
-      <View
-        style={[
-          sectionStyles.card,
-          { backgroundColor: c.bgElev, borderColor: c.line },
-        ]}
-      >
+      <View style={[sectionStyles.card, { backgroundColor: c.bgElev }]}>
         {children}
       </View>
     </View>
@@ -135,17 +147,16 @@ function Section({
 }
 
 const sectionStyles = StyleSheet.create({
-  wrap: { paddingHorizontal: 16, marginBottom: 16 },
+  wrap: { paddingHorizontal: Spacing.lg, marginBottom: Spacing.lg },
   title: {
-    fontSize: 11,
-    fontWeight: "600",
+    ...Type.footnote,
     textTransform: "uppercase",
-    letterSpacing: 0.8,
-    marginBottom: 6,
+    letterSpacing: 0.4,
+    marginBottom: Spacing.sm,
+    paddingHorizontal: Spacing.xs,
   },
   card: {
-    borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.xl,
     overflow: "hidden",
   },
 });
@@ -165,60 +176,68 @@ function FieldRow({
   value: string;
   masked?: boolean;
   mono?: boolean;
-  c: (typeof Colors)["dark"];
+  c: ColorPalette;
   isLast?: boolean;
   multiline?: boolean;
 }) {
   const [revealed, setRevealed] = useState(false);
   if (!value) return null;
-  const display = masked && !revealed ? "•".repeat(Math.min(value.length, 20)) : value;
+  const showMask = masked && !revealed;
 
   return (
-    <View
-      style={[
-        fieldStyles.row,
-        { borderBottomColor: isLast ? "transparent" : c.lineSoft },
-      ]}
-    >
+    <View style={fieldStyles.row}>
       <View style={fieldStyles.left}>
         <Text style={[fieldStyles.label, { color: c.text3 }]}>{label}</Text>
-        <Text
-          style={[
-            fieldStyles.value,
-            { color: c.text, fontFamily: mono || masked ? MONO : undefined },
-          ]}
-          numberOfLines={multiline ? undefined : 1}
-          ellipsizeMode="tail"
-        >
-          {display}
-        </Text>
+        {showMask ? (
+          maskDots(c)
+        ) : (
+          <Text
+            style={[
+              fieldStyles.value,
+              {
+                color: c.text,
+                fontFamily: mono || masked ? MONO : undefined,
+              },
+            ]}
+            numberOfLines={multiline ? undefined : 1}
+            ellipsizeMode="tail"
+          >
+            {value}
+          </Text>
+        )}
       </View>
       <View style={fieldStyles.actions}>
         {masked && (
-          <TouchableOpacity
+          <IconButton
+            icon={revealed ? "eye.slash.fill" : "eye.fill"}
+            size={34}
+            iconSize={16}
+            variant="tinted"
+            haptic="selection"
             onPress={() => setRevealed((v) => !v)}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            style={[fieldStyles.iconBtn, { backgroundColor: c.bgHover }]}
-          >
-            <IconSymbol
-              name={revealed ? "eye.slash.fill" : "eye.fill"}
-              size={16}
-              color={c.text2}
-            />
-          </TouchableOpacity>
+          />
         )}
-        <TouchableOpacity
+        <IconButton
+          icon="doc.on.doc.fill"
+          size={34}
+          iconSize={16}
+          variant="tinted"
+          haptic="light"
           onPress={async () => {
             if (masked) await copyEphemeral(value);
             else await copyText(value);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           }}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          style={[fieldStyles.iconBtn, { backgroundColor: c.bgHover }]}
-        >
-          <IconSymbol name="doc.on.doc.fill" size={16} color={c.text2} />
-        </TouchableOpacity>
+        />
       </View>
+      {!isLast && (
+        <View
+          style={[
+            fieldStyles.hairline,
+            { backgroundColor: c.lineSoft },
+          ]}
+        />
+      )}
     </View>
   );
 }
@@ -227,51 +246,59 @@ const fieldStyles = StyleSheet.create({
   row: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: 8,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    gap: Spacing.sm,
   },
-  left: { flex: 1, gap: 2, minWidth: 0 },
-  label: { fontSize: 11, fontWeight: "500" },
-  value: { fontSize: 14 },
-  actions: { flexDirection: "row", gap: 6, alignItems: "center", flexShrink: 0 },
-  iconBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 7,
+  hairline: {
+    position: "absolute",
+    bottom: 0,
+    left: Spacing.lg,
+    right: 0,
+    height: StyleSheet.hairlineWidth,
+  },
+  left: { flex: 1, gap: 4, minWidth: 0 },
+  label: {
+    ...Type.footnote,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  value: { ...Type.body },
+  actions: {
+    flexDirection: "row",
+    gap: Spacing.xs,
     alignItems: "center",
-    justifyContent: "center",
+    flexShrink: 0,
   },
 });
 
 /* ── 强度 Section ───────────────────────────────────────────── */
 
-function StrengthSection({
-  password,
-  c,
-}: {
-  password: string;
-  c: (typeof Colors)["dark"];
-}) {
+function StrengthSection({ password }: { password: string }) {
+  const { colors: c } = useTheme();
   const { score, entropy } = estimateStrength(password);
   const color = score >= 80 ? c.ok : score >= 50 ? c.warn : c.danger;
 
   return (
-    <Section title="密码强度" c={c}>
+    <Section title="密码强度">
       <View style={strengthStyles.inner}>
         <View style={strengthStyles.scoreRow}>
           <Text style={[strengthStyles.score, { color, fontFamily: MONO }]}>
             {score}
           </Text>
           <Text style={[strengthStyles.scoreMax, { color: c.text3 }]}>/100</Text>
-          <View style={[strengthStyles.labelBadge, { borderColor: color }]}>
+          <View
+            style={[
+              strengthStyles.labelBadge,
+              { backgroundColor: color + "1f" },
+            ]}
+          >
             <Text style={[strengthStyles.labelText, { color }]}>
               {strengthLabel(score)}
             </Text>
           </View>
         </View>
-        <View style={[strengthStyles.bar, { backgroundColor: c.lineSoft }]}>
+        <View style={[strengthStyles.bar, { backgroundColor: c.bgActive }]}>
           <View
             style={[
               strengthStyles.fill,
@@ -280,30 +307,25 @@ function StrengthSection({
           />
         </View>
         <View style={[strengthStyles.meta, { borderTopColor: c.lineSoft }]}>
-          <MetaItem label="长度" value={String(password.length)} c={c} />
+          <MetaItem label="长度" value={String(password.length)} />
           <View style={[strengthStyles.divider, { backgroundColor: c.lineSoft }]} />
-          <MetaItem label="熵值" value={`${entropy} bit`} c={c} />
+          <MetaItem label="熵值" value={`${entropy}b`} />
           <View style={[strengthStyles.divider, { backgroundColor: c.lineSoft }]} />
-          <MetaItem label="破解时间" value={crackTime(score)} c={c} />
+          <MetaItem label="破解时间" value={crackTime(score)} />
         </View>
       </View>
     </Section>
   );
 }
 
-function MetaItem({
-  label,
-  value,
-  c,
-}: {
-  label: string;
-  value: string;
-  c: (typeof Colors)["dark"];
-}) {
+function MetaItem({ label, value }: { label: string; value: string }) {
+  const { colors: c } = useTheme();
   return (
     <View style={strengthStyles.metaItem}>
       <Text style={[strengthStyles.metaLabel, { color: c.text3 }]}>{label}</Text>
-      <Text style={[strengthStyles.metaValue, { color: c.text, fontFamily: MONO }]}>
+      <Text
+        style={[strengthStyles.metaValue, { color: c.text, fontFamily: MONO }]}
+      >
         {value}
       </Text>
     </View>
@@ -311,54 +333,62 @@ function MetaItem({
 }
 
 const strengthStyles = StyleSheet.create({
-  inner: { padding: 14, gap: 12 },
-  scoreRow: { flexDirection: "row", alignItems: "baseline", gap: 6 },
-  score: { fontSize: 40, fontWeight: "700", lineHeight: 46 },
-  scoreMax: { fontSize: 16, marginBottom: 2 },
+  inner: { padding: Spacing.lg, gap: Spacing.md },
+  scoreRow: { flexDirection: "row", alignItems: "baseline", gap: Spacing.xs },
+  score: { fontSize: 44, fontWeight: "700", lineHeight: 50 },
+  scoreMax: { fontSize: 16, marginBottom: 4 },
   labelBadge: {
-    borderWidth: 1,
-    borderRadius: 5,
+    borderRadius: Radius.sm,
     paddingHorizontal: 8,
     paddingVertical: 3,
-    marginLeft: 4,
+    marginLeft: Spacing.xs,
     alignSelf: "center",
   },
-  labelText: { fontSize: 12, fontWeight: "600" },
+  labelText: { ...Type.footnote, fontWeight: "700" },
   bar: { height: 6, borderRadius: 3, overflow: "hidden" },
   fill: { height: "100%", borderRadius: 3 },
   meta: {
     flexDirection: "row",
     alignItems: "center",
     borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: 10,
+    paddingTop: Spacing.sm,
   },
   metaItem: { flex: 1, alignItems: "center", gap: 2 },
-  metaLabel: { fontSize: 10, fontWeight: "500" },
-  metaValue: { fontSize: 13, fontWeight: "600" },
+  metaLabel: {
+    ...Type.caption,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  metaValue: { ...Type.subhead, fontWeight: "700" },
   divider: { width: StyleSheet.hairlineWidth, height: 28 },
 });
 
 /* ── TOTP Section ───────────────────────────────────────────── */
 
-function TotpSection({
-  secret,
-  c,
-}: {
-  secret: string;
-  c: (typeof Colors)["dark"];
-}) {
+function TotpSection({ secret }: { secret: string }) {
+  const { colors: c } = useTheme();
   const [remaining, setRemaining] = useState(totpRemaining());
   const [periodKey, setPeriodKey] = useState(() =>
     Math.floor(Date.now() / 1000 / TOTP_PERIOD),
   );
+  // 进度环初始值只用挂载时的 remaining，之后由 tick 主动驱动 —— 不需要响应 remaining 变化
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const ringAnim = useMemo(() => new Animated.Value(remaining / TOTP_PERIOD), []);
 
   useEffect(() => {
     const t = setInterval(() => {
-      setRemaining(totpRemaining());
+      const r = totpRemaining();
+      setRemaining(r);
       setPeriodKey(Math.floor(Date.now() / 1000 / TOTP_PERIOD));
+      Animated.timing(ringAnim, {
+        toValue: r / TOTP_PERIOD,
+        duration: 900,
+        easing: Easing.linear,
+        useNativeDriver: false,
+      }).start();
     }, 1000);
     return () => clearInterval(t);
-  }, []);
+  }, [ringAnim]);
 
   const code = useMemo(
     () => generateTotp(secret),
@@ -368,7 +398,7 @@ function TotpSection({
   const urgent = remaining <= 5;
 
   return (
-    <Section title="TOTP 验证码" c={c}>
+    <Section title="TOTP 验证码">
       <View style={totpStyles.inner}>
         <View style={totpStyles.codeWrap}>
           <Text
@@ -379,45 +409,59 @@ function TotpSection({
           >
             {formatTotpCode(code)}
           </Text>
+          <View style={[totpStyles.bar, { backgroundColor: c.bgActive }]}>
+            <Animated.View
+              style={[
+                totpStyles.barFill,
+                {
+                  backgroundColor: urgent ? c.danger : c.info,
+                  width: ringAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: ["0%", "100%"],
+                  }),
+                },
+              ]}
+            />
+          </View>
           <Text style={[totpStyles.hint, { color: c.text3 }]}>
-            {remaining}秒后刷新
+            {remaining} 秒后刷新
           </Text>
         </View>
-        <TouchableOpacity
-          style={[totpStyles.copyBtn, { backgroundColor: c.bgHover, borderColor: c.line }]}
+        <IconButton
+          icon="doc.on.doc.fill"
+          size={44}
+          iconSize={18}
+          variant="tinted"
+          haptic="medium"
           onPress={async () => {
             await copyEphemeral(code);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           }}
-          activeOpacity={0.7}
-        >
-          <Text style={[totpStyles.copyText, { color: c.text2 }]}>复制</Text>
-        </TouchableOpacity>
+        />
       </View>
     </Section>
   );
 }
 
 const totpStyles = StyleSheet.create({
-  inner: { flexDirection: "row", alignItems: "center", padding: 14, gap: 14 },
-  codeWrap: { flex: 1, gap: 2 },
-  code: { fontSize: 28, fontWeight: "700", letterSpacing: 6 },
-  hint: { fontSize: 11 },
-  copyBtn: {
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+  inner: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: Spacing.lg,
+    gap: Spacing.md,
   },
-  copyText: { fontSize: 13, fontWeight: "500" },
+  codeWrap: { flex: 1, gap: 6 },
+  code: { fontSize: 32, fontWeight: "700", letterSpacing: 6 },
+  bar: { height: 4, borderRadius: 2, overflow: "hidden" },
+  barFill: { height: "100%", borderRadius: 2 },
+  hint: { ...Type.footnote },
 });
 
 /* ── 详情主屏 ───────────────────────────────────────────────── */
 
 export default function VaultDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const scheme = useColorScheme() ?? "dark";
-  const c = Colors[scheme];
+  const { colors: c } = useTheme();
   const { getItem, toggleFavorite, deleteItem } = useVault();
 
   const item = getItem(id);
@@ -440,7 +484,6 @@ export default function VaultDetailScreen() {
       <SafeAreaView style={[styles.container, { backgroundColor: c.bg }]} edges={["top"]}>
         <NavBar
           title="未找到"
-          c={c}
           favorited={false}
           onBack={() => router.back()}
           onFav={() => {}}
@@ -459,11 +502,9 @@ export default function VaultDetailScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: c.bg }]} edges={["top"]}>
       <NavBar
         title={item.name}
-        c={c}
         favorited={!!item.favorite}
         onBack={() => router.back()}
         onFav={() => {
-          Haptics.selectionAsync();
           toggleFavorite(item.id);
         }}
         onEdit={() => router.push(`/item/${item.id}` as any)}
@@ -476,56 +517,68 @@ export default function VaultDetailScreen() {
       >
         {/* Hero */}
         <View style={heroStyles.wrap}>
-          <View style={[heroStyles.icon, { backgroundColor: faviconColor(item.name) }]}>
+          <View
+            style={[heroStyles.icon, { backgroundColor: faviconColor(item.name) }]}
+          >
             <Text style={heroStyles.iconText}>{faviconInitials(item.name)}</Text>
           </View>
           <Text style={[heroStyles.name, { color: c.text }]}>{item.name}</Text>
-          <View style={[heroStyles.tag, { borderColor: c.line }]}>
-            <Text style={[heroStyles.tagText, { color: c.text2 }]}>
-              {TYPE_LABELS[item.type]}
-            </Text>
-          </View>
+          <Badge label={TYPE_LABELS[item.type]} tone="neutral" />
         </View>
 
         <DetailBody item={item} c={c} />
 
-        {/* 自定义字段（与 desktop 一致，渲染在原生字段下方） */}
         {item.customFields && item.customFields.length > 0 ? (
-          <CustomFieldsSection fields={item.customFields} c={c} />
+          <CustomFieldsSection fields={item.customFields} />
         ) : null}
 
-        {/* 标签 */}
         {item.tags && item.tags.length > 0 && (
-          <Section title="标签" c={c}>
+          <Section title="标签">
             <View style={styles.tagRow}>
               {item.tags.map((t) => (
-                <View key={t} style={[styles.tagChip, { borderColor: c.line, backgroundColor: c.bgHover }]}>
-                  <Text style={[styles.tagChipText, { color: c.text2 }]}>#{t}</Text>
+                <View
+                  key={t}
+                  style={[styles.tagChip, { backgroundColor: c.bgActive }]}
+                >
+                  <Text
+                    style={[
+                      styles.tagChipText,
+                      { color: c.text2, fontFamily: MONO },
+                    ]}
+                  >
+                    #{t}
+                  </Text>
                 </View>
               ))}
             </View>
           </Section>
         )}
 
-        {/* 备注 */}
         {"notes" in item && item.notes ? (
-          <Section title="备注" c={c}>
-            <View style={{ padding: 14 }}>
-              <Text style={[styles.noteText, { color: c.text2 }]}>{item.notes}</Text>
+          <Section title="备注">
+            <View style={{ padding: Spacing.lg }}>
+              <Text style={[styles.noteText, { color: c.text }]}>
+                {item.notes}
+              </Text>
             </View>
           </Section>
         ) : null}
 
         {/* 删除 */}
-        <View style={{ paddingHorizontal: 16, marginBottom: 16 }}>
-          <TouchableOpacity
-            style={[styles.deleteBtn, { borderColor: c.danger + "88" }]}
+        <View
+          style={{
+            paddingHorizontal: Spacing.lg,
+            marginBottom: Spacing.md,
+          }}
+        >
+          <Button
+            label="删除条目"
+            icon="trash.fill"
+            variant="danger"
+            size="lg"
             onPress={handleDelete}
-            activeOpacity={0.75}
-          >
-            <IconSymbol name="trash.fill" size={16} color={c.danger} />
-            <Text style={[styles.deleteText, { color: c.danger }]}>删除条目</Text>
-          </TouchableOpacity>
+            fullWidth
+          />
         </View>
 
         <View style={styles.footer}>
@@ -545,24 +598,24 @@ function DetailBody({
   c,
 }: {
   item: VaultItem;
-  c: (typeof Colors)["dark"];
+  c: ColorPalette;
 }) {
   switch (item.type) {
     case "login":
       return (
         <>
-          <Section title="凭据" c={c}>
+          <Section title="凭据">
             <FieldRow label="用户名" value={item.username} c={c} />
             <FieldRow label="密码" value={item.password} masked c={c} />
             <FieldRow label="网址" value={item.url ?? ""} c={c} isLast />
           </Section>
-          {item.password ? <StrengthSection password={item.password} c={c} /> : null}
-          {item.totp ? <TotpSection secret={item.totp} c={c} /> : null}
+          {item.password ? <StrengthSection password={item.password} /> : null}
+          {item.totp ? <TotpSection secret={item.totp} /> : null}
         </>
       );
     case "card":
       return (
-        <Section title="卡片信息" c={c}>
+        <Section title="卡片信息">
           <FieldRow label="持卡人" value={item.cardholder} c={c} />
           <FieldRow label="卡号" value={item.number} mono masked c={c} />
           <FieldRow label="有效期" value={item.exp} mono c={c} />
@@ -573,15 +626,15 @@ function DetailBody({
       );
     case "note":
       return (
-        <Section title="笔记内容" c={c}>
-          <View style={{ padding: 14 }}>
+        <Section title="笔记内容">
+          <View style={{ padding: Spacing.lg }}>
             <Text style={[styles.noteText, { color: c.text }]}>{item.note}</Text>
           </View>
         </Section>
       );
     case "identity":
       return (
-        <Section title="身份信息" c={c}>
+        <Section title="身份信息">
           <FieldRow label="名" value={item.first} c={c} />
           <FieldRow label="姓" value={item.last} c={c} />
           <FieldRow label="邮箱" value={item.email} c={c} />
@@ -593,61 +646,77 @@ function DetailBody({
       );
     case "ssh":
       return (
-        <Section title={item.apiKey ? "API Token" : "SSH 密钥"} c={c}>
+        <Section title={item.apiKey ? "API Token" : "SSH 密钥"}>
           {item.apiKey ? (
             <FieldRow label="Token" value={item.apiKey} mono masked c={c} isLast />
           ) : (
             <>
               <FieldRow label="用户" value={item.username ?? ""} c={c} />
               <FieldRow label="算法" value={item.keyType ?? ""} mono c={c} />
-              <FieldRow label="指纹" value={item.fingerprint ?? ""} mono c={c} multiline />
-              <FieldRow label="公钥" value={item.publicKey ?? ""} mono c={c} multiline isLast />
+              <FieldRow
+                label="指纹"
+                value={item.fingerprint ?? ""}
+                mono
+                c={c}
+                multiline
+              />
+              <FieldRow
+                label="公钥"
+                value={item.publicKey ?? ""}
+                mono
+                c={c}
+                multiline
+                isLast
+              />
             </>
           )}
         </Section>
       );
     case "passkey":
       return (
-        <Section title="通行密钥" c={c}>
+        <Section title="通行密钥">
           <FieldRow label="依赖方 (RP)" value={item.rpId} c={c} />
           <FieldRow label="用户名" value={item.userName ?? ""} c={c} />
-          <FieldRow label="凭据 ID" value={item.credentialId} mono masked c={c} isLast />
+          <FieldRow
+            label="凭据 ID"
+            value={item.credentialId}
+            mono
+            masked
+            c={c}
+            isLast
+          />
         </Section>
       );
     case "totp":
       return (
         <>
-          <Section title="验证器" c={c}>
+          <Section title="验证器">
             <FieldRow label="发行者" value={item.issuer ?? ""} c={c} />
             <FieldRow label="账户" value={item.account ?? ""} c={c} />
-            <FieldRow label="TOTP 密钥" value={item.secret} mono masked c={c} isLast />
+            <FieldRow
+              label="TOTP 密钥"
+              value={item.secret}
+              mono
+              masked
+              c={c}
+              isLast
+            />
           </Section>
-          {item.secret ? <TotpSection secret={item.secret} c={c} /> : null}
+          {item.secret ? <TotpSection secret={item.secret} /> : null}
         </>
       );
   }
 }
 
 /* ── 自定义字段：详情渲染 ───────────────────────────────────── */
-//
-// 与 desktop CustomFieldsView 一致：每个字段单独成行；
-// text/hidden 支持复制（hidden 走 copyEphemeral 30s 自动清空），
-// boolean 渲染为只读 switch 样式，linked 显示关联字段键名。
 
-function CustomFieldsSection({
-  fields,
-  c,
-}: {
-  fields: CustomField[];
-  c: (typeof Colors)["dark"];
-}) {
+function CustomFieldsSection({ fields }: { fields: CustomField[] }) {
   return (
-    <Section title="自定义字段" c={c}>
+    <Section title="自定义字段">
       {fields.map((f, idx) => (
         <CustomFieldDetailRow
           key={f.id}
           field={f}
-          c={c}
           isLast={idx === fields.length - 1}
         />
       ))}
@@ -657,25 +726,19 @@ function CustomFieldsSection({
 
 function CustomFieldDetailRow({
   field,
-  c,
   isLast,
 }: {
   field: CustomField;
-  c: (typeof Colors)["dark"];
   isLast: boolean;
 }) {
+  const { colors: c } = useTheme();
   const [revealed, setRevealed] = useState(false);
   const label = field.name?.trim() || "(未命名)";
 
   if (field.type === "boolean") {
     const on = Boolean(field.value);
     return (
-      <View
-        style={[
-          fieldStyles.row,
-          { borderBottomColor: isLast ? "transparent" : c.lineSoft },
-        ]}
-      >
+      <View style={fieldStyles.row}>
         <View style={fieldStyles.left}>
           <Text style={[fieldStyles.label, { color: c.text3 }]}>{label}</Text>
           <Text style={[fieldStyles.value, { color: c.text }]}>
@@ -686,20 +749,25 @@ function CustomFieldDetailRow({
           <View
             style={[
               customDetailStyles.roSwitch,
-              { backgroundColor: on ? c.text : c.line },
+              { backgroundColor: on ? c.accent : c.bgActive },
             ]}
           >
             <View
               style={[
                 customDetailStyles.roSwitchThumb,
                 {
-                  backgroundColor: on ? c.bg : c.text3,
+                  backgroundColor: on ? c.accentInk : c.text3,
                   transform: [{ translateX: on ? 14 : 0 }],
                 },
               ]}
             />
           </View>
         </View>
+        {!isLast && (
+          <View
+            style={[fieldStyles.hairline, { backgroundColor: c.lineSoft }]}
+          />
+        )}
       </View>
     );
   }
@@ -708,12 +776,7 @@ function CustomFieldDetailRow({
     const target =
       typeof field.value === "string" && field.value ? field.value : "(未关联)";
     return (
-      <View
-        style={[
-          fieldStyles.row,
-          { borderBottomColor: isLast ? "transparent" : c.lineSoft },
-        ]}
-      >
+      <View style={fieldStyles.row}>
         <View style={fieldStyles.left}>
           <Text style={[fieldStyles.label, { color: c.text3 }]}>{label}</Text>
           <View style={customDetailStyles.linkRow}>
@@ -729,63 +792,68 @@ function CustomFieldDetailRow({
             </Text>
           </View>
         </View>
+        {!isLast && (
+          <View
+            style={[fieldStyles.hairline, { backgroundColor: c.lineSoft }]}
+          />
+        )}
       </View>
     );
   }
 
   const raw = typeof field.value === "string" ? field.value : "";
   const masked = field.type === "hidden";
-  if (!raw && !masked) {
-    // 与原生 FieldRow 行为一致：空文本字段不渲染（boolean / linked 例外）
-    return null;
-  }
-  const display = masked && !revealed ? "•".repeat(Math.min(raw.length, 20)) : raw;
+  if (!raw && !masked) return null;
+  const showMask = masked && !revealed;
+
   return (
-    <View
-      style={[
-        fieldStyles.row,
-        { borderBottomColor: isLast ? "transparent" : c.lineSoft },
-      ]}
-    >
+    <View style={fieldStyles.row}>
       <View style={fieldStyles.left}>
         <Text style={[fieldStyles.label, { color: c.text3 }]}>{label}</Text>
-        <Text
-          style={[
-            fieldStyles.value,
-            { color: c.text, fontFamily: masked ? MONO : undefined },
-          ]}
-          numberOfLines={1}
-          ellipsizeMode="tail"
-        >
-          {display}
-        </Text>
+        {showMask ? (
+          maskDots(c)
+        ) : (
+          <Text
+            style={[
+              fieldStyles.value,
+              { color: c.text, fontFamily: masked ? MONO : undefined },
+            ]}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
+            {raw}
+          </Text>
+        )}
       </View>
       <View style={fieldStyles.actions}>
         {masked && (
-          <TouchableOpacity
+          <IconButton
+            icon={revealed ? "eye.slash.fill" : "eye.fill"}
+            size={34}
+            iconSize={16}
+            variant="tinted"
+            haptic="selection"
             onPress={() => setRevealed((v) => !v)}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            style={[fieldStyles.iconBtn, { backgroundColor: c.bgHover }]}
-          >
-            <IconSymbol
-              name={revealed ? "eye.slash.fill" : "eye.fill"}
-              size={16}
-              color={c.text2}
-            />
-          </TouchableOpacity>
+          />
         )}
-        <TouchableOpacity
+        <IconButton
+          icon="doc.on.doc.fill"
+          size={34}
+          iconSize={16}
+          variant="tinted"
+          haptic="light"
           onPress={async () => {
             if (masked) await copyEphemeral(raw);
             else await copyText(raw);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           }}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          style={[fieldStyles.iconBtn, { backgroundColor: c.bgHover }]}
-        >
-          <IconSymbol name="doc.on.doc.fill" size={16} color={c.text2} />
-        </TouchableOpacity>
+        />
       </View>
+      {!isLast && (
+        <View
+          style={[fieldStyles.hairline, { backgroundColor: c.lineSoft }]}
+        />
+      )}
     </View>
   );
 }
@@ -803,49 +871,40 @@ const customDetailStyles = StyleSheet.create({
 });
 
 const heroStyles = StyleSheet.create({
-  wrap: { alignItems: "center", paddingVertical: 24, gap: 8 },
+  wrap: {
+    alignItems: "center",
+    paddingVertical: Spacing.xxl,
+    gap: Spacing.sm,
+  },
   icon: {
-    width: 56,
-    height: 56,
-    borderRadius: 14,
+    width: 64,
+    height: 64,
+    borderRadius: Radius.xl,
     alignItems: "center",
     justifyContent: "center",
   },
-  iconText: { color: "#fff", fontSize: 22, fontWeight: "700" },
-  name: { fontSize: 22, fontWeight: "700", letterSpacing: -0.4 },
-  tag: {
-    borderWidth: 1,
-    borderRadius: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  tagText: { fontSize: 11, fontWeight: "500" },
+  iconText: { color: "#fff", fontSize: 24, fontWeight: "700" },
+  name: { ...Type.title, marginTop: 4 },
 });
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  scroll: { paddingBottom: 40 },
+  scroll: { paddingBottom: Spacing.xxl },
   notFound: { flex: 1, alignItems: "center", justifyContent: "center" },
-  notFoundText: { fontSize: 14 },
-  noteText: { fontSize: 14, lineHeight: 21 },
-  tagRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, padding: 14 },
+  notFoundText: { ...Type.body },
+  noteText: { ...Type.body, lineHeight: 22 },
+  tagRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    padding: Spacing.lg,
+  },
   tagChip: {
-    borderWidth: 1,
-    borderRadius: 6,
+    borderRadius: Radius.md,
     paddingHorizontal: 8,
     paddingVertical: 3,
   },
-  tagChipText: { fontSize: 12, fontFamily: MONO },
-  deleteBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    height: 44,
-    borderWidth: 1,
-    borderRadius: 10,
-  },
-  deleteText: { fontSize: 15, fontWeight: "600" },
-  footer: { alignItems: "center", paddingTop: 4, paddingBottom: 16 },
-  footerText: { fontSize: 11 },
+  tagChipText: { ...Type.subhead },
+  footer: { alignItems: "center", paddingTop: Spacing.xs, paddingBottom: Spacing.lg },
+  footerText: { ...Type.caption },
 });

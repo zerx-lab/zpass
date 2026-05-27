@@ -3,24 +3,29 @@ import {
   View,
   Text,
   TextInput,
-  TouchableOpacity,
   ScrollView,
   StyleSheet,
   Platform,
   KeyboardAvoidingView,
 } from "react-native";
-import { toast } from "@/components/ui/dialog";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, router } from "expo-router";
 import * as Haptics from "expo-haptics";
 
-import { Colors } from "@/constants/theme";
-import { useColorScheme } from "@/hooks/use-color-scheme";
+import { Fonts, Radius, Spacing, Type } from "@/constants/theme";
+import { useTheme } from "@/contexts/theme-context";
 import { IconSymbol } from "@/components/ui/icon-symbol";
+import {
+  Button,
+  Chip,
+  IconButton,
+  PressableScale,
+} from "@/components/ui/primitives";
 import { useVault, type ItemDraft, type ItemPatch } from "@/contexts/vault-context";
 import type { VaultItem, VaultItemType } from "@/data/vault";
 import { TYPE_LABELS } from "@/lib/format";
 import { generatePassword } from "@/lib/password";
+import { toast } from "@/components/ui/dialog";
 import { QrScanner } from "@/components/qr-scanner";
 import type { OtpMeta } from "@/lib/totp";
 import {
@@ -31,21 +36,19 @@ import {
   type CustomField,
   type CustomFieldType,
 } from "@/lib/custom-fields";
+import type { ColorPalette } from "@/constants/theme";
 
-const MONO = Platform.select({ ios: "Menlo", default: "monospace" });
+const MONO = Fonts?.mono ?? "monospace";
 
 /** 各类型的字段定义 —— 决定表单渲染顺序与控件 */
 interface FieldDef {
   key: string;
   label: string;
   placeholder?: string;
-  /** 是否敏感（默认隐藏 + 提供生成按钮可选） */
   secret?: boolean;
   multiline?: boolean;
   mono?: boolean;
-  /** 仅 login.password 启用「生成」 */
   generate?: boolean;
-  /** 启用「扫描二维码」入口（仅 TOTP 密钥字段） */
   scan?: boolean;
   keyboard?: "default" | "email-address" | "numeric";
 }
@@ -118,9 +121,12 @@ const ALL_TYPES: VaultItemType[] = [
 ];
 
 export default function ItemEditorScreen() {
-  const scheme = useColorScheme() ?? "dark";
-  const c = Colors[scheme];
-  const params = useLocalSearchParams<{ id: string; type?: string }>();
+  const { colors: c } = useTheme();
+  const params = useLocalSearchParams<{
+    id: string;
+    type?: string;
+    initialPassword?: string;
+  }>();
   const { getItem, addItem, updateItem } = useVault();
 
   const isNew = params.id === "new";
@@ -133,7 +139,6 @@ export default function ItemEditorScreen() {
         : "login"),
   );
 
-  // 表单值：所有字段统一存字符串
   const [values, setValues] = useState<Record<string, string>>(() => {
     const v: Record<string, string> = {};
     if (existing) {
@@ -141,13 +146,13 @@ export default function ItemEditorScreen() {
         if (typeof val === "string") v[k] = val;
       }
       v.tags = (existing.tags ?? []).join(", ");
+    } else if (isNew && params.initialPassword) {
+      v.password = params.initialPassword;
     }
     return v;
   });
   const [favorite, setFavorite] = useState(existing?.favorite ?? false);
 
-  // 自定义字段 —— 与 desktop 一致：编辑期全量在内存维护，提交时序列化到
-  // fields["_customFields"]，与原生字段彻底解耦。
   const [customFields, setCustomFields] = useState<CustomField[]>(
     () => existing?.customFields ?? [],
   );
@@ -159,7 +164,6 @@ export default function ItemEditorScreen() {
     setValues((prev) => ({ ...prev, [k]: val }));
   }, []);
 
-  /* ── 自定义字段操作 ──────────────────────────────────────────── */
   const addCustomField = useCallback(
     (cfType: CustomFieldType) => {
       Haptics.selectionAsync();
@@ -196,7 +200,6 @@ export default function ItemEditorScreen() {
         arr.map((f) => {
           if (f.id !== id) return f;
           if (next === f.type) return f;
-          // 类型切换重置 value 形态，避免类型不匹配的 stale 值
           const value: string | boolean =
             next === "boolean"
               ? false
@@ -215,18 +218,15 @@ export default function ItemEditorScreen() {
     setCustomFields((arr) => arr.filter((f) => f.id !== id));
   }, []);
 
-  /* ── 扫码：哪个字段触发扫描 / 弹窗是否打开 ──────────────────── */
   const [scanTarget, setScanTarget] = useState<string | null>(null);
   const handleScanResult = useCallback(
     (uri: string, meta: OtpMeta) => {
       if (!scanTarget) return;
       setValues((prev) => {
         const next: Record<string, string> = { ...prev, [scanTarget]: uri };
-        // 独立 totp 条目：尊重用户已有输入，仅在 issuer / account 为空时回填
         if (type === "totp") {
           if (!next.issuer && meta.issuer) next.issuer = meta.issuer;
           if (!next.account && meta.account) next.account = meta.account;
-          // 名称为空时也用 issuer 兜底，让列表更可读
           if (!next.name && meta.issuer) next.name = meta.issuer;
         }
         return next;
@@ -243,13 +243,11 @@ export default function ItemEditorScreen() {
       return;
     }
 
-    // 组装 type 专属字段
     const draftFields: Record<string, unknown> = {};
     for (const f of fields) {
       const val = (values[f.key] ?? "").trim();
       if (val) draftFields[f.key] = val;
     }
-    // 必填占位：保证联合类型必需字段存在
     if (type === "login") {
       draftFields.username = (values.username ?? "").trim();
       draftFields.password = (values.password ?? "").trim();
@@ -316,22 +314,26 @@ export default function ItemEditorScreen() {
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: c.bg }]} edges={["top"]}>
       {/* NavBar */}
-      <View style={[styles.nav, { borderBottomColor: c.lineSoft }]}>
-        <TouchableOpacity
+      <View style={styles.nav}>
+        <PressableScale
           onPress={() => router.back()}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          haptic="light"
+          scale={0.96}
+          style={styles.navBtn}
         >
           <Text style={[styles.navCancel, { color: c.text2 }]}>取消</Text>
-        </TouchableOpacity>
-        <Text style={[styles.navTitle, { color: c.text }]}>
+        </PressableScale>
+        <Text style={[styles.navTitle, { color: c.text }]} numberOfLines={1}>
           {isNew ? "新建条目" : "编辑条目"}
         </Text>
-        <TouchableOpacity
+        <PressableScale
           onPress={handleSave}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          haptic="medium"
+          scale={0.96}
+          style={styles.navBtn}
         >
-          <Text style={[styles.navSave, { color: c.text }]}>保存</Text>
-        </TouchableOpacity>
+          <Text style={[styles.navSave, { color: c.info }]}>保存</Text>
+        </PressableScale>
       </View>
 
       <KeyboardAvoidingView
@@ -343,41 +345,25 @@ export default function ItemEditorScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {/* 类型选择（仅新建时可改） */}
+          {/* 类型选择 */}
           {isNew && (
-            <>
+            <View style={styles.section}>
               <Text style={[styles.sectionLabel, { color: c.text3 }]}>类型</Text>
-              <View style={styles.typeGrid}>
-                {ALL_TYPES.map((t) => {
-                  const active = type === t;
-                  return (
-                    <TouchableOpacity
-                      key={t}
-                      onPress={() => {
-                        Haptics.selectionAsync();
-                        setType(t);
-                      }}
-                      activeOpacity={0.75}
-                      style={[
-                        styles.typeChip,
-                        active
-                          ? { backgroundColor: c.text, borderColor: c.text }
-                          : { backgroundColor: c.bgElev, borderColor: c.line },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.typeChipText,
-                          { color: active ? c.bg : c.text2 },
-                        ]}
-                      >
-                        {TYPE_LABELS[t]}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.typeRow}
+              >
+                {ALL_TYPES.map((t) => (
+                  <Chip
+                    key={t}
+                    label={TYPE_LABELS[t]}
+                    active={type === t}
+                    onPress={() => setType(t)}
+                  />
+                ))}
+              </ScrollView>
+            </View>
           )}
 
           {/* 名称 */}
@@ -424,7 +410,7 @@ export default function ItemEditorScreen() {
             />
           ))}
 
-          {/* 自定义字段 —— 参考 Bitwarden / desktop 端，统一在原生字段下方 */}
+          {/* 自定义字段 */}
           <CustomFieldsSection
             fields={customFields}
             linkable={linkable}
@@ -454,39 +440,45 @@ export default function ItemEditorScreen() {
           )}
 
           {/* 收藏 */}
-          <TouchableOpacity
-            style={[styles.favRow, { backgroundColor: c.bgElev, borderColor: c.line }]}
-            onPress={() => {
-              Haptics.selectionAsync();
-              setFavorite((v) => !v);
-            }}
-            activeOpacity={0.75}
+          <PressableScale
+            onPress={() => setFavorite((v) => !v)}
+            scale={0.99}
+            haptic="selection"
+            pressedBg={c.bgHover}
+            style={[styles.favRow, { backgroundColor: c.bgElev }]}
           >
-            <IconSymbol
-              name={favorite ? "star.fill" : "star"}
-              size={18}
-              color={favorite ? "#f5c518" : c.text3}
-            />
+            <View
+              style={[
+                styles.favIcon,
+                { backgroundColor: favorite ? c.warn + "1f" : c.bgActive },
+              ]}
+            >
+              <IconSymbol
+                name={favorite ? "star.fill" : "star"}
+                size={16}
+                color={favorite ? c.warn : c.text3}
+              />
+            </View>
             <Text style={[styles.favText, { color: c.text }]}>加入收藏</Text>
             <View
               style={[
                 styles.switchTrack,
-                { backgroundColor: favorite ? c.text : c.line },
+                { backgroundColor: favorite ? c.accent : c.bgActive },
               ]}
             >
               <View
                 style={[
                   styles.switchThumb,
                   {
-                    backgroundColor: favorite ? c.bg : c.text3,
+                    backgroundColor: favorite ? c.accentInk : c.text3,
                     transform: [{ translateX: favorite ? 14 : 0 }],
                   },
                 ]}
               />
             </View>
-          </TouchableOpacity>
+          </PressableScale>
 
-          <View style={{ height: 32 }} />
+          <View style={{ height: Spacing.xxl }} />
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -512,7 +504,7 @@ function Field({
   def: FieldDef;
   value: string;
   onChange: (v: string) => void;
-  c: (typeof Colors)["dark"];
+  c: ColorPalette;
   onGenerate?: () => void;
   onScan?: () => void;
 }) {
@@ -527,7 +519,6 @@ function Field({
           styles.inputWrap,
           {
             backgroundColor: c.bgElev,
-            borderColor: c.line,
             alignItems: def.multiline ? "flex-start" : "center",
           },
         ]}
@@ -552,46 +543,44 @@ function Field({
           autoCorrect={false}
           keyboardType={def.keyboard ?? "default"}
         />
-        {def.secret && (
-          <TouchableOpacity
-            onPress={() => setRevealed((v) => !v)}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            style={styles.fieldIcon}
-          >
-            <IconSymbol
-              name={revealed ? "eye.slash.fill" : "eye.fill"}
-              size={16}
-              color={c.text3}
+        <View style={styles.fieldIconRow}>
+          {def.secret && (
+            <IconButton
+              icon={revealed ? "eye.slash.fill" : "eye.fill"}
+              size={32}
+              iconSize={16}
+              variant="ghost"
+              haptic="selection"
+              onPress={() => setRevealed((v) => !v)}
             />
-          </TouchableOpacity>
-        )}
-        {onGenerate && (
-          <TouchableOpacity
-            onPress={onGenerate}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            style={styles.fieldIcon}
-          >
-            <IconSymbol name="arrow.clockwise" size={16} color={c.text3} />
-          </TouchableOpacity>
-        )}
-        {onScan && (
-          <TouchableOpacity
-            onPress={onScan}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            style={styles.fieldIcon}
-          >
-            <IconSymbol name="qrcode.viewfinder" size={18} color={c.text2} />
-          </TouchableOpacity>
-        )}
+          )}
+          {onGenerate && (
+            <IconButton
+              icon="arrow.clockwise"
+              size={32}
+              iconSize={16}
+              variant="ghost"
+              haptic="light"
+              onPress={onGenerate}
+            />
+          )}
+          {onScan && (
+            <IconButton
+              icon="qrcode.viewfinder"
+              size={32}
+              iconSize={18}
+              variant="ghost"
+              haptic="selection"
+              onPress={onScan}
+            />
+          )}
+        </View>
       </View>
     </View>
   );
 }
 
 /* ── 自定义字段：编辑器区块 ─────────────────────────────────── */
-//
-// 顶部 4 个 + 按钮，分别对应 text / hidden / boolean / linked，与
-// desktop 对话框中的下拉菜单等价。新增即追加一行编辑区。
 
 function CustomFieldsSection({
   fields,
@@ -608,7 +597,7 @@ function CustomFieldsSection({
   onChangeType: (id: string, type: CustomFieldType) => void;
   onUpdate: (id: string, patch: Partial<CustomField>) => void;
   onRemove: (id: string) => void;
-  c: (typeof Colors)["dark"];
+  c: ColorPalette;
 }) {
   const linkedDisabled = linkable.length === 0;
 
@@ -616,49 +605,35 @@ function CustomFieldsSection({
     <View style={styles.cfSection}>
       <Text style={[styles.fieldLabel, { color: c.text3 }]}>自定义字段</Text>
 
-      {/* 4 个新增按钮 */}
       <View style={styles.cfAddRow}>
         {CUSTOM_FIELD_TYPES.map((tp) => {
           const disabled = tp === "linked" && linkedDisabled;
           return (
-            <TouchableOpacity
+            <Button
               key={tp}
+              label={CUSTOM_FIELD_TYPE_LABEL[tp]}
+              icon="plus"
+              variant="secondary"
+              size="sm"
               onPress={() => {
                 if (disabled) return;
                 onAdd(tp);
               }}
-              activeOpacity={0.75}
-              style={[
-                styles.cfAddChip,
-                {
-                  backgroundColor: c.bgElev,
-                  borderColor: c.line,
-                  opacity: disabled ? 0.4 : 1,
-                },
-              ]}
-            >
-              <IconSymbol name="plus" size={11} color={c.text3} />
-              <Text style={[styles.cfAddChipText, { color: c.text2 }]}>
-                {CUSTOM_FIELD_TYPE_LABEL[tp]}
-              </Text>
-            </TouchableOpacity>
+              disabled={disabled}
+            />
           );
         })}
       </View>
 
       {fields.length === 0 ? (
-        <View
-          style={[
-            styles.cfEmpty,
-            { borderColor: c.line, backgroundColor: c.bgElev },
-          ]}
-        >
+        <View style={[styles.cfEmpty, { backgroundColor: c.bgElev }]}>
+          <IconSymbol name="text.alignleft" size={20} color={c.text3} />
           <Text style={[styles.cfEmptyText, { color: c.text3 }]}>
             可添加文本、隐藏、开关或关联字段
           </Text>
         </View>
       ) : (
-        <View style={{ gap: 10 }}>
+        <View style={{ gap: Spacing.sm }}>
           {fields.map((f) => (
             <CustomFieldEditorRow
               key={f.id}
@@ -689,68 +664,45 @@ function CustomFieldEditorRow({
   onChangeType: (type: CustomFieldType) => void;
   onUpdate: (patch: Partial<CustomField>) => void;
   onRemove: () => void;
-  c: (typeof Colors)["dark"];
+  c: ColorPalette;
 }) {
   const [revealed, setRevealed] = useState(false);
 
   return (
-    <View
-      style={[
-        styles.cfRow,
-        { borderColor: c.line, backgroundColor: c.bgElev },
-      ]}
-    >
-      {/* 顶部：类型 segment + 名称 + 删除 */}
+    <View style={[styles.cfRow, { backgroundColor: c.bgElev }]}>
       <View style={styles.cfHeader}>
         <View style={styles.cfTypeBar}>
           {CUSTOM_FIELD_TYPES.map((tp) => {
             const active = field.type === tp;
             const disabled = tp === "linked" && linkable.length === 0;
             return (
-              <TouchableOpacity
+              <Chip
                 key={tp}
+                label={CUSTOM_FIELD_TYPE_LABEL[tp]}
+                active={active}
                 onPress={() => {
                   if (disabled) return;
                   onChangeType(tp);
                 }}
-                activeOpacity={0.7}
-                style={[
-                  styles.cfTypeChip,
-                  active
-                    ? { backgroundColor: c.text, borderColor: c.text }
-                    : { backgroundColor: c.bg, borderColor: c.line },
-                  disabled && !active && { opacity: 0.4 },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.cfTypeChipText,
-                    { color: active ? c.bg : c.text3 },
-                  ]}
-                >
-                  {CUSTOM_FIELD_TYPE_LABEL[tp]}
-                </Text>
-              </TouchableOpacity>
+                style={disabled && !active ? { opacity: 0.4 } : undefined}
+              />
             );
           })}
         </View>
-        <TouchableOpacity
+        <IconButton
+          icon="trash"
+          size={32}
+          iconSize={15}
+          variant="ghost"
+          haptic="medium"
           onPress={onRemove}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          style={styles.cfRemoveBtn}
-        >
-          <IconSymbol name="trash.fill" size={15} color={c.text3} />
-        </TouchableOpacity>
+        />
       </View>
 
       <TextInput
         style={[
           styles.cfNameInput,
-          {
-            color: c.text,
-            backgroundColor: c.bg,
-            borderColor: c.line,
-          },
+          { color: c.text, backgroundColor: c.bg },
         ]}
         value={field.name}
         onChangeText={(v) => onUpdate({ name: v })}
@@ -761,16 +713,11 @@ function CustomFieldEditorRow({
         maxLength={120}
       />
 
-      {/* 值控件 */}
       {field.type === "text" && (
         <TextInput
           style={[
             styles.cfValueInput,
-            {
-              color: c.text,
-              backgroundColor: c.bg,
-              borderColor: c.line,
-            },
+            { color: c.text, backgroundColor: c.bg },
           ]}
           value={typeof field.value === "string" ? field.value : ""}
           onChangeText={(v) => onUpdate({ value: v })}
@@ -782,12 +729,7 @@ function CustomFieldEditorRow({
       )}
 
       {field.type === "hidden" && (
-        <View
-          style={[
-            styles.cfHiddenWrap,
-            { backgroundColor: c.bg, borderColor: c.line },
-          ]}
-        >
+        <View style={[styles.cfHiddenWrap, { backgroundColor: c.bg }]}>
           <TextInput
             style={[styles.cfHiddenInput, { color: c.text, fontFamily: MONO }]}
             value={typeof field.value === "string" ? field.value : ""}
@@ -798,49 +740,44 @@ function CustomFieldEditorRow({
             autoCapitalize="none"
             autoCorrect={false}
           />
-          <TouchableOpacity
+          <IconButton
+            icon={revealed ? "eye.slash.fill" : "eye.fill"}
+            size={32}
+            iconSize={16}
+            variant="ghost"
             onPress={() => setRevealed((v) => !v)}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            style={styles.cfHiddenEye}
-          >
-            <IconSymbol
-              name={revealed ? "eye.slash.fill" : "eye.fill"}
-              size={16}
-              color={c.text3}
-            />
-          </TouchableOpacity>
+          />
         </View>
       )}
 
       {field.type === "boolean" && (
-        <TouchableOpacity
+        <PressableScale
           onPress={() => onUpdate({ value: !field.value })}
-          activeOpacity={0.75}
-          style={[
-            styles.cfBoolRow,
-            { backgroundColor: c.bg, borderColor: c.line },
-          ]}
+          scale={0.99}
+          haptic="selection"
+          pressedBg={c.bgHover}
+          style={[styles.cfBoolRow, { backgroundColor: c.bg }]}
         >
-          <Text style={[styles.cfBoolText, { color: c.text2 }]}>
+          <Text style={[styles.cfBoolText, { color: c.text }]}>
             {field.value ? "已开启" : "已关闭"}
           </Text>
           <View
             style={[
-              styles.cfSwitchTrack,
-              { backgroundColor: field.value ? c.text : c.line },
+              styles.switchTrack,
+              { backgroundColor: field.value ? c.accent : c.bgActive },
             ]}
           >
             <View
               style={[
-                styles.cfSwitchThumb,
+                styles.switchThumb,
                 {
-                  backgroundColor: field.value ? c.bg : c.text3,
+                  backgroundColor: field.value ? c.accentInk : c.text3,
                   transform: [{ translateX: field.value ? 14 : 0 }],
                 },
               ]}
             />
           </View>
-        </TouchableOpacity>
+        </PressableScale>
       )}
 
       {field.type === "linked" &&
@@ -854,29 +791,12 @@ function CustomFieldEditorRow({
               const active =
                 typeof field.value === "string" && field.value === k;
               return (
-                <TouchableOpacity
+                <Chip
                   key={k}
+                  label={k}
+                  active={active}
                   onPress={() => onUpdate({ value: k })}
-                  activeOpacity={0.7}
-                  style={[
-                    styles.cfLinkChip,
-                    active
-                      ? { backgroundColor: c.text, borderColor: c.text }
-                      : { backgroundColor: c.bg, borderColor: c.line },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.cfLinkChipText,
-                      {
-                        color: active ? c.bg : c.text3,
-                        fontFamily: MONO,
-                      },
-                    ]}
-                  >
-                    {k}
-                  </Text>
-                </TouchableOpacity>
+                />
               );
             })}
           </View>
@@ -892,74 +812,78 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.xs,
+    paddingBottom: Spacing.sm,
   },
-  navCancel: { fontSize: 15 },
-  navTitle: { fontSize: 16, fontWeight: "600" },
-  navSave: { fontSize: 15, fontWeight: "700" },
+  navBtn: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
+    minWidth: 56,
+  },
+  navCancel: { ...Type.body },
+  navTitle: { ...Type.title2 },
+  navSave: { ...Type.bodyEmph, fontWeight: "700" },
 
-  scroll: { paddingHorizontal: 16, paddingTop: 16 },
+  scroll: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.md },
 
+  section: { marginBottom: Spacing.lg },
   sectionLabel: {
-    fontSize: 11,
-    fontWeight: "600",
+    ...Type.footnote,
     textTransform: "uppercase",
-    letterSpacing: 0.8,
-    marginBottom: 8,
+    letterSpacing: 0.4,
+    marginBottom: Spacing.sm,
   },
-  typeGrid: {
+  typeRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 20,
+    gap: Spacing.sm,
+    paddingRight: Spacing.lg,
   },
-  typeChip: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  typeChipText: { fontSize: 13, fontWeight: "500" },
 
-  field: { marginBottom: 14 },
+  field: { marginBottom: Spacing.md },
   fieldLabel: {
-    fontSize: 11,
-    fontWeight: "600",
+    ...Type.footnote,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
     marginBottom: 6,
     marginLeft: 2,
   },
   inputWrap: {
     flexDirection: "row",
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    gap: 8,
+    borderRadius: Radius.lg,
+    paddingLeft: Spacing.md,
+    paddingRight: Spacing.xs,
+    gap: Spacing.xs,
+    minHeight: 46,
   },
   input: {
     flex: 1,
-    fontSize: 14,
+    ...Type.body,
     paddingVertical: 11,
   },
-  fieldIcon: {
-    width: 28,
-    height: 43,
+  fieldIconRow: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    gap: 2,
   },
 
   favRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    marginTop: 4,
+    gap: Spacing.md,
+    borderRadius: Radius.xl,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    marginTop: Spacing.xs,
   },
-  favText: { flex: 1, fontSize: 14, fontWeight: "500" },
+  favIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: Radius.md,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  favText: { flex: 1, ...Type.body },
   switchTrack: {
     width: 32,
     height: 18,
@@ -970,42 +894,30 @@ const styles = StyleSheet.create({
   switchThumb: { width: 14, height: 14, borderRadius: 999 },
 
   /* 自定义字段 */
-  cfSection: { marginBottom: 16 },
+  cfSection: { marginBottom: Spacing.lg },
   cfAddRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 6,
-    marginBottom: 10,
+    gap: Spacing.xs,
+    marginBottom: Spacing.sm,
   },
-  cfAddChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  cfAddChipText: { fontSize: 12, fontWeight: "500" },
   cfEmpty: {
-    borderWidth: 1,
-    borderStyle: "dashed",
-    borderRadius: 10,
-    paddingVertical: 12,
+    borderRadius: Radius.xl,
+    paddingVertical: Spacing.lg,
     alignItems: "center",
+    gap: Spacing.xs,
   },
-  cfEmptyText: { fontSize: 12 },
+  cfEmptyText: { ...Type.footnote },
   cfRow: {
-    borderWidth: 1,
-    borderRadius: 10,
-    padding: 10,
-    gap: 8,
+    borderRadius: Radius.xl,
+    padding: Spacing.md,
+    gap: Spacing.sm,
   },
   cfHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 8,
+    gap: Spacing.sm,
   },
   cfTypeBar: {
     flex: 1,
@@ -1013,77 +925,40 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: 4,
   },
-  cfTypeChip: {
-    borderWidth: 1,
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  cfTypeChipText: { fontSize: 11, fontWeight: "500" },
-  cfRemoveBtn: {
-    width: 30,
-    height: 30,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   cfNameInput: {
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 9,
-    fontSize: 13,
+    borderRadius: Radius.lg,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 10,
+    ...Type.subhead,
   },
   cfValueInput: {
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 9,
-    fontSize: 13,
+    borderRadius: Radius.lg,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 10,
+    ...Type.subhead,
   },
   cfHiddenWrap: {
     flexDirection: "row",
     alignItems: "center",
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 10,
+    borderRadius: Radius.lg,
+    paddingLeft: Spacing.md,
+    paddingRight: Spacing.xs,
     gap: 4,
   },
-  cfHiddenInput: { flex: 1, fontSize: 13, paddingVertical: 9 },
-  cfHiddenEye: {
-    width: 28,
-    height: 36,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  cfHiddenInput: { flex: 1, ...Type.subhead, paddingVertical: 10 },
   cfBoolRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderRadius: Radius.lg,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm + 2,
   },
-  cfBoolText: { fontSize: 13 },
-  cfSwitchTrack: {
-    width: 32,
-    height: 18,
-    borderRadius: 999,
-    justifyContent: "center",
-    paddingHorizontal: 2,
-  },
-  cfSwitchThumb: { width: 14, height: 14, borderRadius: 999 },
-  cfLinkNote: { fontSize: 12, fontStyle: "italic" },
+  cfBoolText: { ...Type.subhead },
+  cfLinkNote: { ...Type.footnote, fontStyle: "italic" },
   cfLinkBar: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 4,
+    gap: Spacing.xs,
   },
-  cfLinkChip: {
-    borderWidth: 1,
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  cfLinkChipText: { fontSize: 11 },
 });

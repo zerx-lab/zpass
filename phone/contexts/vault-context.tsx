@@ -236,14 +236,15 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!locked) {
-      refresh();
-    } else {
+    if (locked) {
       // 锁定时只清 items；spaces / activeSpaceId 是 plaintext，保留下来
-      // 给锁屏页与"我的"页的空间头像使用
+      // 给锁屏页与"我的"页的空间头像使用。
+      // 解锁路径不在这里 refresh —— unlock / initialize / tryUnlockWithTrustedDevice
+      // 都在 setLocked(false) 之前同步预加载好 items + spaces，避免 LockOverlay
+      // 卸载后列表先空 1~3 秒(逐条 AEAD 解密耗时)再补齐的闪烁。
       setAllItems([]);
     }
-  }, [locked, refresh]);
+  }, [locked]);
 
   // 把最新 allItems 同步到 ref —— 让 runBreachScan 无需把 allItems 放进
   // useCallback deps（条目每变一次回调引用就重建，会污染消费者 useEffect deps）
@@ -384,6 +385,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     async (password: string): Promise<ActionResult> => {
       try {
         await vaultService.initialize(password);
+        // 翻 locked 之前先把 items + spaces 拉到 state —— 详见 unlock 的同款注释
+        await refresh();
         setInitialized(true);
         setLocked(false);
         return { ok: true };
@@ -391,20 +394,24 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         return toActionError(e);
       }
     },
-    [],
+    [refresh],
   );
 
   const unlock = useCallback(
     async (password: string): Promise<ActionResult> => {
       try {
         await vaultService.unlock(password);
+        // 把全表解密放在 setLocked(false) 之前：listItems 会同步逐条 AEAD 解密，
+        // 大表能阻塞 1~3 秒。先 await refresh 让 items 进 state 再翻 locked,
+        // 这段耗时并入解锁 spinner，避免 LockOverlay 卸载后再看到空列表。
+        await refresh();
         setLocked(false);
         return { ok: true };
       } catch (e) {
         return toActionError(e);
       }
     },
-    [],
+    [refresh],
   );
 
   const lock = useCallback(() => {
@@ -527,6 +534,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     try {
       const ok = await vaultService.tryUnlockWithTrustedDevice();
       if (ok) {
+        // 与主密码路径一致：先把 items + spaces 预加载进 state，再翻 locked
+        await refresh();
         setLocked(false);
         return true;
       }
@@ -546,7 +555,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       setTrustedDeviceTrying(false);
       trustedTryInflightRef.current = false;
     }
-  }, []);
+  }, [refresh]);
 
   /* ---------------------- HIBP 泄露扫描 ---------------------- */
 

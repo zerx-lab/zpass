@@ -1,20 +1,16 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import {
-  StyleSheet,
-  View,
-  Text,
-  TouchableOpacity,
-  ScrollView,
-} from "react-native";
+import { StyleSheet, View, Text, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
-// 主题：useColorScheme 已桥接到 ThemeContext，自动响应「我的 → 主题」的手动切换
 import * as Haptics from "expo-haptics";
 
-import { Colors, Fonts } from "@/constants/theme";
-import { useColorScheme } from "@/hooks/use-color-scheme";
-import { IconSymbol } from "@/components/ui/icon-symbol";
-import { useVault } from "@/contexts/vault-context";
+import { Elevation, Fonts, Radius, Spacing, Type, Hit } from "@/constants/theme";
+import { useTheme } from "@/contexts/theme-context";
+import {
+  Button,
+  IconButton,
+  PressableScale,
+} from "@/components/ui/primitives";
 import { copyText } from "@/lib/clipboard";
 import { randomBytes } from "@/lib/crypto";
 
@@ -22,14 +18,11 @@ import { randomBytes } from "@/lib/crypto";
 function secureRandomInt(max: number): number {
   if (max <= 0) return 0;
   const limit = 256 - (256 % max);
-  // 一次取一字节循环拒绝采样；max ≤ 128 时极少重试
   while (true) {
     const b = randomBytes(1)[0];
     if (b < limit) return b % max;
   }
 }
-
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 type Mode = "password" | "passphrase" | "pin";
 
@@ -41,8 +34,6 @@ interface Options {
   avoidAmbiguous: boolean;
   pronounceable: boolean;
 }
-
-// ─── Password Generation Logic ─────────────────────────────────────────────────
 
 function generatePassword(len: number, opts: Options): string {
   const upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -69,74 +60,21 @@ function generatePassword(len: number, opts: Options): string {
 }
 
 const WORDLIST = [
-  "apple",
-  "brave",
-  "cloud",
-  "dance",
-  "eagle",
-  "flame",
-  "grace",
-  "heart",
-  "ivory",
-  "jewel",
-  "karma",
-  "lemon",
-  "maple",
-  "noble",
-  "ocean",
-  "pearl",
-  "queen",
-  "river",
-  "solar",
-  "tiger",
-  "ultra",
-  "vivid",
-  "water",
-  "xenon",
-  "youth",
-  "zebra",
-  "amber",
-  "blaze",
-  "crisp",
-  "delta",
-  "ember",
-  "frost",
-  "glide",
-  "haven",
-  "index",
-  "jolly",
-  "knack",
-  "lunar",
-  "mango",
-  "nexus",
-  "orbit",
-  "prism",
-  "quiet",
-  "radar",
-  "sleek",
-  "trove",
-  "unity",
-  "vault",
-  "witch",
-  "xerox",
-  "yield",
-  "zonal",
-  "acorn",
-  "bloom",
-  "coral",
-  "drift",
-  "elbow",
-  "fable",
-  "glade",
-  "honey",
+  "apple", "brave", "cloud", "dance", "eagle", "flame", "grace", "heart",
+  "ivory", "jewel", "karma", "lemon", "maple", "noble", "ocean", "pearl",
+  "queen", "river", "solar", "tiger", "ultra", "vivid", "water", "xenon",
+  "youth", "zebra", "amber", "blaze", "crisp", "delta", "ember", "frost",
+  "glide", "haven", "index", "jolly", "knack", "lunar", "mango", "nexus",
+  "orbit", "prism", "quiet", "radar", "sleek", "trove", "unity", "vault",
+  "witch", "xerox", "yield", "zonal", "acorn", "bloom", "coral", "drift",
+  "elbow", "fable", "glade", "honey",
 ];
 
 function generatePassphrase(wordCount: number): string {
-  const words = Array.from(
+  return Array.from(
     { length: wordCount },
     () => WORDLIST[secureRandomInt(WORDLIST.length)],
-  );
-  return words.join("-");
+  ).join("-");
 }
 
 function generatePin(len: number): string {
@@ -144,8 +82,6 @@ function generatePin(len: number): string {
     "",
   );
 }
-
-// ─── Strength Calculation ───────────────────────────────────────────────────────
 
 function calcStrength(
   password: string,
@@ -172,7 +108,6 @@ function calcStrength(
     return { score, label: score < 50 ? "较弱" : "一般", entropy };
   }
 
-  // password mode
   if (opts.lower) poolSize += 26;
   if (opts.upper) poolSize += 26;
   if (opts.numbers) poolSize += 10;
@@ -195,8 +130,6 @@ function calcStrength(
   return { score, label, entropy };
 }
 
-// ─── Colorize Password ─────────────────────────────────────────────────────────
-
 interface CharSpan {
   char: string;
   type: "upper" | "lower" | "number" | "symbol";
@@ -211,69 +144,122 @@ function tokenize(password: string): CharSpan[] {
   });
 }
 
-// ─── Sub-components ────────────────────────────────────────────────────────────
+/* ─── Sub-components ─────────────────────────────────────────────────────── */
 
-interface ToggleCardProps {
+function ToggleRow({
+  label,
+  sub,
+  value,
+  onToggle,
+}: {
   label: string;
   sub: string;
   value: boolean;
   onToggle: () => void;
-  c: (typeof Colors)["dark"];
-}
-
-function ToggleCard({ label, sub, value, onToggle, c }: ToggleCardProps) {
-  const handlePress = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    onToggle();
-  };
-
+}) {
+  const { colors: c } = useTheme();
+  const monoFamily = Fonts?.mono ?? "monospace";
   return (
-    <TouchableOpacity
-      style={[
-        styles.toggleCard,
-        { backgroundColor: c.bgElev, borderColor: c.line },
-      ]}
-      onPress={handlePress}
-      activeOpacity={0.75}
+    <PressableScale
+      onPress={onToggle}
+      scale={0.97}
+      haptic="selection"
+      pressedBg={c.bgHover}
+      style={[styles.toggleCard, { backgroundColor: c.bgElev }]}
     >
-      <View style={styles.toggleCardLeft}>
-        <Text style={[styles.toggleLabel, { color: c.text }]}>{label}</Text>
+      <View style={{ flex: 1, marginRight: Spacing.sm }}>
+        <Text style={[styles.toggleLabel, { color: c.text }]} numberOfLines={1}>
+          {label}
+        </Text>
         <Text
-          style={[
-            styles.toggleSub,
-            { color: c.text3, fontFamily: Fonts?.mono ?? "monospace" },
-          ]}
+          style={[styles.toggleSub, { color: c.text3, fontFamily: monoFamily }]}
+          numberOfLines={1}
         >
           {sub}
         </Text>
       </View>
-      {/* Custom toggle switch */}
       <View
         style={[
           styles.switchTrack,
-          { backgroundColor: value ? c.text : c.line },
+          { backgroundColor: value ? c.accent : c.bgActive },
         ]}
       >
         <View
           style={[
             styles.switchThumb,
             {
-              backgroundColor: value ? c.bg : c.text3,
+              backgroundColor: value ? c.accentInk : c.text3,
               transform: [{ translateX: value ? 14 : 0 }],
             },
           ]}
         />
       </View>
-    </TouchableOpacity>
+    </PressableScale>
   );
 }
 
-// ─── Main Component ────────────────────────────────────────────────────────────
+function Stepper({
+  value,
+  min,
+  max,
+  onChange,
+  hint,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  onChange: (delta: number) => void;
+  hint?: string;
+}) {
+  const { colors: c } = useTheme();
+  const monoFamily = Fonts?.mono ?? "monospace";
+  const progress = ((value - min) / (max - min)) * 100;
+  return (
+    <View>
+      <View style={styles.stepper}>
+        <IconButton
+          icon="minus"
+          size={Hit.buttonMd}
+          variant="tinted"
+          haptic="light"
+          onPress={() => onChange(-1)}
+        />
+        <View style={[styles.stepperTrack, { backgroundColor: c.bgElev }]}>
+          <View
+            style={[
+              styles.stepperTrackFill,
+              { backgroundColor: c.accent, width: `${progress}%` as any },
+            ]}
+          />
+        </View>
+        <IconButton
+          icon="plus"
+          size={Hit.buttonMd}
+          variant="tinted"
+          haptic="light"
+          onPress={() => onChange(1)}
+        />
+      </View>
+      <Text
+        style={[styles.stepperValue, { color: c.text, fontFamily: monoFamily }]}
+      >
+        {value}
+      </Text>
+      {hint ? (
+        <Text
+          style={[styles.stepperHint, { color: c.text3, fontFamily: monoFamily }]}
+        >
+          {hint}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+/* ─── Main Component ─────────────────────────────────────────────────────── */
 
 export default function GeneratorScreen() {
-  const scheme = useColorScheme() ?? "dark";
-  const c = Colors[scheme];
-  const { addItem } = useVault();
+  const { colors: c } = useTheme();
 
   const [mode, setMode] = useState<Mode>("password");
   const [len, setLen] = useState(20);
@@ -294,17 +280,12 @@ export default function GeneratorScreen() {
 
   const regen = useCallback(() => {
     let pw = "";
-    if (mode === "password") {
-      pw = generatePassword(len, opts);
-    } else if (mode === "passphrase") {
-      pw = generatePassphrase(wordCount);
-    } else {
-      pw = generatePin(pinLen);
-    }
+    if (mode === "password") pw = generatePassword(len, opts);
+    else if (mode === "passphrase") pw = generatePassphrase(wordCount);
+    else pw = generatePin(pinLen);
     setPassword(pw);
   }, [mode, len, wordCount, pinLen, opts]);
 
-  // Auto-regen when dependencies change
   useEffect(() => {
     regen();
   }, [regen]);
@@ -322,46 +303,21 @@ export default function GeneratorScreen() {
     copyTimer.current = setTimeout(() => setCopied(false), 1500);
   };
 
-  // 把生成的密码作为新登录条目存入保险库，并跳转到编辑页补全信息
-  const handleSave = async () => {
+  const handleSave = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    const created = await addItem({
-      type: "login",
-      name: "新登录条目",
-      username: "",
-      password,
-    });
-    if (created) router.push(`/item/${created.id}` as any);
+    router.push({
+      pathname: "/item/[id]",
+      params: { id: "new", type: "login", initialPassword: password },
+    } as any);
   };
 
   const toggleOpt = (key: keyof Options) => {
     setOpts((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const adjustLen = (delta: number) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setLen((v) => Math.min(64, Math.max(8, v + delta)));
-  };
-
-  const adjustWordCount = (delta: number) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setWordCount((v) => Math.min(12, Math.max(2, v + delta)));
-  };
-
-  const adjustPinLen = (delta: number) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setPinLen((v) => Math.min(12, Math.max(4, v + delta)));
-  };
-
-  const setMode_ = (m: Mode) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setMode(m);
-  };
-
   const strength = calcStrength(password, opts, mode);
   const tokens = tokenize(password);
 
-  // Char color by type
   const charColor = (type: CharSpan["type"]) => {
     switch (type) {
       case "upper":
@@ -369,65 +325,44 @@ export default function GeneratorScreen() {
       case "lower":
         return c.text2;
       case "number":
-        return c.text;
+        return c.info;
       case "symbol":
-        return c.text3;
+        return c.warn;
     }
   };
 
-  // Strength bar color
   const barColor =
     strength.score < 40 ? c.danger : strength.score < 70 ? c.warn : c.ok;
 
   const monoFamily = Fonts?.mono ?? "monospace";
 
   return (
-    <SafeAreaView
-      style={[styles.safe, { backgroundColor: c.bg }]}
-      edges={["top"]}
-    >
+    <SafeAreaView style={[styles.safe, { backgroundColor: c.bg }]} edges={["top"]}>
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={[
-          styles.scrollContent,
-          { backgroundColor: c.bg },
-        ]}
+        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Header ─────────────────────────────────── */}
+        {/* Header */}
         <View style={styles.header}>
           <Text style={[styles.title, { color: c.text }]}>生成器</Text>
-          <Text
-            style={[
-              styles.subtitle,
-              {
-                color: c.text3,
-                fontFamily: monoFamily,
-              },
-            ]}
-          >
+          <Text style={[styles.subtitle, { color: c.text3 }]}>
             零知识 · 本地生成
           </Text>
         </View>
 
-        {/* ── Password Display Card ───────────────────── */}
-        <View
-          style={[
-            styles.displayCard,
-            { backgroundColor: c.bgElev, borderColor: c.line },
-          ]}
-        >
-          <View style={styles.displayCardBadge}>
+        {/* Password Display Card */}
+        <View style={[styles.displayCard, { backgroundColor: c.bgElev }]}>
+          <View style={styles.displayBadge}>
             <Text
               style={[
-                styles.charCountBadge,
+                styles.charCount,
                 { color: c.text3, fontFamily: monoFamily },
               ]}
             >
               {password.length} 字符
             </Text>
           </View>
-
           <Text style={[styles.passwordText, { fontFamily: monoFamily }]}>
             {tokens.map((tok, i) => (
               <Text key={i} style={{ color: charColor(tok.type) }}>
@@ -435,369 +370,192 @@ export default function GeneratorScreen() {
               </Text>
             ))}
           </Text>
-        </View>
-
-        {/* ── Strength Indicator ──────────────────────── */}
-        <View
-          style={[
-            styles.strengthCard,
-            { backgroundColor: c.bgElev, borderColor: c.line },
-          ]}
-        >
-          <View style={styles.strengthRow}>
-            <Text style={[styles.strengthLabel, { color: c.text2 }]}>
-              强度：
-            </Text>
-            <View style={[styles.strengthBarBg, { backgroundColor: c.line }]}>
+          <View style={[styles.strengthRow, { borderTopColor: c.lineSoft }]}>
+            <View style={[styles.barBg, { backgroundColor: c.bgActive }]}>
               <View
                 style={[
-                  styles.strengthBarFill,
-                  {
-                    backgroundColor: barColor,
-                    width: `${strength.score}%` as any,
-                  },
+                  styles.barFill,
+                  { backgroundColor: barColor, width: `${strength.score}%` as any },
                 ]}
               />
             </View>
-            <Text
-              style={[
-                styles.strengthInfo,
-                { color: barColor, fontFamily: monoFamily },
-              ]}
-            >
+            <Text style={[styles.strengthLabel, { color: barColor }]}>
               {strength.label}
             </Text>
+            <Text
+              style={[styles.entropy, { color: c.text3, fontFamily: monoFamily }]}
+            >
+              {strength.entropy}b
+            </Text>
           </View>
-          <Text
-            style={[
-              styles.strengthEntropy,
-              { color: c.text3, fontFamily: monoFamily },
-            ]}
-          >
-            约 {strength.entropy} 位熵值
-          </Text>
         </View>
 
-        {/* ── Action Buttons ──────────────────────────── */}
+        {/* Action Buttons */}
         <View style={styles.actionRow}>
-          <TouchableOpacity
-            style={[
-              styles.actionBtn,
-              styles.actionBtnLeft,
-              { backgroundColor: c.bgElev, borderColor: c.line },
-            ]}
+          <Button
+            label="重新生成"
+            icon="arrow.counterclockwise"
+            variant="secondary"
+            size="lg"
             onPress={handleRegen}
-            activeOpacity={0.75}
-          >
-            <IconSymbol
-              name="arrow.counterclockwise"
-              size={18}
-              color={c.text}
-            />
-            <Text style={[styles.actionBtnText, { color: c.text }]}>
-              重新生成
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.actionBtn,
-              styles.actionBtnRight,
-              { backgroundColor: c.text, borderColor: c.text },
-            ]}
+            style={{ flex: 1 }}
+            fullWidth
+          />
+          <Button
+            label={copied ? "已复制" : "复制"}
+            icon={copied ? "checkmark" : "doc.on.doc.fill"}
+            variant="primary"
+            size="lg"
             onPress={handleCopy}
-            activeOpacity={0.75}
-          >
-            <IconSymbol name="doc.on.doc.fill" size={18} color={c.bg} />
-            <Text style={[styles.actionBtnText, { color: c.bg }]}>
-              {copied ? "已复制！" : "复制"}
-            </Text>
-          </TouchableOpacity>
+            style={{ flex: 1 }}
+            fullWidth
+          />
         </View>
 
-        {/* ── Mode Segmented Control ──────────────────── */}
-        <View
-          style={[
-            styles.segmented,
-            { borderColor: c.line, backgroundColor: c.bgElev },
-          ]}
-        >
+        {/* Mode Segmented Control */}
+        <View style={[styles.segmented, { backgroundColor: c.bgActive }]}>
           {(
             [
               { key: "password", label: "密码" },
               { key: "passphrase", label: "词组" },
               { key: "pin", label: "PIN" },
             ] as const
-          ).map((seg) => (
-            <TouchableOpacity
-              key={seg.key}
-              style={[
-                styles.segmentItem,
-                mode === seg.key && {
-                  backgroundColor: c.text,
-                },
-              ]}
-              onPress={() => setMode_(seg.key)}
-              activeOpacity={0.8}
-            >
-              <Text
+          ).map((seg) => {
+            const active = mode === seg.key;
+            return (
+              <PressableScale
+                key={seg.key}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  setMode(seg.key);
+                }}
+                scale={0.97}
+                haptic="none"
                 style={[
-                  styles.segmentText,
-                  {
-                    color: mode === seg.key ? c.bg : c.text2,
-                    fontWeight: mode === seg.key ? "600" : "400",
+                  styles.segmentItem,
+                  active && {
+                    backgroundColor: c.bg,
+                    ...Elevation.md,
                   },
                 ]}
               >
-                {seg.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
+                <Text
+                  style={[
+                    styles.segmentText,
+                    {
+                      color: active ? c.text : c.text2,
+                      fontWeight: active ? "600" : "500",
+                    },
+                  ]}
+                >
+                  {seg.label}
+                </Text>
+              </PressableScale>
+            );
+          })}
         </View>
 
-        {/* ── Password Mode Controls ──────────────────── */}
+        {/* Mode-specific controls */}
         {mode === "password" && (
           <>
-            {/* Length stepper */}
-            <View
-              style={[
-                styles.section,
-                { backgroundColor: c.bgElev, borderColor: c.line },
-              ]}
-            >
-              <Text style={[styles.sectionTitle, { color: c.text2 }]}>
+            <View style={[styles.section, { backgroundColor: c.bgElev }]}>
+              <Text style={[styles.sectionTitle, { color: c.text3 }]}>
                 密码长度
               </Text>
-              <View style={styles.stepper}>
-                <TouchableOpacity
-                  style={[styles.stepperBtn, { borderColor: c.line }]}
-                  onPress={() => adjustLen(-1)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.stepperBtnText, { color: c.text }]}>
-                    −
-                  </Text>
-                </TouchableOpacity>
-
-                <View style={styles.stepperTrack}>
-                  <View
-                    style={[
-                      styles.stepperTrackFill,
-                      {
-                        backgroundColor: c.text,
-                        width: `${((len - 8) / (64 - 8)) * 100}%` as any,
-                      },
-                    ]}
-                  />
-                </View>
-
-                <TouchableOpacity
-                  style={[styles.stepperBtn, { borderColor: c.line }]}
-                  onPress={() => adjustLen(1)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.stepperBtnText, { color: c.text }]}>
-                    ＋
-                  </Text>
-                </TouchableOpacity>
-              </View>
-              <Text
-                style={[
-                  styles.stepperValue,
-                  { color: c.text, fontFamily: monoFamily },
-                ]}
-              >
-                {len}
-              </Text>
+              <Stepper
+                value={len}
+                min={8}
+                max={64}
+                onChange={(d) =>
+                  setLen((v) => Math.min(64, Math.max(8, v + d)))
+                }
+              />
             </View>
 
-            {/* Toggle options 2-col grid */}
             <View style={styles.toggleGrid}>
-              <ToggleCard
+              <ToggleRow
                 label="大写字母"
                 sub="A B C D E F"
                 value={opts.upper}
                 onToggle={() => toggleOpt("upper")}
-                c={c}
               />
-              <ToggleCard
+              <ToggleRow
                 label="小写字母"
                 sub="a b c d e f"
                 value={opts.lower}
                 onToggle={() => toggleOpt("lower")}
-                c={c}
               />
-              <ToggleCard
+              <ToggleRow
                 label="数字"
                 sub="0 1 2 3 4 5"
                 value={opts.numbers}
                 onToggle={() => toggleOpt("numbers")}
-                c={c}
               />
-              <ToggleCard
+              <ToggleRow
                 label="特殊符号"
                 sub="! @ # $ % ^"
                 value={opts.symbols}
                 onToggle={() => toggleOpt("symbols")}
-                c={c}
               />
-              <ToggleCard
+              <ToggleRow
                 label="避免混淆"
                 sub="Il1O0"
                 value={opts.avoidAmbiguous}
                 onToggle={() => toggleOpt("avoidAmbiguous")}
-                c={c}
               />
-              <ToggleCard
+              <ToggleRow
                 label="易读模式"
                 sub="pronounceable"
                 value={opts.pronounceable}
                 onToggle={() => toggleOpt("pronounceable")}
-                c={c}
               />
             </View>
           </>
         )}
 
-        {/* ── Passphrase Mode Controls ────────────────── */}
         {mode === "passphrase" && (
-          <View
-            style={[
-              styles.section,
-              { backgroundColor: c.bgElev, borderColor: c.line },
-            ]}
-          >
-            <Text style={[styles.sectionTitle, { color: c.text2 }]}>
+          <View style={[styles.section, { backgroundColor: c.bgElev }]}>
+            <Text style={[styles.sectionTitle, { color: c.text3 }]}>
               单词数量
             </Text>
-            <View style={styles.stepper}>
-              <TouchableOpacity
-                style={[styles.stepperBtn, { borderColor: c.line }]}
-                onPress={() => adjustWordCount(-1)}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.stepperBtnText, { color: c.text }]}>
-                  −
-                </Text>
-              </TouchableOpacity>
-
-              <View style={styles.stepperTrack}>
-                <View
-                  style={[
-                    styles.stepperTrackFill,
-                    {
-                      backgroundColor: c.text,
-                      width: `${((wordCount - 2) / (12 - 2)) * 100}%` as any,
-                    },
-                  ]}
-                />
-              </View>
-
-              <TouchableOpacity
-                style={[styles.stepperBtn, { borderColor: c.line }]}
-                onPress={() => adjustWordCount(1)}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.stepperBtnText, { color: c.text }]}>
-                  ＋
-                </Text>
-              </TouchableOpacity>
-            </View>
-            <Text
-              style={[
-                styles.stepperValue,
-                { color: c.text, fontFamily: monoFamily },
-              ]}
-            >
-              {wordCount}
-            </Text>
-            <Text
-              style={[
-                styles.passphraseHint,
-                { color: c.text3, fontFamily: monoFamily },
-              ]}
-            >
-              单词以 - 分隔，例如：apple-brave-cloud
-            </Text>
+            <Stepper
+              value={wordCount}
+              min={2}
+              max={12}
+              onChange={(d) =>
+                setWordCount((v) => Math.min(12, Math.max(2, v + d)))
+              }
+              hint="单词以 - 分隔，例如：apple-brave-cloud"
+            />
           </View>
         )}
 
-        {/* ── PIN Mode Controls ───────────────────────── */}
         {mode === "pin" && (
-          <View
-            style={[
-              styles.section,
-              { backgroundColor: c.bgElev, borderColor: c.line },
-            ]}
-          >
-            <Text style={[styles.sectionTitle, { color: c.text2 }]}>
+          <View style={[styles.section, { backgroundColor: c.bgElev }]}>
+            <Text style={[styles.sectionTitle, { color: c.text3 }]}>
               PIN 位数
             </Text>
-            <View style={styles.stepper}>
-              <TouchableOpacity
-                style={[styles.stepperBtn, { borderColor: c.line }]}
-                onPress={() => adjustPinLen(-1)}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.stepperBtnText, { color: c.text }]}>
-                  −
-                </Text>
-              </TouchableOpacity>
-
-              <View style={styles.stepperTrack}>
-                <View
-                  style={[
-                    styles.stepperTrackFill,
-                    {
-                      backgroundColor: c.text,
-                      width: `${((pinLen - 4) / (12 - 4)) * 100}%` as any,
-                    },
-                  ]}
-                />
-              </View>
-
-              <TouchableOpacity
-                style={[styles.stepperBtn, { borderColor: c.line }]}
-                onPress={() => adjustPinLen(1)}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.stepperBtnText, { color: c.text }]}>
-                  ＋
-                </Text>
-              </TouchableOpacity>
-            </View>
-            <Text
-              style={[
-                styles.stepperValue,
-                { color: c.text, fontFamily: monoFamily },
-              ]}
-            >
-              {pinLen}
-            </Text>
-            <Text
-              style={[
-                styles.passphraseHint,
-                { color: c.text3, fontFamily: monoFamily },
-              ]}
-            >
-              范围 4 ~ 12 位，仅含数字 0-9
-            </Text>
+            <Stepper
+              value={pinLen}
+              min={4}
+              max={12}
+              onChange={(d) =>
+                setPinLen((v) => Math.min(12, Math.max(4, v + d)))
+              }
+              hint="范围 4 ~ 12 位，仅含数字 0-9"
+            />
           </View>
         )}
 
-        {/* ── Save Button ─────────────────────────────── */}
-        <TouchableOpacity
-          style={[
-            styles.saveBtn,
-            { backgroundColor: c.bgElev, borderColor: c.line },
-          ]}
+        <Button
+          label="保存到密码库"
+          icon="square.and.arrow.down.fill"
+          variant="secondary"
+          size="lg"
           onPress={handleSave}
-          activeOpacity={0.75}
-        >
-          <Text style={[styles.saveBtnText, { color: c.text2 }]}>
-            + 保存到密码库
-          </Text>
-        </TouchableOpacity>
+          fullWidth
+          style={{ marginTop: Spacing.sm }}
+        />
 
         <View style={styles.bottomPad} />
       </ScrollView>
@@ -805,225 +563,159 @@ export default function GeneratorScreen() {
   );
 }
 
-// ─── Styles ────────────────────────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-  },
+  safe: { flex: 1 },
   scrollContent: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.xxl,
   },
 
-  // Header
   header: {
-    marginBottom: 16,
+    marginBottom: Spacing.lg,
   },
   title: {
-    fontSize: 22,
-    fontWeight: "700",
-    letterSpacing: -0.3,
-    marginBottom: 2,
+    ...Type.title,
   },
   subtitle: {
-    fontSize: 10,
+    ...Type.footnote,
+    marginTop: 2,
   },
 
-  // Password Display Card
+  /* Display */
   displayCard: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingVertical: 22,
-    paddingHorizontal: 18,
-    marginBottom: 10,
-    position: "relative",
-    minHeight: 90,
+    borderRadius: Radius.xl,
+    padding: Spacing.lg,
+    marginBottom: Spacing.md,
+    minHeight: 110,
   },
-  displayCardBadge: {
+  displayBadge: {
     position: "absolute",
-    top: 10,
-    right: 14,
+    top: Spacing.md,
+    right: Spacing.md,
   },
-  charCountBadge: {
-    fontSize: 10,
+  charCount: {
+    ...Type.caption,
   },
   passwordText: {
     fontSize: 22,
     lineHeight: 32,
     flexWrap: "wrap",
-    marginTop: 4,
-  },
-
-  // Strength
-  strengthCard: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    marginBottom: 12,
+    marginTop: Spacing.sm,
   },
   strengthRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
+    paddingTop: Spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  barBg: {
+    flex: 1,
+    height: 4,
+    borderRadius: 2,
+    overflow: "hidden",
+  },
+  barFill: {
+    height: "100%",
+    borderRadius: 2,
   },
   strengthLabel: {
-    fontSize: 12,
+    ...Type.caption,
+    minWidth: 28,
+    textAlign: "right",
   },
-  strengthBarBg: {
+  entropy: {
+    ...Type.caption,
+    minWidth: 32,
+    textAlign: "right",
+  },
+
+  actionRow: {
+    flexDirection: "row",
+    gap: Spacing.sm,
+    marginBottom: Spacing.lg,
+  },
+
+  segmented: {
+    flexDirection: "row",
+    borderRadius: Radius.lg,
+    padding: 3,
+    marginBottom: Spacing.md,
+  },
+  segmentItem: {
+    flex: 1,
+    paddingVertical: Spacing.sm,
+    alignItems: "center",
+    borderRadius: Radius.md,
+  },
+  segmentText: {
+    ...Type.subhead,
+  },
+
+  section: {
+    borderRadius: Radius.xl,
+    padding: Spacing.lg,
+    marginBottom: Spacing.md,
+  },
+  sectionTitle: {
+    ...Type.footnote,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+    marginBottom: Spacing.md,
+  },
+
+  stepper: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.md,
+  },
+  stepperTrack: {
     flex: 1,
     height: 6,
     borderRadius: 3,
     overflow: "hidden",
   },
-  strengthBarFill: {
+  stepperTrackFill: {
     height: "100%",
     borderRadius: 3,
   },
-  strengthInfo: {
-    fontSize: 12,
-    minWidth: 24,
-    textAlign: "right",
-  },
-  strengthEntropy: {
-    fontSize: 10,
-    marginTop: 4,
-  },
-
-  // Action buttons
-  actionRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 16,
-  },
-  actionBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingVertical: 13,
-    borderWidth: 1,
-    borderRadius: 10,
-  },
-  actionBtnLeft: {},
-  actionBtnRight: {},
-  actionBtnIcon: {
-    fontSize: 17,
-    lineHeight: 20,
-  },
-  actionBtnText: {
-    fontSize: 14,
-    fontWeight: "500",
-  },
-
-  // Segmented Control
-  segmented: {
-    flexDirection: "row",
-    borderWidth: 1,
-    borderRadius: 8,
-    overflow: "hidden",
-    marginBottom: 16,
-    padding: 3,
-  },
-  segmentItem: {
-    flex: 1,
-    paddingVertical: 8,
-    alignItems: "center",
-    borderRadius: 6,
-  },
-  segmentText: {
-    fontSize: 13,
-  },
-
-  // Section card (length/word count stepper)
-  section: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    fontSize: 12,
-    marginBottom: 12,
-    fontWeight: "500",
-  },
-
-  // Stepper
-  stepper: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  stepperBtn: {
-    width: 34,
-    height: 34,
-    borderWidth: 1,
-    borderRadius: 7,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  stepperBtnText: {
-    fontSize: 18,
-    lineHeight: 22,
-    fontWeight: "300",
-  },
-  stepperTrack: {
-    flex: 1,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "transparent",
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "rgba(128,128,128,0.2)",
-  },
-  stepperTrackFill: {
-    height: "100%",
-    borderRadius: 2,
-  },
   stepperValue: {
-    fontSize: 13,
-    marginTop: 8,
+    ...Type.headline,
+    marginTop: Spacing.sm,
     textAlign: "center",
   },
-  passphraseHint: {
-    fontSize: 10,
-    marginTop: 8,
+  stepperHint: {
+    ...Type.footnote,
+    marginTop: Spacing.xs,
     textAlign: "center",
   },
 
-  // Toggle grid
   toggleGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 12,
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
   },
   toggleCard: {
-    width: "47.5%",
-    borderWidth: 1,
-    borderRadius: 10,
-    padding: 12,
+    width: "48%",
+    borderRadius: Radius.xl,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-  },
-  toggleCardLeft: {
-    flex: 1,
-    marginRight: 8,
+    minHeight: 56,
   },
   toggleLabel: {
-    fontSize: 12,
-    fontWeight: "500",
-    marginBottom: 2,
+    ...Type.subhead,
   },
   toggleSub: {
-    fontSize: 9,
+    ...Type.caption,
+    marginTop: 2,
   },
 
-  // Switch
   switchTrack: {
     width: 32,
     height: 18,
@@ -1037,20 +729,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
 
-  // Save button
-  saveBtn: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: "center",
-    marginBottom: 8,
-  },
-  saveBtnText: {
-    fontSize: 14,
-    fontWeight: "500",
-  },
-
   bottomPad: {
-    height: 24,
+    height: Spacing.xxl,
   },
 });

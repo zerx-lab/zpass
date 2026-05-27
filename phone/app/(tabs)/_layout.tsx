@@ -74,10 +74,9 @@ export default function TabLayout() {
         }}
       />
 
-      {/* ── 隐藏路由（验证码并入密码库分类） ── */}
+      {/* ── 隐藏路由（占位 / 已弃用页面） ── */}
       <Tabs.Screen name="index" options={{ href: null }} />
       <Tabs.Screen name="explore" options={{ href: null }} />
-      <Tabs.Screen name="totp" options={{ href: null }} />
     </Tabs>
   );
 }

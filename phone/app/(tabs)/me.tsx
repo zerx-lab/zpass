@@ -1,7 +1,7 @@
-// 我的 —— 账户 / 偏好 / 数据 / 关于
+// 我的 —— iOS HIG insetGrouped 风格重构
 //
-// 与 desktop SettingsPage 对齐：所有偏好均在本地，云端模式占位。
-// 主密码修改、清空保险库、明文导入导出都直接走加密 vault。
+// 模块：用户卡片 + 空间 + 统计 + 安全 + 外观 + 数据 + 关于
+// 弹窗：修改主密码 / 启用信任设备 / 空间管理（全部走 primitives + Sheet 样式）
 
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
@@ -10,17 +10,15 @@ import {
   View,
   Text,
   ScrollView,
-  TouchableOpacity,
   Platform,
   Modal,
   TextInput,
   KeyboardAvoidingView,
-  ActivityIndicator,
+  Pressable,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { Colors } from "@/constants/theme";
-import { useColorScheme } from "@/hooks/use-color-scheme";
+import { Fonts, Radius, Spacing, Type } from "@/constants/theme";
 import { useTheme, type ThemeMode } from "@/contexts/theme-context";
 import { useVault } from "@/contexts/vault-context";
 import type { VaultItem, VaultItemType } from "@/data/vault";
@@ -29,191 +27,67 @@ import { sortSpaces, type Space } from "@/lib/spaces";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { SpaceAvatar } from "@/components/space-avatar";
 import { actionSheet, dialog, toast } from "@/components/ui/dialog";
+import {
+  Badge,
+  Button,
+  IconButton,
+  ListGroup,
+  ListRow,
+  PressableScale,
+} from "@/components/ui/primitives";
+import type { ColorPalette } from "@/constants/theme";
 
-const MONO = Platform.select({ ios: "ui-monospace", default: "monospace" });
+const MONO = Fonts?.mono ?? "monospace";
 
-interface MenuRowConfig {
-  key: string;
-  label: string;
-  value?: string;
-  badge?: { text: string; color: "danger" | "warn" | "ok" | "text3" };
-  showChevron?: boolean;
-  onPress?: () => void;
-}
+type IconName = Parameters<typeof IconSymbol>[0]["name"];
 
-/* ----- 子组件 ----- */
-
-function SectionLabel({ title, c }: { title: string; c: typeof Colors.dark }) {
-  return (
-    <Text style={[styles.sectionLabel, { color: c.text3, fontFamily: MONO }]}>
-      {title}
-    </Text>
-  );
-}
-
-function MenuRow({
-  config,
-  isFirst,
-  isLast,
-  c,
-}: {
-  config: MenuRowConfig;
-  isFirst: boolean;
-  isLast: boolean;
-  c: typeof Colors.dark;
-}) {
-  const handlePress = () => {
-    if (config.onPress) config.onPress();
-    else toast.info("功能开发中", config.label + " 暂未实现");
-  };
-
-  const badgeColor = config.badge
-    ? config.badge.color === "danger"
-      ? c.danger
-      : config.badge.color === "warn"
-        ? c.warn
-        : config.badge.color === "ok"
-          ? c.ok
-          : c.text3
-    : c.text3;
-
-  return (
-    <>
-      <TouchableOpacity
-        activeOpacity={0.65}
-        onPress={handlePress}
-        style={[
-          styles.menuRow,
-          {
-            borderTopLeftRadius: isFirst ? 10 : 0,
-            borderTopRightRadius: isFirst ? 10 : 0,
-            borderBottomLeftRadius: isLast ? 10 : 0,
-            borderBottomRightRadius: isLast ? 10 : 0,
-          },
-        ]}
-      >
-        <Text style={[styles.menuRowLabel, { color: c.text }]}>{config.label}</Text>
-        <View style={styles.menuRowRight}>
-          {config.badge ? (
-            <View
-              style={[
-                styles.badgeWrap,
-                {
-                  backgroundColor: badgeColor + "22",
-                  borderColor: badgeColor + "66",
-                },
-              ]}
-            >
-              <Text
-                style={[styles.badgeText, { color: badgeColor, fontFamily: MONO }]}
-              >
-                {config.badge.text}
-              </Text>
-            </View>
-          ) : null}
-          {config.value ? (
-            <Text
-              style={[styles.menuRowValue, { color: c.text3, fontFamily: MONO }]}
-            >
-              {config.value}
-            </Text>
-          ) : null}
-          {config.showChevron ? (
-            <Text style={[styles.chevron, { color: c.text3 }]}>{"›"}</Text>
-          ) : null}
-        </View>
-      </TouchableOpacity>
-      {!isLast && (
-        <View style={[styles.separator, { backgroundColor: c.lineSoft }]} />
-      )}
-    </>
-  );
-}
-
-function MenuSection({
-  label,
-  rows,
-  c,
-}: {
-  label: string;
-  rows: MenuRowConfig[];
-  c: typeof Colors.dark;
-}) {
-  return (
-    <View style={styles.menuSection}>
-      <SectionLabel title={label} c={c} />
-      <View
-        style={[
-          styles.menuCard,
-          { backgroundColor: c.bgElev, borderColor: c.line },
-        ]}
-      >
-        {rows.map((row, index) => (
-          <MenuRow
-            key={row.key}
-            config={row}
-            isFirst={index === 0}
-            isLast={index === rows.length - 1}
-            c={c}
-          />
-        ))}
-      </View>
-    </View>
-  );
-}
+/* ----- 用户卡片 ----- */
 
 function UserCard({
-  c,
   count,
   space,
   onPress,
 }: {
-  c: typeof Colors.dark;
   count: number;
   space: Space | null;
   onPress?: () => void;
 }) {
-  // 头像与标题都跟随当前空间；点击整个卡片打开空间管理面板。
-  // 用 TouchableOpacity 包裹整张卡：用户感知"头像可以改" → 进入空间管理
-  // 后通过长按行做重命名（保留原有交互入口，避免新增二级 modal）。
+  const { colors: c } = useTheme();
   return (
-    <TouchableOpacity
-      activeOpacity={0.85}
+    <PressableScale
       onPress={onPress}
-      style={[
-        styles.userCard,
-        { backgroundColor: c.bgElev, borderColor: c.line },
-      ]}
+      scale={0.985}
+      haptic="selection"
+      pressedBg={c.bgHover}
+      style={[styles.userCard, { backgroundColor: c.bgElev }]}
     >
       <SpaceAvatar
         space={space}
         size={56}
-        background={c.text}
-        foreground={c.bg}
+        background={c.accent}
+        foreground={c.accentInk}
         fontSize={22}
-        borderRadius={28}
+        borderRadius={Radius.full}
       />
       <View style={styles.userInfo}>
         <Text style={[styles.userName, { color: c.text }]} numberOfLines={1}>
           {space?.name ?? "本地保险库"}
         </Text>
-        <Text style={[styles.userPlan, { color: c.text3, fontFamily: MONO }]}>
+        <Text style={[styles.userMeta, { color: c.text3 }]}>
           {count} 条加密条目 · 零知识
         </Text>
       </View>
-      <Text style={[styles.chevron, { color: c.text3 }]}>{"›"}</Text>
-    </TouchableOpacity>
+      <IconSymbol name="chevron.right" size={18} color={c.text4} />
+    </PressableScale>
   );
 }
 
 /* ----- 主屏 ----- */
 
 export default function MeScreen() {
-  const scheme = useColorScheme() ?? "dark";
-  const c = Colors[scheme];
+  const { colors: c, mode: themeMode, setMode: setThemeMode, scheme } = useTheme();
   const router = useRouter();
 
-  const { mode: themeMode, setMode: setThemeMode } = useTheme();
   const {
     lock,
     items,
@@ -313,7 +187,7 @@ export default function MeScreen() {
   /* ── 主题切换 ── */
   const themeValueLabel = React.useMemo(() => {
     if (themeMode === "system")
-      return `跟随系统（${scheme === "dark" ? "深色" : "浅色"}）`;
+      return `跟随系统 · ${scheme === "dark" ? "深色" : "浅色"}`;
     return themeMode === "dark" ? "深色" : "浅色";
   }, [themeMode, scheme]);
 
@@ -328,7 +202,7 @@ export default function MeScreen() {
       message: "切换 ZPass 的外观主题",
       actions: options.map((opt) => ({
         key: opt.value,
-        label: `${opt.label}${themeMode === opt.value ? " · 已选" : ""}`,
+        label: `${opt.label}${themeMode === opt.value ? " · 当前" : ""}`,
         variant: themeMode === opt.value ? "primary" : "default",
       })),
     });
@@ -337,26 +211,7 @@ export default function MeScreen() {
 
   const typeCounts = React.useMemo(() => countByType(items), [items]);
 
-  const spacesRows: MenuRowConfig[] = [
-    {
-      key: "current-space",
-      label: "当前空间",
-      value: activeSpaceName,
-      showChevron: true,
-      onPress: () => setSpacesModal(true),
-    },
-  ];
-
-  /* ── 在此设备上自动解锁（信任设备） ──
-   *
-   * UI 状态机：
-   *   - 平台不支持            → toast 提示，行可点但不进入弹窗
-   *   - 已启用                → 点击 confirm 后 disable
-   *   - 未启用                → 点击弹自定义 Modal 二次输入主密码
-   *
-   * 注：用自定义 TrustedDeviceEnableModal 而不是 dialog.prompt —— 后者会
-   * trim 输入，破坏含两端空格的主密码。
-   */
+  /* ── 信任设备切换 ── */
   const handleToggleTrustedDevice = React.useCallback(async () => {
     if (!trustedDeviceSupported) {
       toast.info("当前平台不支持设备解锁", "需在 iOS / Android 真机上启用生物识别");
@@ -380,115 +235,24 @@ export default function MeScreen() {
     setTrustedModal(true);
   }, [trustedDeviceSupported, trustedDeviceEnabled, disableTrustedDevice]);
 
-  const securityRows: MenuRowConfig[] = [
-    {
-      key: "change-pwd",
-      label: "修改主密码",
-      showChevron: true,
-      onPress: () => setPwModal(true),
-    },
-    {
-      key: "trusted-device",
-      label: "在此设备上自动解锁",
-      value: !trustedDeviceSupported
-        ? "不支持"
-        : trustedDeviceEnabled
-          ? "已启用"
-          : "未启用",
-      showChevron: trustedDeviceSupported,
-      onPress: handleToggleTrustedDevice,
-    },
-    {
-      key: "lan-sync",
-      label: "局域网同步",
-      value: "连接桌面端",
-      showChevron: true,
-      onPress: () => router.push("/sync" as never),
-    },
-    {
-      key: "lock-now",
-      label: "立即锁定",
-      showChevron: true,
-      onPress: async () => {
-        const ok = await dialog.confirm("锁定 ZPass", "确认要锁定保险库吗？", {
-          okLabel: "锁定",
-          destructive: true,
-        });
-        if (ok) lock();
-      },
-    },
-  ];
+  const trustedValueLabel = !trustedDeviceSupported
+    ? "不支持"
+    : trustedDeviceEnabled
+      ? "已启用"
+      : "未启用";
 
-  const appearanceRows: MenuRowConfig[] = [
-    {
-      key: "theme",
-      label: "主题",
-      value: themeValueLabel,
-      showChevron: true,
-      onPress: handleThemePress,
-    },
-    { key: "language", label: "语言", value: "中文" },
-  ];
-
-  const dataRows: MenuRowConfig[] = [
-    {
-      key: "import",
-      label: "导入数据",
-      value: "ZPass JSON",
-      showChevron: true,
-      onPress: handleImport,
-    },
-    {
-      key: "export",
-      label: "导出明文备份",
-      value: `${items.length} 项`,
-      showChevron: true,
-      onPress: handleExport,
-    },
-    {
-      key: "clear",
-      label: "清空所有条目",
-      showChevron: true,
-      onPress: handleClearAll,
-    },
-    {
-      key: "reset",
-      label: "重置 ZPass",
-      showChevron: true,
-      onPress: handleReset,
-    },
-  ];
-
-  const statsRows: MenuRowConfig[] = (
-    [
-      ["登录凭据", "login"],
-      ["验证码", "totp"],
-      ["支付卡", "card"],
-      ["安全笔记", "note"],
-      ["身份信息", "identity"],
-      ["SSH 密钥", "ssh"],
-      ["通行密钥", "passkey"],
-    ] as [string, VaultItemType][]
-  ).map(([label, t]) => ({
-    key: `stat-${t}`,
-    label,
-    value: `${typeCounts[t] ?? 0} 项`,
-  }));
-
-  const aboutRows: MenuRowConfig[] = [
-    {
-      key: "about",
-      label: "关于 ZPass",
-      value: "零知识本地密码管理器",
-    },
-    { key: "version", label: "版本", value: "1.0.0" },
+  const itemTypeRows: { label: string; type: VaultItemType; icon: IconName }[] = [
+    { label: "登录凭据", type: "login", icon: "key.fill" },
+    { label: "验证码", type: "totp", icon: "clock.fill" },
+    { label: "支付卡", type: "card", icon: "creditcard.fill" },
+    { label: "安全笔记", type: "note", icon: "note.text" },
+    { label: "身份信息", type: "identity", icon: "person.crop.circle.fill" },
+    { label: "SSH 密钥", type: "ssh", icon: "terminal.fill" },
+    { label: "通行密钥", type: "passkey", icon: "key.horizontal.fill" },
   ];
 
   return (
-    <SafeAreaView
-      style={[styles.safe, { backgroundColor: c.bg }]}
-      edges={["top", "bottom"]}
-    >
+    <SafeAreaView style={[styles.safe, { backgroundColor: c.bg }]} edges={["top"]}>
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={styles.scrollContent}
@@ -498,21 +262,117 @@ export default function MeScreen() {
           <Text style={[styles.pageTitle, { color: c.text }]}>我的</Text>
         </View>
 
-        <UserCard
-          c={c}
-          count={items.length}
-          space={activeSpace}
-          onPress={() => setSpacesModal(true)}
-        />
+        <View style={{ marginHorizontal: Spacing.lg, marginBottom: Spacing.lg }}>
+          <UserCard
+            count={items.length}
+            space={activeSpace}
+            onPress={() => setSpacesModal(true)}
+          />
+        </View>
 
-        <MenuSection label="SPACES · 空间" rows={spacesRows} c={c} />
-        <MenuSection label="STATS · 条目统计" rows={statsRows} c={c} />
-        <MenuSection label="SECURITY · 安全与隐私" rows={securityRows} c={c} />
-        <MenuSection label="APPEARANCE · 外观" rows={appearanceRows} c={c} />
-        <MenuSection label="DATA · 数据" rows={dataRows} c={c} />
-        <MenuSection label="ABOUT · 关于" rows={aboutRows} c={c} />
+        <ListGroup header="空间">
+          <ListRow
+            title="当前空间"
+            value={activeSpaceName}
+            icon="square.grid.2x2.fill"
+            onPress={() => setSpacesModal(true)}
+          />
+        </ListGroup>
 
-        <View style={{ height: 16 }} />
+        <ListGroup header="安全与隐私">
+          <ListRow
+            title="修改主密码"
+            icon="lock.fill"
+            onPress={() => setPwModal(true)}
+          />
+          <ListRow
+            title="此设备自动解锁"
+            value={trustedValueLabel}
+            icon="faceid"
+            onPress={handleToggleTrustedDevice}
+            disabled={!trustedDeviceSupported}
+          />
+          <ListRow
+            title="局域网同步"
+            value="连接桌面端"
+            icon="antenna.radiowaves.left.and.right"
+            onPress={() => router.push("/sync" as never)}
+          />
+          <ListRow
+            title="立即锁定"
+            icon="lock.shield.fill"
+            iconBg={c.danger + "1f"}
+            iconColor={c.danger}
+            tone="danger"
+            onPress={async () => {
+              const ok = await dialog.confirm(
+                "锁定 ZPass",
+                "确认要锁定保险库吗？",
+                { okLabel: "锁定", destructive: true },
+              );
+              if (ok) lock();
+            }}
+          />
+        </ListGroup>
+
+        <ListGroup header="外观">
+          <ListRow
+            title="主题"
+            value={themeValueLabel}
+            icon={scheme === "dark" ? "moon.fill" : "sun.max.fill"}
+            onPress={handleThemePress}
+          />
+          <ListRow title="语言" value="中文" icon="globe" />
+        </ListGroup>
+
+        <ListGroup header="数据">
+          <ListRow
+            title="导入数据"
+            value="ZPass JSON"
+            icon="arrow.down.doc.fill"
+            onPress={handleImport}
+          />
+          <ListRow
+            title="导出明文备份"
+            value={`${items.length} 项`}
+            icon="arrow.up.doc.fill"
+            onPress={handleExport}
+          />
+          <ListRow
+            title="清空所有条目"
+            icon="trash"
+            iconBg={c.warn + "1f"}
+            iconColor={c.warn}
+            tone="danger"
+            onPress={handleClearAll}
+          />
+          <ListRow
+            title="重置 ZPass"
+            icon="trash.fill"
+            iconBg={c.danger + "1f"}
+            iconColor={c.danger}
+            tone="danger"
+            onPress={handleReset}
+          />
+        </ListGroup>
+
+        <ListGroup header="条目统计">
+          {itemTypeRows.map(({ label, type, icon }) => (
+            <ListRow
+              key={type}
+              title={label}
+              value={`${typeCounts[type] ?? 0} 项`}
+              icon={icon}
+              accessory="none"
+            />
+          ))}
+        </ListGroup>
+
+        <ListGroup header="关于" footer="零知识本地密码管理器 · 数据永远只在你的设备上加密存储">
+          <ListRow title="版本" value="1.0.0" icon="info.circle" />
+        </ListGroup>
+
+        <View style={{ height: Spacing.xl }} />
       </ScrollView>
 
       <ChangePasswordModal
@@ -539,7 +399,6 @@ export default function MeScreen() {
         onCreate={createSpace}
         onRename={renameSpace}
         onDelete={deleteSpace}
-        c={c}
       />
     </SafeAreaView>
   );
@@ -565,8 +424,7 @@ function ChangePasswordModal({
     newPwd: string,
   ) => Promise<{ ok: true } | { ok: false; code: string; message: string }>;
 }) {
-  const scheme = useColorScheme() ?? "dark";
-  const c = Colors[scheme];
+  const { colors: c } = useTheme();
 
   const [oldPwd, setOldPwd] = useState("");
   const [newPwd, setNewPwd] = useState("");
@@ -574,14 +432,15 @@ function ChangePasswordModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const reset = () => {
+  const resetForm = () => {
     setOldPwd("");
     setNewPwd("");
     setConfirmPwd("");
     setError(null);
   };
   const close = () => {
-    reset();
+    if (busy) return;
+    resetForm();
     onClose();
   };
 
@@ -599,7 +458,7 @@ function ChangePasswordModal({
     const r = await onSubmit(oldPwd, newPwd);
     setBusy(false);
     if (r.ok) {
-      reset();
+      resetForm();
       onClose();
       toast.ok("已更新", "主密码已修改");
     } else {
@@ -608,57 +467,63 @@ function ChangePasswordModal({
   };
 
   return (
-    <Modal
+    <SheetModal
       visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={close}
+      onClose={close}
+      title="修改主密码"
+      subtitle="主密码用于解锁与加密保险库，请妥善保管"
     >
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={modalStyles.backdrop}
-      >
-        <View style={[modalStyles.card, { backgroundColor: c.bgElev, borderColor: c.line }]}>
-          <Text style={[modalStyles.title, { color: c.text }]}>修改主密码</Text>
+      <ModalField label="当前主密码" value={oldPwd} onChange={setOldPwd} c={c} />
+      <ModalField
+        label="新主密码"
+        hint="至少 8 位，建议混合大小写 + 数字 + 符号"
+        value={newPwd}
+        onChange={setNewPwd}
+        c={c}
+      />
+      <ModalField
+        label="确认新主密码"
+        value={confirmPwd}
+        onChange={setConfirmPwd}
+        c={c}
+      />
 
-          <ModalField label="当前主密码" value={oldPwd} onChange={setOldPwd} c={c} />
-          <ModalField label="新主密码（≥ 8 位）" value={newPwd} onChange={setNewPwd} c={c} />
-          <ModalField label="确认新主密码" value={confirmPwd} onChange={setConfirmPwd} c={c} />
-
-          {error ? (
-            <Text style={[modalStyles.error, { color: c.danger }]}>{error}</Text>
-          ) : null}
-
-          <View style={modalStyles.actions}>
-            <TouchableOpacity
-              onPress={close}
-              style={[modalStyles.btn, modalStyles.btnGhost, { borderColor: c.line }]}
-              disabled={busy}
-            >
-              <Text style={[modalStyles.btnGhostText, { color: c.text2 }]}>取消</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleSubmit}
-              style={[modalStyles.btn, { backgroundColor: c.text }]}
-              disabled={busy}
-            >
-              {busy ? (
-                <ActivityIndicator color={c.bg} />
-              ) : (
-                <Text style={[modalStyles.btnText, { color: c.bg }]}>确认</Text>
-              )}
-            </TouchableOpacity>
-          </View>
+      {error ? (
+        <View style={[modalStyles.errorBox, { backgroundColor: c.danger + "1f" }]}>
+          <IconSymbol
+            name="exclamationmark.circle.fill"
+            size={14}
+            color={c.danger}
+          />
+          <Text style={[modalStyles.errorText, { color: c.danger }]}>
+            {error}
+          </Text>
         </View>
-      </KeyboardAvoidingView>
-    </Modal>
+      ) : null}
+
+      <View style={modalStyles.actions}>
+        <Button
+          label="取消"
+          variant="ghost"
+          onPress={close}
+          disabled={busy}
+          style={{ flex: 1 }}
+          fullWidth
+        />
+        <Button
+          label={busy ? "处理中" : "确认修改"}
+          variant="primary"
+          onPress={handleSubmit}
+          disabled={busy}
+          style={{ flex: 1 }}
+          fullWidth
+        />
+      </View>
+    </SheetModal>
   );
 }
 
 /* ----- 启用信任设备 modal ----- */
-//
-// 与 ChangePasswordModal 同款结构，但只要单字段（主密码二次确认）。不复用
-// dialog.prompt 是因为后者会 trim 输入 —— 包含两端空格的主密码会被破坏。
 
 function TrustedDeviceEnableModal({
   visible,
@@ -671,20 +536,19 @@ function TrustedDeviceEnableModal({
     confirmPassword: string,
   ) => Promise<{ ok: true } | { ok: false; code: string; message: string }>;
 }) {
-  const scheme = useColorScheme() ?? "dark";
-  const c = Colors[scheme];
+  const { colors: c } = useTheme();
 
   const [pwd, setPwd] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const reset = () => {
+  const resetForm = () => {
     setPwd("");
     setError(null);
   };
   const close = () => {
-    if (busy) return; // 启用流程不可中断（已经在写 SecureStore + vault）
-    reset();
+    if (busy) return;
+    resetForm();
     onClose();
   };
 
@@ -698,7 +562,7 @@ function TrustedDeviceEnableModal({
     const r = await onSubmit(pwd);
     setBusy(false);
     if (r.ok) {
-      reset();
+      resetForm();
       onClose();
       toast.ok("已启用设备解锁", "下次启动可使用生物识别");
       return;
@@ -711,76 +575,61 @@ function TrustedDeviceEnableModal({
   };
 
   return (
-    <Modal
+    <SheetModal
       visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={close}
+      onClose={close}
+      title="启用设备解锁"
+      subtitle="启用后此设备可用生物识别 / 设备凭据解锁。请输入主密码以确认。"
     >
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={modalStyles.backdrop}
-      >
-        <View
-          style={[
-            modalStyles.card,
-            { backgroundColor: c.bgElev, borderColor: c.line },
-          ]}
-        >
-          <Text style={[modalStyles.title, { color: c.text }]}>
-            启用设备解锁
+      <ModalField label="主密码" value={pwd} onChange={setPwd} c={c} />
+
+      {error ? (
+        <View style={[modalStyles.errorBox, { backgroundColor: c.danger + "1f" }]}>
+          <IconSymbol
+            name="exclamationmark.circle.fill"
+            size={14}
+            color={c.danger}
+          />
+          <Text style={[modalStyles.errorText, { color: c.danger }]}>
+            {error}
           </Text>
-          <Text
-            style={[
-              modalStyles.subtitle,
-              { color: c.text3, fontFamily: MONO },
-            ]}
-          >
-            启用后此设备可用生物识别 / 设备凭据解锁。请输入主密码以确认操作。
-          </Text>
-
-          <ModalField label="主密码" value={pwd} onChange={setPwd} c={c} />
-
-          {error ? (
-            <Text style={[modalStyles.error, { color: c.danger }]}>{error}</Text>
-          ) : null}
-
-          <View style={modalStyles.actions}>
-            <TouchableOpacity
-              onPress={close}
-              style={[modalStyles.btn, modalStyles.btnGhost, { borderColor: c.line }]}
-              disabled={busy}
-            >
-              <Text style={[modalStyles.btnGhostText, { color: c.text2 }]}>取消</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleSubmit}
-              style={[modalStyles.btn, { backgroundColor: c.text }]}
-              disabled={busy}
-            >
-              {busy ? (
-                <ActivityIndicator color={c.bg} />
-              ) : (
-                <Text style={[modalStyles.btnText, { color: c.bg }]}>启用</Text>
-              )}
-            </TouchableOpacity>
-          </View>
         </View>
-      </KeyboardAvoidingView>
-    </Modal>
+      ) : null}
+
+      <View style={modalStyles.actions}>
+        <Button
+          label="取消"
+          variant="ghost"
+          onPress={close}
+          disabled={busy}
+          style={{ flex: 1 }}
+          fullWidth
+        />
+        <Button
+          label={busy ? "启用中" : "启用"}
+          variant="primary"
+          onPress={handleSubmit}
+          disabled={busy}
+          style={{ flex: 1 }}
+          fullWidth
+        />
+      </View>
+    </SheetModal>
   );
 }
 
 function ModalField({
   label,
+  hint,
   value,
   onChange,
   c,
 }: {
   label: string;
+  hint?: string;
   value: string;
   onChange: (v: string) => void;
-  c: typeof Colors.dark;
+  c: ColorPalette;
 }) {
   return (
     <View style={modalStyles.field}>
@@ -788,7 +637,7 @@ function ModalField({
       <TextInput
         style={[
           modalStyles.fieldInput,
-          { color: c.text, backgroundColor: c.bg, borderColor: c.line },
+          { color: c.text, backgroundColor: c.bg },
         ]}
         value={value}
         onChangeText={onChange}
@@ -796,17 +645,74 @@ function ModalField({
         autoCapitalize="none"
         autoCorrect={false}
       />
+      {hint ? (
+        <Text style={[modalStyles.fieldHint, { color: c.text3 }]}>{hint}</Text>
+      ) : null}
     </View>
   );
 }
 
+/* ----- SheetModal 容器 —— iOS HIG bottom sheet 风格 ----- */
+
+function SheetModal({
+  visible,
+  onClose,
+  title,
+  subtitle,
+  children,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
+  const { colors: c } = useTheme();
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+      statusBarTranslucent
+    >
+      <Pressable
+        onPress={onClose}
+        style={[modalStyles.backdrop, { backgroundColor: c.overlay }]}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          style={modalStyles.kavWrap}
+          pointerEvents="box-none"
+        >
+          <Pressable
+            onPress={(e) => e.stopPropagation()}
+            style={[modalStyles.card, { backgroundColor: c.bgElev2 }]}
+          >
+            <View style={modalStyles.cardHandle}>
+              <View
+                style={[
+                  modalStyles.handleBar,
+                  { backgroundColor: c.line },
+                ]}
+              />
+            </View>
+            <Text style={[modalStyles.title, { color: c.text }]}>{title}</Text>
+            {subtitle ? (
+              <Text style={[modalStyles.subtitle, { color: c.text3 }]}>
+                {subtitle}
+              </Text>
+            ) : null}
+            <View style={{ height: Spacing.md }} />
+            {children}
+          </Pressable>
+        </KeyboardAvoidingView>
+      </Pressable>
+    </Modal>
+  );
+}
+
 /* ----- 空间 modal ----- */
-//
-// 视觉对齐用户给的截图：
-//   标题 "空间"
-//   每行 [编号 | 名称 | 选中态]
-//   底部 "+ 新建空间"
-// 长按行 → ActionSheet（重命名 / 删除）。
 
 function SpacesModal({
   visible,
@@ -817,7 +723,6 @@ function SpacesModal({
   onCreate,
   onRename,
   onDelete,
-  c,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -832,8 +737,8 @@ function SpacesModal({
   onDelete: (
     id: string,
   ) => Promise<{ ok: true } | { ok: false; code: string; message: string }>;
-  c: typeof Colors.dark;
 }) {
+  const { colors: c } = useTheme();
   const ordered = React.useMemo(() => sortSpaces(spaces), [spaces]);
 
   const handleCreate = async () => {
@@ -893,256 +798,243 @@ function SpacesModal({
       transparent
       animationType="fade"
       onRequestClose={onClose}
+      statusBarTranslucent
     >
-      <TouchableOpacity
-        activeOpacity={1}
+      <Pressable
         onPress={onClose}
-        style={spacesModalStyles.backdrop}
+        style={[modalStyles.backdrop, { backgroundColor: c.overlay }]}
       >
-        <TouchableOpacity
-          activeOpacity={1}
-          onPress={() => {}}
-          style={[
-            spacesModalStyles.card,
-            { backgroundColor: c.bgElev, borderColor: c.line },
-          ]}
+        <Pressable
+          onPress={(e) => e.stopPropagation()}
+          style={[modalStyles.spacesCard, { backgroundColor: c.bgElev2 }]}
         >
-          <Text
-            style={[
-              spacesModalStyles.title,
-              { color: c.text3, fontFamily: MONO },
-            ]}
-          >
-            空间
-          </Text>
+          <View style={modalStyles.cardHandle}>
+            <View
+              style={[modalStyles.handleBar, { backgroundColor: c.line }]}
+            />
+          </View>
+          <View style={modalStyles.spacesHeader}>
+            <Text style={[modalStyles.title, { color: c.text }]}>空间</Text>
+            <IconButton
+              icon="plus"
+              size={36}
+              iconSize={16}
+              variant="tinted"
+              haptic="medium"
+              onPress={handleCreate}
+            />
+          </View>
 
-          {ordered.length === 0 ? (
-            <Text
-              style={[
-                spacesModalStyles.empty,
-                { color: c.text3 },
-              ]}
-            >
-              没有空间
+          <ScrollView style={{ maxHeight: 400 }}>
+            <View style={[modalStyles.spacesList, { backgroundColor: c.bgElev }]}>
+              {ordered.length === 0 ? (
+                <Text style={[modalStyles.emptyText, { color: c.text3 }]}>
+                  没有空间
+                </Text>
+              ) : (
+                ordered.map((sp, idx) => {
+                  const active = sp.id === activeSpaceId;
+                  return (
+                    <React.Fragment key={sp.id}>
+                      <PressableScale
+                        onPress={() => onSelect(sp.id)}
+                        onLongPress={() => handleRow(sp)}
+                        scale={0.99}
+                        haptic="selection"
+                        pressedBg={c.bgHover}
+                        style={modalStyles.spaceRow}
+                      >
+                        <SpaceAvatar
+                          space={sp}
+                          size={32}
+                          background={active ? c.accent : c.bgActive}
+                          foreground={active ? c.accentInk : c.text}
+                          fontSize={14}
+                          borderRadius={Radius.md}
+                        />
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text
+                            style={[
+                              modalStyles.spaceName,
+                              { color: c.text },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {sp.name}
+                          </Text>
+                          <Text
+                            style={[
+                              modalStyles.spaceMeta,
+                              { color: c.text3, fontFamily: MONO },
+                            ]}
+                          >
+                            #{sp.order}
+                          </Text>
+                        </View>
+                        {active ? (
+                          <Badge label="当前" tone="info" />
+                        ) : (
+                          <IconSymbol
+                            name="chevron.right"
+                            size={14}
+                            color={c.text4}
+                          />
+                        )}
+                      </PressableScale>
+                      {idx !== ordered.length - 1 ? (
+                        <View
+                          style={{
+                            height: StyleSheet.hairlineWidth,
+                            backgroundColor: c.lineSoft,
+                            marginLeft: Spacing.lg + 32 + Spacing.md,
+                          }}
+                        />
+                      ) : null}
+                    </React.Fragment>
+                  );
+                })
+              )}
+            </View>
+            <Text style={[modalStyles.spacesHint, { color: c.text3 }]}>
+              长按一行可重命名或删除
             </Text>
-          ) : (
-            ordered.map((sp, idx) => {
-              const active = sp.id === activeSpaceId;
-              return (
-                <TouchableOpacity
-                  key={sp.id}
-                  activeOpacity={0.7}
-                  onPress={() => onSelect(sp.id)}
-                  onLongPress={() => handleRow(sp)}
-                  style={[
-                    spacesModalStyles.row,
-                    {
-                      backgroundColor: active ? c.bgHover : "transparent",
-                      borderColor: c.line,
-                      borderTopWidth: idx === 0 ? StyleSheet.hairlineWidth : 0,
-                    },
-                  ]}
-                >
-                  <View
-                    style={[
-                      spacesModalStyles.numChip,
-                      {
-                        backgroundColor: active ? c.text : c.bg,
-                        borderColor: active ? c.text : c.line,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        spacesModalStyles.numText,
-                        {
-                          color: active ? c.bg : c.text2,
-                          fontFamily: MONO,
-                        },
-                      ]}
-                    >
-                      {sp.order}
-                    </Text>
-                  </View>
-                  <Text
-                    style={[spacesModalStyles.rowName, { color: c.text }]}
-                    numberOfLines={1}
-                  >
-                    {sp.name}
-                  </Text>
-                  {active ? (
-                    <IconSymbol name="checkmark" size={16} color={c.text2} />
-                  ) : null}
-                </TouchableOpacity>
-              );
-            })
-          )}
-
-          <TouchableOpacity
-            activeOpacity={0.7}
-            onPress={handleCreate}
-            style={[
-              spacesModalStyles.addRow,
-              { borderTopColor: c.line },
-            ]}
-          >
-            <Text style={[spacesModalStyles.addText, { color: c.text2 }]}>
-              + 新建空间
-            </Text>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </TouchableOpacity>
+          </ScrollView>
+        </Pressable>
+      </Pressable>
     </Modal>
   );
 }
-
-const spacesModalStyles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    justifyContent: "center",
-    paddingHorizontal: 24,
-  },
-  card: {
-    borderWidth: 1,
-    borderRadius: 14,
-    overflow: "hidden",
-  },
-  title: {
-    fontSize: 11,
-    fontWeight: "600",
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 8,
-  },
-  empty: {
-    fontSize: 13,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    textAlign: "center",
-  },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    gap: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  numChip: {
-    width: 22,
-    height: 22,
-    borderRadius: 5,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  numText: { fontSize: 11, fontWeight: "700" },
-  rowName: { flex: 1, fontSize: 14, fontWeight: "500" },
-  addRow: {
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    alignItems: "center",
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  addText: { fontSize: 14, fontWeight: "500" },
-});
 
 /* ----- styles ----- */
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
-  scrollContent: { paddingHorizontal: 16, paddingBottom: 16 },
+  scrollContent: { paddingBottom: Spacing.lg },
 
-  pageHeader: { paddingTop: 16, paddingBottom: 16 },
-  pageTitle: { fontSize: 22, fontWeight: "700", letterSpacing: -0.3 },
+  pageHeader: {
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.lg,
+  },
+  pageTitle: { ...Type.largeTitle },
 
   userCard: {
     flexDirection: "row",
     alignItems: "center",
-    borderWidth: 1,
-    borderRadius: 14,
-    padding: 20,
-    gap: 14,
-    marginBottom: 16,
+    borderRadius: Radius.xl,
+    padding: Spacing.lg,
+    gap: Spacing.md,
   },
   userInfo: { flex: 1, gap: 3 },
-  userName: { fontSize: 15, fontWeight: "600" },
-  userPlan: { fontSize: 11 },
-
-  menuSection: { marginBottom: 16 },
-  sectionLabel: {
-    fontSize: 9,
-    fontWeight: "600",
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-    marginBottom: 8,
-    marginLeft: 2,
-  },
-  menuCard: { borderWidth: 1, borderRadius: 10, overflow: "hidden" },
-
-  menuRow: {
-    height: 48,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    gap: 8,
-  },
-  menuRowLabel: { flex: 1, fontSize: 15 },
-  menuRowRight: { flexDirection: "row", alignItems: "center", gap: 6 },
-  menuRowValue: { fontSize: 13 },
-  chevron: { fontSize: 20, lineHeight: 24, marginLeft: 2 },
-
-  separator: { height: 1, marginLeft: 16 },
-
-  badgeWrap: {
-    borderWidth: 1,
-    borderRadius: 5,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    minWidth: 20,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  badgeText: { fontSize: 10, fontWeight: "700", letterSpacing: 0.2 },
+  userName: { ...Type.title2 },
+  userMeta: { ...Type.footnote },
 });
 
 const modalStyles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    justifyContent: "center",
-    paddingHorizontal: 24,
+    justifyContent: "flex-end",
+  },
+  kavWrap: {
+    width: "100%",
   },
   card: {
-    borderWidth: 1,
-    borderRadius: 14,
-    padding: 18,
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.xxl,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    width: "100%",
   },
-  title: { fontSize: 17, fontWeight: "700", marginBottom: 8 },
-  subtitle: { fontSize: 12, lineHeight: 18, marginBottom: 14 },
-  field: { marginBottom: 12 },
-  fieldLabel: { fontSize: 11, fontWeight: "600", marginBottom: 5 },
-  fieldInput: {
-    height: 42,
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    fontSize: 14,
-  },
-  error: { fontSize: 12, marginTop: 4, marginBottom: 4 },
-  actions: { flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 6 },
-  btn: {
-    minWidth: 80,
-    height: 42,
-    borderRadius: 10,
+  cardHandle: {
     alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 16,
+    paddingBottom: Spacing.sm,
   },
-  btnText: { fontSize: 14, fontWeight: "700" },
-  btnGhost: { borderWidth: 1, backgroundColor: "transparent" },
-  btnGhostText: { fontSize: 14, fontWeight: "500" },
+  handleBar: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+  },
+  title: {
+    ...Type.title2,
+    marginTop: Spacing.xs,
+  },
+  subtitle: {
+    ...Type.footnote,
+    marginTop: 4,
+  },
+
+  field: { marginBottom: Spacing.sm },
+  fieldLabel: {
+    ...Type.footnote,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+    marginBottom: 6,
+  },
+  fieldInput: {
+    height: 46,
+    borderRadius: Radius.lg,
+    paddingHorizontal: Spacing.md,
+    ...Type.body,
+  },
+  fieldHint: { ...Type.footnote, marginTop: 4 },
+
+  errorBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.xs,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    marginTop: Spacing.sm,
+    marginBottom: Spacing.xs,
+  },
+  errorText: { ...Type.footnote, flex: 1 },
+
+  actions: {
+    flexDirection: "row",
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
+  },
+
+  /* Spaces */
+  spacesCard: {
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.xxl,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    width: "100%",
+  },
+  spacesHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: Spacing.md,
+  },
+  spacesList: {
+    borderRadius: Radius.xl,
+    overflow: "hidden",
+  },
+  spaceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md - 2,
+    minHeight: 56,
+  },
+  spaceName: { ...Type.body },
+  spaceMeta: { ...Type.footnote, marginTop: 1 },
+  spacesHint: {
+    ...Type.footnote,
+    textAlign: "center",
+    paddingTop: Spacing.sm,
+  },
+  emptyText: {
+    ...Type.subhead,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.lg,
+    textAlign: "center",
+  },
 });

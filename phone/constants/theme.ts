@@ -199,10 +199,169 @@ export const Fonts = Platform.select({
 
 /**
  * 圆角 Token（与设计系统一致：仅 5 / 7 / 10 / 14）
+ * - sm: pill / 小标签
+ * - md: 小按钮 / chip
+ * - lg: 输入框 / 行内按钮
+ * - xl: 卡片 / Sheet / 弹层
  */
 export const Radius = {
   sm: 5,
   md: 7,
   lg: 10,
   xl: 14,
+  full: 9999,
+} as const;
+
+/**
+ * 间距 Token（4 倍数体系，iOS HIG 偏好 8/16）
+ *   xs(4)  · 微小间距（图标 + 文本）
+ *   sm(8)  · 紧凑分隔
+ *   md(12) · 行内
+ *   lg(16) · 屏幕主 padding / 卡片 padding
+ *   xl(20) · 大块分隔
+ *   xxl(24) · 段落标题上下
+ *   xxxl(32) · 节末留白
+ */
+export const Spacing = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 20,
+  xxl: 24,
+  xxxl: 32,
+} as const;
+
+/**
+ * Elevation Token —— iOS 用 shadow，Android 用 elevation
+ *   none: 无阴影
+ *   sm: 列表行/小卡片 hover
+ *   md: insetGrouped 卡片
+ *   lg: FAB / Sheet
+ *   xl: 弹层 (dialog)
+ *
+ * 暗色主题下 shadow 几乎不可见，主要靠 bgElev 颜色区分；
+ * 这里仍提供 shadowOpacity 让浅色主题获益。
+ */
+export type ElevationLevel = "none" | "sm" | "md" | "lg" | "xl";
+
+export interface ElevationStyle {
+  shadowColor: string;
+  shadowOffset: { width: number; height: number };
+  shadowOpacity: number;
+  shadowRadius: number;
+  elevation: number;
+}
+
+export const Elevation: Record<ElevationLevel, ElevationStyle> = {
+  none: {
+    shadowColor: "transparent",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
+  },
+  sm: {
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  md: {
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  lg: {
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.14,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  xl: {
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.24,
+    shadowRadius: 28,
+    elevation: 18,
+  },
+};
+
+/**
+ * Typography 角色（取代散落的 fontSize/fontWeight 拼装）
+ * 以 iOS HIG 文本样式为参照，权重保留 ZPass "克制" 偏好（多数 500/600）。
+ */
+export interface TypeStyle {
+  fontSize: number;
+  lineHeight: number;
+  fontWeight: "400" | "500" | "600" | "700";
+  letterSpacing?: number;
+}
+
+export const Type: Record<
+  | "largeTitle"
+  | "title"
+  | "title2"
+  | "headline"
+  | "body"
+  | "bodyEmph"
+  | "callout"
+  | "subhead"
+  | "footnote"
+  | "caption"
+  | "mono",
+  TypeStyle
+> = {
+  largeTitle: { fontSize: 32, lineHeight: 38, fontWeight: "700", letterSpacing: -0.6 },
+  title: { fontSize: 22, lineHeight: 28, fontWeight: "700", letterSpacing: -0.4 },
+  title2: { fontSize: 17, lineHeight: 22, fontWeight: "700", letterSpacing: -0.2 },
+  headline: { fontSize: 15, lineHeight: 20, fontWeight: "600", letterSpacing: -0.1 },
+  body: { fontSize: 15, lineHeight: 20, fontWeight: "400" },
+  bodyEmph: { fontSize: 15, lineHeight: 20, fontWeight: "500" },
+  callout: { fontSize: 14, lineHeight: 19, fontWeight: "400" },
+  subhead: { fontSize: 13, lineHeight: 18, fontWeight: "500" },
+  footnote: { fontSize: 12, lineHeight: 16, fontWeight: "400" },
+  caption: { fontSize: 11, lineHeight: 14, fontWeight: "500" },
+  mono: { fontSize: 13, lineHeight: 18, fontWeight: "500" },
+};
+
+/**
+ * Motion Token —— 统一动效时长 / 缓动
+ * 与 iOS UIView 动画曲线对齐：短交互 200ms 内，弹层 ≤ 260ms。
+ */
+export const Motion = {
+  duration: {
+    fast: 130,
+    base: 180,
+    slow: 240,
+    sheet: 260,
+  },
+  spring: {
+    /** 触感按钮的弹簧（小回弹） */
+    button: { speed: 28, bounciness: 2 },
+    /** 卡片/弹层进入 */
+    enter: { speed: 22, bounciness: 4 },
+  },
+  /** 按下态缩放 */
+  pressScale: 0.97,
+} as const;
+
+/**
+ * 命中区 / 控件高度
+ */
+export const Hit = {
+  /** 最小命中区域（44 iOS HIG） */
+  min: 44,
+  /** 列表行高 */
+  row: 52,
+  /** 大按钮 */
+  buttonLg: 52,
+  /** 中按钮 */
+  buttonMd: 44,
+  /** 小按钮 / chip */
+  buttonSm: 32,
 } as const;
