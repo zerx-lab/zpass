@@ -34,6 +34,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
   Easing,
+  Linking,
   Modal,
   ScrollView,
   StyleSheet,
@@ -341,12 +342,22 @@ function CameraScene({
             variant="primary"
             size="lg"
             onPress={onRequest}
-            style={{ marginTop: Spacing.md }}
+            style={{ marginTop: Spacing.md, alignSelf: "center" }}
           />
         ) : (
-          <Text style={[styles.permHint, { color: c.text3, marginTop: 8 }]}>
-            请到系统设置中开启相机权限
-          </Text>
+          <>
+            <Text style={[styles.permHint, { color: c.text3, marginTop: 8 }]}>
+              请到系统设置中开启相机权限
+            </Text>
+            <Button
+              label="打开系统设置"
+              icon="gearshape.fill"
+              variant="primary"
+              size="lg"
+              onPress={() => Linking.openSettings()}
+              style={{ marginTop: Spacing.md, alignSelf: "center" }}
+            />
+          </>
         )}
       </View>
     );
@@ -402,7 +413,7 @@ function PickScene({ onPick, c }: { onPick: () => void; c: Palette }) {
         variant="primary"
         size="lg"
         onPress={onPick}
-        style={{ marginTop: Spacing.md }}
+        style={{ marginTop: Spacing.md, alignSelf: "center" }}
       />
     </View>
   );

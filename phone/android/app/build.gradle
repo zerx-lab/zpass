@@ -104,21 +104,15 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
-        release {
-            if (project.hasProperty('ZPASS_UPLOAD_STORE_FILE')) {
-                storeFile file(ZPASS_UPLOAD_STORE_FILE)
-                storePassword ZPASS_UPLOAD_STORE_PASSWORD
-                keyAlias ZPASS_UPLOAD_KEY_ALIAS
-                keyPassword ZPASS_UPLOAD_KEY_PASSWORD
-            }
-        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            signingConfig project.hasProperty('ZPASS_UPLOAD_STORE_FILE') ? signingConfigs.release : signingConfigs.debug
+            // Caution! In production, you need to generate your own keystore file.
+            // see https://reactnative.dev/docs/signed-apk-android.
+            signingConfig signingConfigs.debug
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds
@@ -159,9 +153,6 @@ android {
 }
 
 dependencies {
-// @generated begin mobilecrypto-aar - expo prebuild (DO NOT MODIFY) sync-98bf9b64ba95e772436877fa1e38ec94b077dae9
-    implementation fileTree(dir: "libs", include: ["*.aar", "*.jar"])
-// @generated end mobilecrypto-aar
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
 

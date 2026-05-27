@@ -129,6 +129,46 @@ jobs:
       - name: Install dependencies (bun)
         run: bun install --frozen-lockfile
 
+      # 把 release tag 回写到 app.json 的 expo.version，
+      # 这样下一步 expo prebuild 生成的 android/app/build.gradle versionName
+      # 与 app 内 expo-constants 读到的 version 完全一致.
+      #   - push tag v*                     → github.ref_name 去掉 v 前缀
+      #   - workflow_dispatch + tag_name    → inputs.tag_name 去掉 v 前缀
+      #   - 其它 dispatch（不发 release） → 不改，沿用源码里的 version
+      - name: Sync release tag into app.json version
+        env:
+          DISPATCH_TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, pathlib, sys
+
+          ref_type = os.environ.get("GITHUB_REF_TYPE", "")
+          ref_name = os.environ.get("GITHUB_REF_NAME", "")
+          dispatch_tag = os.environ.get("DISPATCH_TAG_NAME", "")
+
+          raw = ""
+          if ref_type == "tag" and ref_name:
+              raw = ref_name
+          elif dispatch_tag:
+              raw = dispatch_tag
+
+          if not raw:
+              print("[skip] no release tag, keep app.json version as-is")
+              sys.exit(0)
+
+          m = re.match(r'^v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.\-]+)?)$', raw)
+          if not m:
+              sys.exit(f"[error] tag {raw!r} is not a valid semver (expected vX.Y.Z)")
+          version = m.group(1)
+
+          p = pathlib.Path("app.json")
+          cfg = json.loads(p.read_text())
+          old = cfg.get("expo", {}).get("version")
+          cfg.setdefault("expo", {})["version"] = version
+          p.write_text(json.dumps(cfg, indent=2) + "\n")
+          print(f"[ok] app.json expo.version: {old} -> {version}")
+          PY
+
       # 编 cryptocore Rust → 4 ABI libcryptocore.so（cargo-ndk）.
       # 产物在 cryptocore/build/jniLibs/<abi>/libcryptocore.so；下一步 expo prebuild
       # 会触发 with-cryptocore plugin 自动复制到
