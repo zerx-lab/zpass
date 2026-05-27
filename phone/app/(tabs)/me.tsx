@@ -3,6 +3,7 @@
 // 模块：用户卡片 + 空间 + 统计 + 安全 + 外观 + 数据 + 关于
 // 弹窗：修改主密码 / 启用信任设备 / 空间管理（全部走 primitives + Sheet 样式）
 
+import Constants from "expo-constants";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
@@ -38,6 +39,10 @@ import {
 import type { ColorPalette } from "@/constants/theme";
 
 const MONO = Fonts?.mono ?? "monospace";
+
+const APP_VERSION = __DEV__
+  ? "dev"
+  : (Constants.expoConfig?.version ?? "0.0.0");
 
 type IconName = Parameters<typeof IconSymbol>[0]["name"];
 
@@ -369,7 +374,7 @@ export default function MeScreen() {
         </ListGroup>
 
         <ListGroup header="关于" footer="零知识本地密码管理器 · 数据永远只在你的设备上加密存储">
-          <ListRow title="版本" value="1.0.0" icon="info.circle" />
+          <ListRow title="版本" value={APP_VERSION} icon="info.circle" />
         </ListGroup>
 
         <View style={{ height: Spacing.xl }} />
