@@ -540,11 +540,13 @@ jobs:
       # hdiutil 把已经 ad-hoc 签好名的 .app 包成只读压缩 dmg (UDZO).
       # 跟 zip 同一个源 .app, 所以签名状态一致.
       #
-      # `-volicon` 把 ZPass 图标贴到 dmg 卷宗本身, 这样:
-      #   1. Finder 显示 dmg 文件时是 ZPass 图标, 不是默认磁盘图标
-      #   2. 双击挂载后弹出的安装窗口左上角也是品牌图标
-      # 走的是 task icns 产出的 assets/logo/zpass.icns (Taskfile 已经把
-      # icns 串进 build/make 的 deps).
+      # 不传 `-volicon`: macOS 26 (macos-14 runner 自 2026-05 起 image) 上
+      # `hdiutil create` 已经移除了 -volicon 选项, 传它会直接 fail with
+      # "unknown option". DMG 卷宗本身因此用系统默认磁盘图标, 但 .app 内部
+      # 的品牌图标 (由 task icns -> assets/logo/zpass.icns -> Forge 嵌入)
+      # 不受影响, Finder 显示 dmg 文件时也按 UTI 走默认. 想恢复卷宗图标
+      # 需要 mount 后写 .VolumeIcon.icns + bless, 在 macOS 26 上同样被收紧,
+      # 价值不抵复杂度, 等以后再说.
       - name: Create DMG from signed .app
         run: |
           APP="out/zpass-darwin-arm64/zpass.app"
@@ -552,7 +554,6 @@ jobs:
           hdiutil create \
             -volname "ZPass" \
             -srcfolder "$APP" \
-            -volicon assets/logo/zpass.icns \
             -ov -format UDZO \
             out/make/dmg/ZPass-darwin-arm64.dmg
 
