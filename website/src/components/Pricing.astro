@@ -12,9 +12,13 @@ import type { SiteStrings, PriceTier } from "../i18n/strings";
 
 export interface Props {
 	t: SiteStrings;
+	/** 章节背景变体 */
+	variant?: "default" | "soft" | "ink" | "blue";
 }
 
-const { t } = Astro.props;
+const { t, variant = "default" } = Astro.props;
+const sectionClass =
+	variant === "default" ? "section" : `section section--${variant}`;
 
 // 4 档定价数据，按从入门到企业的顺序排列
 // featured 标记控制高亮样式，默认高亮 Personal（最常被选择的方案）
@@ -26,7 +30,7 @@ const tiers: Array<{ tier: PriceTier; featured?: boolean; contact?: boolean }> =
 ];
 ---
 
-<section class="section" id="pricing">
+<section class={sectionClass} id="pricing">
 	<div class="wrap">
 		<div class="sec-head reveal">
 			<div class="index mono"><b>07</b> / {t.section_pricing}</div>

@@ -1,11 +1,17 @@
 ---
 // ============================================================================
-// Hero — 顶部主视觉
-// 包含：eyebrow、超大标题、副标题、单一 CTA(订阅发布通知)、可用平台行、
-// 统计数字行。
+// Hero — 主视觉（1Password 风格）
 //
-// 注：前期开发期版本——已移除原"查看源代码"副 CTA 与 hero-panel
-// 终端面板(curl 安装命令演示),因为产品尚未发布,无可下载二进制。
+// 设计语言：
+//   - 居中布局，巨型轻字重标题（H1 ~96px，font-weight 300）
+//   - 米色 eyebrow tag（不再用蓝点 + mono）
+//   - 双 CTA：主蓝色实底 + 描边
+//   - 4 列统计行，超轻字重数字
+//   - 默认 ink 暗色背景，搭配底部蓝色渐变
+//
+// 注：保留原有的 hero-stats 数据契约（4 项），保留 hero_eyebrow / hero_title_1
+// / hero_title_2 / hero_sub / hero_cta_primary / hero_availability 等 i18n
+// 字段，文案完全不变。
 // ============================================================================
 
 import type { SiteStrings, Locale } from "../i18n/strings";
@@ -13,7 +19,7 @@ import type { SiteStrings, Locale } from "../i18n/strings";
 export interface Props {
 	t: SiteStrings;
 	locale: Locale;
-	/** 当前语言版本的首页基础路径,用于锚点链接 */
+	/** 当前语言版本的首页基础路径，用于锚点链接 */
 	homeBase?: string;
 }
 
@@ -27,12 +33,9 @@ const stats = [
 ];
 ---
 
-<section class="hero" id="top">
+<section class="hero hero--ink" id="top">
 	<div class="hero-grid-bg"></div>
-	<div class="wrap" style="position: relative;">
-		<span class="cross" style="left: -5px; top: -5px;"></span>
-		<span class="cross" style="right: -5px; top: -5px;"></span>
-
+	<div class="wrap">
 		<div class="eyebrow">
 			<span class="dot"></span>{t.hero_eyebrow}
 		</div>
@@ -47,14 +50,15 @@ const stats = [
 
 		<div class="hero-cta">
 			<a href={`${homeBase}#download`} class="btn primary"
-				>{t.hero_cta_primary}</a
+				>{t.hero_cta_primary} <span class="arrow">→</span></a
 			>
+			<a href={`${homeBase}#features`} class="btn">{t.nav_features}</a>
 		</div>
 
 		<div class="hero-availability mono">{t.hero_availability}</div>
 
 		<!-- ========== Hero 统计数字行 ========== -->
-		<div class="hero-stats mono">
+		<div class="hero-stats">
 			{
 				stats.map((s) => (
 					<div>

@@ -293,7 +293,8 @@ const en: SiteStrings = {
 	hero_sub:
 		"ZPass keeps your logins, passkeys and 2FA codes encrypted on your own devices. We never see them in plain text — not in transit, not at rest, not anywhere on our servers. Native apps for every platform you use.",
 	hero_cta_primary: "Download {version}",
-	hero_availability: "Windows · Linux · Android · Chrome / Firefox · macOS / iOS soon",
+	hero_availability:
+		"Windows · macOS · Linux · Android · Chrome / Firefox · iOS soon",
 
 	release_eyebrow: "AVAILABLE NOW · {version}",
 	release_title: "Download ZPass",
@@ -370,7 +371,7 @@ const en: SiteStrings = {
 	desktop_headline: "Your whole vault, one keystroke away.",
 	desktop_body:
 		"Everything is decrypted locally. ⌘K opens the command palette, ⌘L locks the app instantly, and the full vault stays usable with no network at all. Same encrypted core as the mobile app — just with more room to breathe.",
-	desktop_status_macos: "macOS · in development",
+	desktop_status_macos: "macOS · arm64 · {version}",
 	desktop_status_windows: "Windows · {version} available",
 	desktop_status_linux: "Linux · {version} available",
 	desktop_status_extra: "⌘K command palette · offline-first",
@@ -616,7 +617,8 @@ const zh: SiteStrings = {
 	hero_sub:
 		"ZPass 把你的登录信息、通行密钥和两步验证码统一加密存放在本地设备。未经加密的明文不会进入网络、不会落到磁盘、也不会出现在我们的服务器上——我们看不到，任何第三方也看不到。覆盖你日常使用的每一个平台。",
 	hero_cta_primary: "下载 {version}",
-	hero_availability: "Windows · Linux · Android · Chrome / Firefox · macOS / iOS 即将到来",
+	hero_availability:
+		"Windows · macOS · Linux · Android · Chrome / Firefox · iOS 即将到来",
 
 	release_eyebrow: "现已发布 · {version}",
 	release_title: "下载 ZPass",
@@ -692,7 +694,7 @@ const zh: SiteStrings = {
 	desktop_headline: "整个密码库，一次按键就能召唤。",
 	desktop_body:
 		"所有解密都在本地完成。⌘K 唤出命令面板，⌘L 一键锁定，完全离线也能正常使用整个密码库。与移动端共用同一套加密内核——只是屏幕更大、呼吸更从容。",
-	desktop_status_macos: "macOS · 开发中",
+	desktop_status_macos: "macOS · arm64 · 已发布 {version}",
 	desktop_status_windows: "Windows · 已发布 {version}",
 	desktop_status_linux: "Linux · 已发布 {version}",
 	desktop_status_extra: "⌘K 命令面板 · 离线优先",

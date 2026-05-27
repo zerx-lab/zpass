@@ -12,9 +12,13 @@ import type { SiteStrings } from "../i18n/strings";
 
 export interface Props {
 	t: SiteStrings;
+	/** 章节背景变体 */
+	variant?: "default" | "soft" | "ink" | "blue";
 }
 
-const { t } = Astro.props;
+const { t, variant = "default" } = Astro.props;
+const sectionClass =
+	variant === "default" ? "section" : `section section--${variant}`;
 
 // 6 个安全要点
 const cells: Array<[string, string]> = [
@@ -35,7 +39,7 @@ const audits: Array<{ firm: string; meta: string }> = [
 ];
 ---
 
-<section class="section" id="security">
+<section class={sectionClass} id="security">
 	<div class="wrap">
 		<div class="sec-head reveal">
 			<div class="index mono"><b>06</b> / {t.section_security}</div>

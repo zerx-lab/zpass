@@ -16,9 +16,13 @@ import Brandmark from "./Brandmark.astro";
 
 export interface Props {
 	t: SiteStrings;
+	/** 章节背景变体 */
+	variant?: "default" | "soft" | "ink" | "blue";
 }
 
-const { t } = Astro.props;
+const { t, variant = "default" } = Astro.props;
+const sectionClass =
+	variant === "default" ? "section" : `section section--${variant}`;
 
 // 左侧 sidebar 主导航
 // [键名(用于决定 i18n), 计数文本(可空), 是否激活, 图标 path d]
@@ -120,7 +124,7 @@ const platforms: string[] = [
 ];
 ---
 
-<section class="section" id="desktop">
+<section class={sectionClass} id="desktop">
 	<div class="wrap">
 		<div class="sec-head reveal">
 			<div class="index mono">
@@ -483,33 +487,50 @@ const platforms: string[] = [
 	.desktop-eyebrow {
 		font-family: var(--font-mono);
 		color: var(--text-3);
-		font-size: 11px;
-		letter-spacing: 0.08em;
+		font-size: 12px;
+		letter-spacing: 0.12em;
+		text-transform: uppercase;
 	}
 	.desktop-headline {
-		margin-top: 18px;
+		margin-top: 22px;
 		max-width: 18ch;
+		font-size: clamp(36px, 4.6vw, 56px);
+		letter-spacing: -0.02em;
+		font-weight: var(--fw-display, 300);
+		line-height: 1.04;
 	}
 	.desktop-body {
 		color: var(--text-2);
 		max-width: 48ch;
-		margin-top: 18px;
-		font-size: 15px;
+		margin-top: 22px;
+		font-size: 17px;
+		line-height: 1.55;
 	}
 	.desktop-cta-row {
-		margin-top: 28px;
+		margin-top: 32px;
 		display: flex;
-		gap: 10px;
+		gap: 12px;
 		flex-wrap: wrap;
 	}
 	.desktop-meta {
-		margin-top: 28px;
+		margin-top: 32px;
 		color: var(--text-3);
-		font-size: 11px;
+		font-size: 12px;
 		display: grid;
 		grid-template-columns: 1fr 1fr;
 		gap: 10px;
 		max-width: 360px;
+	}
+
+	/* === ink 变体下的文本颜色补偿 ===
+	   :global() 是必要的 — .section--ink 类名是父级应用的，
+	   不在 Astro 托付给 Desktop 的作用域 hash 范围内。 */
+	:global(.section--ink) .desktop-eyebrow,
+	:global(.section--ink) .desktop-meta {
+		color: var(--text-on-ink-3);
+	}
+	:global(.section--ink) .desktop-body {
+		color: var(--text-on-ink-2);
 	}
 
 	.desktop-stage {

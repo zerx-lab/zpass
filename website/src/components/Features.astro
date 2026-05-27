@@ -9,9 +9,13 @@ import type { SiteStrings } from "../i18n/strings";
 
 export interface Props {
 	t: SiteStrings;
+	/** 章节背景变体：default(白) / soft(灰白) / ink(深 navy) / blue(蓝实色) */
+	variant?: "default" | "soft" | "ink" | "blue";
 }
 
-const { t } = Astro.props;
+const { t, variant = "default" } = Astro.props;
+const sectionClass =
+	variant === "default" ? "section" : `section section--${variant}`;
 
 // 6 个特性：[icon kind, title, body]
 const items: Array<[string, string, string]> = [
@@ -24,7 +28,7 @@ const items: Array<[string, string, string]> = [
 ];
 ---
 
-<section class="section" id="features">
+<section class={sectionClass} id="features">
 	<div class="wrap">
 		<div class="sec-head reveal">
 			<div class="index mono"><b>01</b> / {t.section_features}</div>

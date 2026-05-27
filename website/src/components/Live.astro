@@ -20,6 +20,8 @@ export interface Props {
 	src?: string;
 	/** 浏览器地址栏显示文本 */
 	url?: string;
+	/** 章节背景变体 */
+	variant?: "default" | "soft" | "ink" | "blue";
 }
 
 const {
@@ -27,12 +29,15 @@ const {
 	show = false,
 	src = "/demo/zpass.html",
 	url = "preview.zpass.dev",
+	variant = "default",
 } = Astro.props;
+const sectionClass =
+	variant === "default" ? "live" : `live section--${variant}`;
 ---
 
 {
 	show && (
-		<section class="live" id="demo">
+		<section class={sectionClass} id="demo">
 			<div class="wrap">
 				<div class="sec-head reveal">
 					<div class="index mono">

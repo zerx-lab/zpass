@@ -12,7 +12,12 @@
 
 import type { ReleaseData } from "../lib/release-fetcher";
 
-export type PlatformId = "windows" | "linux" | "android" | "extension";
+export type PlatformId =
+	| "macos"
+	| "windows"
+	| "linux"
+	| "android"
+	| "extension";
 
 export interface ReleaseAsset {
 	/** 下方"主下载按钮"使用的标签（去掉冗余的产品名）—— 例如 "Installer (.exe)" */
@@ -60,6 +65,32 @@ interface PlatformMeta {
 }
 
 const PLATFORM_METAS: PlatformMeta[] = [
+	{
+		id: "macos",
+		titleZh: "macOS",
+		titleEn: "macOS",
+		subtitleZh: "Apple Silicon · macOS 11 及以上",
+		subtitleEn: "Apple Silicon · macOS 11 and above",
+		assets: [
+			{
+				label: "安装包 (.dmg)",
+				arch: "arm64",
+				format: "dmg",
+				filename: "ZPass-darwin-arm64.dmg",
+				recommended: true,
+				noteZh: "推荐 · 拖入 Applications 即可安装",
+				noteEn: "Recommended · drag into Applications to install",
+			},
+			{
+				label: "压缩包 (.zip)",
+				arch: "arm64",
+				format: "zip",
+				filename: "ZPass-darwin-arm64.zip",
+				noteZh: "解压即用，适合脚本化部署",
+				noteEn: "Portable archive for scripted installs",
+			},
+		],
+	},
 	{
 		id: "windows",
 		titleZh: "Windows",
@@ -210,11 +241,11 @@ const PLATFORM_METAS: PlatformMeta[] = [
 // 兜底数据（GitHub API 不可达时使用）
 // ============================================================================
 
-export const FALLBACK_VERSION = "v0.0.2";
+export const FALLBACK_VERSION = "v0.0.6";
 export const FALLBACK_TAG_URL =
-	"https://github.com/zerx-lab/zpass/releases/tag/v0.0.2";
+	"https://github.com/zerx-lab/zpass/releases/tag/v0.0.6";
 const FALLBACK_BASE_URL =
-	"https://github.com/zerx-lab/zpass/releases/download/v0.0.2";
+	"https://github.com/zerx-lab/zpass/releases/download/v0.0.6";
 
 interface FallbackAsset {
 	filename: string;
@@ -229,19 +260,21 @@ const fb = (filename: string, sizeBytes: number): FallbackAsset => ({
 });
 
 export const FALLBACK_ASSETS: FallbackAsset[] = [
-	fb("ZPass-windows-x64-Setup.exe", 140307968),
-	fb("ZPass-windows-x64.zip", 141983793),
-	fb("ZPass-linux-x64.AppImage", 119003640),
-	fb("ZPass-linux-x64.deb", 91883922),
-	fb("ZPass-linux-x64.rpm", 96057265),
-	fb("ZPass-linux-x64.pkg.tar.zst", 113193190),
-	fb("ZPass-linux-x64.zip", 116965356),
-	fb("ZPass-android-arm64-v8a.apk", 41911618),
-	fb("ZPass-android-x86_64.apk", 44619831),
-	fb("ZPass-android-universal.apk", 115076862),
-	fb("ZPass-extension-chrome.zip", 46901),
-	fb("ZPass-extension-firefox.zip", 46876),
-	fb("ZPass-extension-sources.zip", 184824),
+	fb("ZPass-darwin-arm64.dmg", 133012367),
+	fb("ZPass-darwin-arm64.zip", 119856097),
+	fb("ZPass-windows-x64-Setup.exe", 140372992),
+	fb("ZPass-windows-x64.zip", 142053094),
+	fb("ZPass-linux-x64.AppImage", 119069176),
+	fb("ZPass-linux-x64.deb", 91936350),
+	fb("ZPass-linux-x64.rpm", 96114141),
+	fb("ZPass-linux-x64.pkg.tar.zst", 113276971),
+	fb("ZPass-linux-x64.zip", 117033929),
+	fb("ZPass-android-arm64-v8a.apk", 42039822),
+	fb("ZPass-android-x86_64.apk", 44797184),
+	fb("ZPass-android-universal.apk", 116368551),
+	fb("ZPass-extension-chrome.zip", 55392),
+	fb("ZPass-extension-firefox.zip", 55366),
+	fb("ZPass-extension-sources.zip", 588881),
 ];
 
 // ============================================================================
@@ -274,8 +307,7 @@ export function buildPlatforms(release: ReleaseData): PlatformGroup[] {
 				fromApi?.url ??
 				fromFallback?.url ??
 				`${FALLBACK_BASE_URL}/${meta.filename}`;
-			const sizeBytes =
-				fromApi?.sizeBytes ?? fromFallback?.sizeBytes ?? 0;
+			const sizeBytes = fromApi?.sizeBytes ?? fromFallback?.sizeBytes ?? 0;
 			return { ...meta, url, sizeBytes };
 		}),
 	}));

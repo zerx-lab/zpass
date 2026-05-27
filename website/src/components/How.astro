@@ -9,9 +9,13 @@ import type { SiteStrings } from "../i18n/strings";
 
 export interface Props {
 	t: SiteStrings;
+	/** 章节背景变体 */
+	variant?: "default" | "soft" | "ink" | "blue";
 }
 
-const { t } = Astro.props;
+const { t, variant = "default" } = Astro.props;
+const sectionClass =
+	variant === "default" ? "section" : `section section--${variant}`;
 
 const steps = [
 	{ title: t.how_1_title, body: t.how_1_body },
@@ -20,7 +24,7 @@ const steps = [
 ];
 ---
 
-<section class="section" id="how">
+<section class={sectionClass} id="how">
 	<div class="wrap">
 		<div class="sec-head reveal">
 			<div class="index mono"><b>02</b> / {t.section_how}</div>

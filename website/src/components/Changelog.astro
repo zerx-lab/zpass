@@ -16,9 +16,13 @@ import type { SiteStrings } from "../i18n/strings";
 
 export interface Props {
 	t: SiteStrings;
+	/** 章节背景变体 */
+	variant?: "default" | "soft" | "ink" | "blue";
 }
 
-const { t } = Astro.props;
+const { t, variant = "default" } = Astro.props;
+const sectionClass =
+	variant === "default" ? "section" : `section section--${variant}`;
 
 // 路线图条目类型
 type RoadmapTag = "build" | "plan" | "next";
@@ -76,7 +80,7 @@ const items: RoadmapItem[] = [
 ];
 ---
 
-<section class="section" id="changelog">
+<section class={sectionClass} id="changelog">
 	<div class="wrap">
 		<div class="sec-head reveal">
 			<div class="index mono">

@@ -20,7 +20,7 @@ const { t, locale = "en" } = Astro.props;
 const privacyHref = localizePath("/privacy", locale);
 ---
 
-<footer class="foot foot--lite">
+<footer class="foot foot--lite section--soft">
 	<div class="wrap">
 		<div class="foot-lite">
 			<div class="foot-lite-brand">
@@ -76,7 +76,9 @@ const privacyHref = localizePath("/privacy", locale);
 
 <style>
 	.foot--lite {
-		padding: 48px 0 40px;
+		padding: 64px 0 56px;
+		background: var(--bg-soft);
+		border-top: 1px solid var(--line-soft);
 	}
 
 	.foot-lite {
@@ -123,12 +125,12 @@ const privacyHref = localizePath("/privacy", locale);
 	}
 
 	.foot-contact {
-		background: none;
+		background: var(--bg);
 		border: 1px solid var(--line);
-		border-radius: var(--radius-sm);
-		padding: 4px 10px;
-		font-size: 11px;
-		color: var(--text-3);
+		border-radius: var(--radius-pill);
+		padding: 5px 14px;
+		font-size: 12px;
+		color: var(--text-2);
 		cursor: pointer;
 		transition: color 0.15s, border-color 0.15s, background 0.15s;
 		letter-spacing: 0.02em;
@@ -144,11 +146,12 @@ const privacyHref = localizePath("/privacy", locale);
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
-		padding: 4px 10px;
-		font-size: 11px;
-		color: var(--text-3);
+		padding: 5px 14px;
+		font-size: 12px;
+		color: var(--text-2);
 		border: 1px solid var(--line);
-		border-radius: var(--radius-sm);
+		border-radius: var(--radius-pill);
+		background: var(--bg);
 		text-decoration: none;
 		letter-spacing: 0.02em;
 		transition: color 0.15s, border-color 0.15s, background 0.15s;

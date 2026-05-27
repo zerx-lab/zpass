@@ -10,9 +10,13 @@ import type { SiteStrings } from "../i18n/strings";
 
 export interface Props {
 	t: SiteStrings;
+	/** 章节背景变体 */
+	variant?: "default" | "soft" | "ink" | "blue";
 }
 
-const { t } = Astro.props;
+const { t, variant = "default" } = Astro.props;
+const sectionClass =
+	variant === "default" ? "section" : `section section--${variant}`;
 
 // 静态展示的 vault 列表行：[徽标缩写, 名称, 用户名, TOTP 码]
 const rows: Array<[string, string, string, string]> = [
@@ -31,7 +35,7 @@ const tabs: Array<[string, boolean]> = [
 ];
 ---
 
-<section class="section" id="mobile">
+<section class={sectionClass} id="mobile">
 	<div class="wrap">
 		<div class="sec-head reveal">
 			<div class="index mono">

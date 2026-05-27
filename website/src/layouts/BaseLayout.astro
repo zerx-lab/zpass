@@ -388,5 +388,40 @@ const metaColorScheme =
 				document.addEventListener("astro:page-load", init);
 			})();
 		</script>
+
+		<!-- ===== Nav 滚动阴影 =====
+		  滚动超过 8px 后给 .nav 加上 .is-scrolled，启动轻微投影，
+		  营造导航从背景中轻轻浮出的观感。与 .reveal 使用同一个 passive
+		  scroll 事件制避免多次重复绑定。
+		==================================================================== -->
+		<script is:inline>
+			(function () {
+				function wire() {
+					var nav = document.querySelector(".nav");
+					if (!nav) return;
+					function onScroll() {
+						if (window.scrollY > 8) nav.classList.add("is-scrolled");
+						else nav.classList.remove("is-scrolled");
+					}
+					onScroll();
+					// 每次 page-load 重新取到新 nav 并重设状态；passive 减少开销
+					if (!window.__zpassNavScroll) {
+						window.__zpassNavScroll = true;
+						window.addEventListener("scroll", function () {
+							var n = document.querySelector(".nav");
+							if (!n) return;
+							if (window.scrollY > 8) n.classList.add("is-scrolled");
+							else n.classList.remove("is-scrolled");
+						}, { passive: true });
+					}
+				}
+				if (document.readyState === "loading") {
+					document.addEventListener("DOMContentLoaded", wire);
+				} else {
+					wire();
+				}
+				document.addEventListener("astro:page-load", wire);
+			})();
+		</script>
 	</body>
 </html>

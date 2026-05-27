@@ -9,9 +9,13 @@ import type { SiteStrings } from "../i18n/strings";
 
 export interface Props {
 	t: SiteStrings;
+	/** 章节背景变体 */
+	variant?: "default" | "soft" | "ink" | "blue";
 }
 
-const { t } = Astro.props;
+const { t, variant = "default" } = Astro.props;
+const sectionClass =
+	variant === "default" ? "section" : `section section--${variant}`;
 
 // 5 条问答：[question, answer]
 const items: Array<[string, string]> = [
@@ -23,7 +27,7 @@ const items: Array<[string, string]> = [
 ];
 ---
 
-<section class="section" id="faq">
+<section class={sectionClass} id="faq">
 	<div class="wrap">
 		<div class="sec-head reveal">
 			<div class="index mono"><b>09</b> / FAQ</div>

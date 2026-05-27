@@ -43,6 +43,22 @@ const enPath = localizePath(pathname, "en");
 const zhPath = localizePath(pathname, "zh");
 ---
 
+<!-- ==================================================================
+     Ribbon — 顶部米色窄条（仿 1Password 顶栏发布公告）
+     发布前阶段：展示开发状态 + GitHub 链接
+     ================================================================== -->
+<div class="ribbon" role="complementary">
+	<div class="ribbon-inner">
+		<a href={GITHUB_URL} target="_blank" rel="noopener">
+			<span>{t.hero_eyebrow}</span>
+			<span class="ribbon-arrow" aria-hidden="true">→</span>
+		</a>
+		<a href={link("download")}>
+			<span>{t.nav_download}</span>
+		</a>
+	</div>
+</div>
+
 <nav class="nav">
 	<div class="wrap nav-inner">
 		<a href={homeBase} class="brand" aria-label="ZPass — 首页">
