@@ -123,7 +123,7 @@ export function FontSelect({
 					// min-w 跟随触发按钮宽度（Radix Popover CSS 变量）
 					className={clsx(
 						"z-50 w-(--radix-popover-trigger-width)",
-						"zpass-glass rounded-(--radius) shadow-md",
+						"zpass-glass rounded-(--radius)",
 						"origin-(--radix-popover-content-transform-origin)",
 						"transition-[opacity,transform] duration-100 ease-out",
 						"data-[state=open]:opacity-100 data-[state=open]:scale-100",

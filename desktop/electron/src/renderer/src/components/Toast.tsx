@@ -129,12 +129,11 @@ function ToastItemView({
 			className="
 				toast-item pointer-events-auto
 				flex items-start gap-2.5
-				min-w-[180px] max-w-[360px]
-				rounded-md
-				zpass-glass
+				min-w-[200px] max-w-[380px]
+				rounded-(--radius-lg)
+				zpass-toast
 				px-3.5 py-2.5
 				text-[12.5px] text-(--text)
-				shadow-md
 			"
 			style={{
 				// 入场动画：从下方 8px + 透明 → 原位 + 不透明
@@ -162,12 +161,12 @@ function ToastItemView({
 					className="
 						shrink-0 self-center
 						rounded-(--radius-sm)
-						border border-(--line) bg-(--bg-elev)
+						border border-(--line-soft) bg-(--bg-elev)
 						px-2 py-0.5
 						text-[11.5px] font-medium text-(--text)
 						transition-colors duration-100
-						hover:border-(--text-3) hover:bg-(--bg-active)
-						focus:outline-none focus:border-(--text-3)
+						hover:bg-(--bg-hover)
+						focus:outline-none
 					"
 				>
 					{action.label}

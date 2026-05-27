@@ -497,17 +497,32 @@ html:not([data-theme]) {
 }
 
 .zpass-glass {
-	/* 浮层本体：在 elev 之上叠一层半透明 + 轻模糊，
-	 * 让其下的 backdrop 漏出一点点环境色，不是完全实色卡片 */
-	background-color: color-mix(in srgb, var(--bg-elev) 88%, transparent);
-	backdrop-filter: blur(28px) saturate(150%);
-	-webkit-backdrop-filter: blur(28px) saturate(150%);
+	/* 浮层本体：macOS sheet / Linear 弹窗 同源配方
+	 *   - 半透明 elev 底 + 重模糊(让 backdrop 漏出一丝环境色)
+	 *   - inset 1px 顶高光("光从上方打来"的反光)
+	 *   - 多层外阴影(锐影 + 散影 + 远景投影,做出"飘起来"的距离感)
+	 * 严禁紫色相 —— 阴影里的色光也按 brand 蓝走（feedback: brand_color）
+	 */
+	background-color: color-mix(in srgb, var(--bg-elev) 92%, transparent);
+	backdrop-filter: blur(32px) saturate(160%);
+	-webkit-backdrop-filter: blur(32px) saturate(160%);
 	border: 1px solid var(--line);
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.06),
+		0 1px 2px rgba(0, 0, 0, 0.25),
+		0 16px 40px -8px rgba(0, 0, 0, 0.5),
+		0 32px 80px -24px rgba(0, 0, 0, 0.6);
 }
 
 [data-theme="light"] .zpass-glass {
-	/* 浅色下 elev 已经是近白，需要更强的不透明度避免内容糊掉 */
-	background-color: color-mix(in srgb, var(--bg-elev) 94%, transparent);
+	/* 浅色下 elev 已经是近白,需要更强的不透明度避免内容糊掉 */
+	background-color: color-mix(in srgb, var(--bg-elev) 96%, transparent);
+	border-color: var(--line-soft);
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.7),
+		0 1px 2px rgba(15, 15, 18, 0.06),
+		0 16px 40px -8px rgba(15, 15, 18, 0.14),
+		0 32px 80px -24px rgba(37, 99, 235, 0.16);
 }
 
 /* ─── disabled hover 锁定（C5） ────────────────────────────────
@@ -588,4 +603,449 @@ html[data-window-blurred] [data-mini-titlebar] {
 	overflow: hidden;
 	width: 0;
 	opacity: 0;
+}
+
+/* ============================================================
+ * ZPass 桌面 app 视觉增量（与 design/vault-home.html 同源）
+ * ------------------------------------------------------------
+ * 原则：
+ *   - 与现有 token / utility 共存，组件按需挂类即可生效
+ *   - 不污染普通 button / a / 输入框的视觉（避免回归)
+ *   - 严格服从 AGENTS.md 字体 / 圆角 / 描边铁律
+ * ============================================================ */
+
+/* ─── 软渐变背景工具类 —— Sidebar / Detail Hero 顶 ─── */
+.zpass-bg-gradient {
+	background-image: var(--bg-gradient);
+}
+
+/* ─── item type 渐变色块（列表行 glyph 与 hero glyph 共用色阶） ───
+ * 列表小 glyph(28-32px) 用 .zpass-glyph,详情 hero(64px) 用 .zpass-hero-glyph,
+ * 二者共享 .zpass-tint-<type> 配色类。
+ * Dark 模式下用更深的端点端,light 模式下饱和度下调一档。
+ */
+.zpass-glyph {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	color: #ffffff;
+	font-family: var(--font-mono);
+	font-weight: 600;
+	border-radius: var(--radius);
+	position: relative;
+	overflow: hidden;
+	box-shadow:
+		inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+		0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+/* favicon 图片叠在 glyph 字形上方,占满方块 */
+.zpass-glyph > img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+[data-theme="light"] .zpass-glyph {
+	/* 浅色卡片底上的渐变方块：去掉 dark 模式的高对比 inset 高光,改用 1px 白边
+	 * 把形状从白纸上勾出来,加柔和落影代替 dark 模式的深阴影 */
+	box-shadow:
+		inset 0 0 0 1px rgba(255, 255, 255, 0.4),
+		0 1px 2px rgba(15, 15, 18, 0.08),
+		0 2px 8px rgba(15, 15, 18, 0.06);
+}
+
+/* macOS app icon 风格的大 glyph（详情 hero 用,64x64）
+ * 关键配方：
+ *   - 顶部 1px 内高光（"反光"）
+ *   - 整体外发光（brand 色弥散，做出"图标镀光"质感）
+ *   - 底部 inner shadow（暗化下沿,营造"凸起"感）
+ *   - close shadow 落到卡片上
+ * 这五层叠起来才是 Sonoma 之后系统级 app icon 的标准做法,
+ * 缺任何一层都会回到 web 扁平卡片观感。
+ */
+.zpass-hero-glyph {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	color: #ffffff;
+	font-family: var(--font-sans);
+	font-weight: 500;
+	font-size: 30px;
+	letter-spacing: -0.02em;
+	border-radius: var(--radius-xl);
+	position: relative;
+	overflow: hidden;
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.25),
+		inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+		inset 0 -2px 6px rgba(0, 0, 0, 0.18),
+		0 1px 2px rgba(0, 0, 0, 0.2),
+		0 12px 28px -8px rgba(77, 142, 255, 0.42);
+}
+
+[data-theme="light"] .zpass-hero-glyph {
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.35),
+		inset 0 0 0 1px rgba(255, 255, 255, 0.18),
+		inset 0 -2px 6px rgba(0, 0, 0, 0.12),
+		0 1px 2px rgba(15, 15, 18, 0.12),
+		0 4px 12px rgba(37, 99, 235, 0.2),
+		0 16px 32px -8px rgba(37, 99, 235, 0.28);
+}
+
+/* hero-glyph 内嵌 favicon 图片占满方块,继承外层圆角 */
+.zpass-hero-glyph > img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+/* tint 配色 —— login 默认,其它按 type 类后缀切换
+ * 严禁紫色相（feedback: brand_color）—— login/passkey 用蓝绿系而非 indigo/violet
+ */
+.zpass-tint-login {
+	background: linear-gradient(135deg, var(--tint-login), #1f5fbf);
+}
+.zpass-tint-card {
+	background: linear-gradient(135deg, var(--tint-card), #b08350);
+}
+.zpass-tint-note {
+	background: linear-gradient(135deg, var(--tint-note), #5fa05a);
+}
+.zpass-tint-identity {
+	background: linear-gradient(135deg, var(--tint-identity), #c44b6a);
+}
+.zpass-tint-ssh {
+	background: linear-gradient(135deg, var(--tint-ssh), #4187a8);
+}
+.zpass-tint-passkey {
+	background: linear-gradient(135deg, var(--tint-passkey), #2d7a92);
+}
+.zpass-tint-totp {
+	background: linear-gradient(135deg, var(--tint-totp), #3e7a55);
+}
+
+[data-theme="light"] .zpass-tint-login {
+	background: linear-gradient(135deg, #2563eb, #1e40af);
+}
+[data-theme="light"] .zpass-tint-card {
+	background: linear-gradient(135deg, #c08a4a, #8c6230);
+}
+[data-theme="light"] .zpass-tint-note {
+	background: linear-gradient(135deg, #5fb55a, #3d8a3a);
+}
+[data-theme="light"] .zpass-tint-identity {
+	background: linear-gradient(135deg, #ed5f7e, #c03a5a);
+}
+[data-theme="light"] .zpass-tint-ssh {
+	background: linear-gradient(135deg, #4f9fc2, #2d7390);
+}
+[data-theme="light"] .zpass-tint-passkey {
+	background: linear-gradient(135deg, #3e98b5, #1f6a82);
+}
+[data-theme="light"] .zpass-tint-totp {
+	background: linear-gradient(135deg, #4f9c70, #2d6f48);
+}
+
+/* ─── Toast HUD —— macOS "Action Confirmation" 风 ───
+ * 不是普通玻璃浮层(zpass-glass) —— Toast 是"屏幕级"反馈,
+ * 视觉权重应当略高于浮层菜单,因此:
+ *   - 更浓的玻璃模糊 + 更高对比度的描边
+ *   - 顶部 inset 1px 高光（光从上方打来的"反光"）
+ *   - 多层落影做出"漂浮在屏幕上方"的距离感
+ *   - 浅色档背景仍略微透明,深色档接近实色（HUD 常态深色）
+ */
+.zpass-toast {
+	background-color: color-mix(in srgb, var(--bg-elev-2) 90%, transparent);
+	backdrop-filter: blur(28px) saturate(160%);
+	-webkit-backdrop-filter: blur(28px) saturate(160%);
+	border: 1px solid var(--line);
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.08),
+		0 1px 2px rgba(0, 0, 0, 0.3),
+		0 12px 32px -8px rgba(0, 0, 0, 0.5);
+}
+[data-theme="light"] .zpass-toast {
+	background-color: color-mix(in srgb, #ffffff 95%, transparent);
+	border-color: var(--line-soft);
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.6),
+		0 1px 2px rgba(15, 15, 18, 0.06),
+		0 12px 32px -8px rgba(15, 15, 18, 0.18),
+		0 24px 48px -16px rgba(37, 99, 235, 0.12);
+}
+
+/* ─── 主按钮的"凸起"配方（macOS Aqua 同向）───
+ * 实心填充按钮(default/danger/warn) hover/active 自带 opacity/scale 反馈,
+ * 但缺了"立体感"。这里加 inset 1px 顶高光 + 多层落影,模拟 Aqua 系按钮的
+ * 微凸起观感。dark 主题用白光高光,light 主题保持同向(白光在深色按钮上
+ * 通用)。active 状态阴影压扁,模拟"按下去"。
+ */
+.zpass-btn-primary {
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.14),
+		0 1px 2px rgba(0, 0, 0, 0.18),
+		0 2px 6px rgba(0, 0, 0, 0.08);
+}
+.zpass-btn-primary:active {
+	box-shadow:
+		inset 0 1px 2px rgba(0, 0, 0, 0.18),
+		0 1px 1px rgba(0, 0, 0, 0.1);
+}
+[data-theme="light"] .zpass-btn-primary {
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.14),
+		0 1px 2px rgba(15, 15, 18, 0.18),
+		0 2px 6px rgba(15, 15, 18, 0.1);
+}
+[data-theme="light"] .zpass-btn-primary:active {
+	box-shadow:
+		inset 0 1px 2px rgba(0, 0, 0, 0.3),
+		0 1px 1px rgba(15, 15, 18, 0.12);
+}
+
+/* ─── Workspace avatar 渐变方块（SpaceAvatar 文字回退） ───
+ * brand 蓝色系渐变 + inner 1px 白边 + 落影; 严禁紫色相（feedback: brand_color）
+ */
+.zpass-workspace-avatar {
+	background: linear-gradient(135deg, var(--brand), #1f5fbf);
+	box-shadow:
+		inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+		0 1px 2px rgba(0, 0, 0, 0.25),
+		0 2px 6px rgba(0, 0, 0, 0.18);
+}
+[data-theme="light"] .zpass-workspace-avatar {
+	background: linear-gradient(135deg, #2563eb, #1e40af);
+	box-shadow:
+		inset 0 0 0 1px rgba(255, 255, 255, 0.4),
+		0 1px 2px rgba(15, 15, 18, 0.06),
+		0 4px 12px rgba(37, 99, 235, 0.18);
+}
+
+/* ─── Sidebar NavRow 选中态 brand indicator ───
+ * 给 NavLink 加 .zpass-nav-active 即可。indicator 紧贴 sidebar 左缘外侧 4px,
+ * 与 NavLink mx-2 留白的"内 8 + 外 8"视觉节奏对齐。
+ */
+.zpass-nav-active::before {
+	content: "";
+	position: absolute;
+	left: -10px;
+	top: 50%;
+	transform: translateY(-50%);
+	width: 2px;
+	height: 16px;
+	background: var(--brand);
+	border-radius: 0 2px 2px 0;
+}
+
+/* ─── NavRow / List Row 选中态的 brand indicator 细条 ───
+ * 视觉锚点：左侧 2px brand 色细条 + bg-active 整行底色。
+ * 不要把整行染成 brand 色（那是 web admin panel 味）——
+ * 桌面 app（macOS Settings / Linear / 1Password 8）的"选中"就是
+ * 一根细条 + 微微变深的底，三者缺一不可。
+ *
+ * 用法：在选中态元素上加 .zpass-active-indicator,需要 relative 父级。
+ */
+.zpass-active-indicator {
+	position: relative;
+}
+.zpass-active-indicator::before {
+	content: "";
+	position: absolute;
+	left: -8px;
+	top: 50%;
+	transform: translateY(-50%);
+	width: 2px;
+	height: 16px;
+	background: var(--brand);
+	border-radius: 0 2px 2px 0;
+}
+
+/* 列表行用：indicator 比 nav 长一些（贴满行高） */
+.zpass-active-bar::before {
+	content: "";
+	position: absolute;
+	left: -8px;
+	top: 8px;
+	bottom: 8px;
+	width: 2px;
+	background: var(--brand);
+	border-radius: 0 2px 2px 0;
+}
+
+/* VaultListRow 选中态 brand indicator —— indicator 从 row 容器内嵌左侧 4px,
+ * 不依赖外部 padding。与 .zpass-nav-active 一脉相承,但因为列表 row 没有
+ * 外部留白,indicator 紧贴左缘 4px。
+ */
+.zpass-row-active::before {
+	content: "";
+	position: absolute;
+	left: -4px;
+	top: 8px;
+	bottom: 8px;
+	width: 2px;
+	background: var(--brand);
+	border-radius: 0 2px 2px 0;
+}
+
+/* ─── TOTP 大字号显示（field 内 24px brand 色 + tabular-nums） ───
+ * 对标 macOS Calculator / Authy / 1Password 的验证码显示：
+ *   - 字号显著大于其它字段 value（24px vs 13px）
+ *   - brand 色让"这是关键短期凭证"的语义一眼可读
+ *   - tabular-nums 修复"482 → 491"切换时字符宽度抖动
+ */
+.zpass-totp-display {
+	font-family: var(--font-mono);
+	font-size: 24px;
+	letter-spacing: 0.1em;
+	font-weight: 500;
+	font-variant-numeric: tabular-nums;
+	color: var(--brand);
+	line-height: 1.1;
+}
+
+/* ─── 状态点（ONLINE / ENCRYPTED）光晕 ───
+ * 6px 圆点 + 颜色光晕,比单色圆点多一分"活物"质感。
+ */
+.zpass-status-dot {
+	display: inline-block;
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--ok);
+	box-shadow: 0 0 6px rgba(94, 164, 122, 0.5);
+	flex-shrink: 0;
+}
+[data-theme="light"] .zpass-status-dot {
+	box-shadow: 0 0 6px rgba(53, 115, 79, 0.35);
+}
+
+/* ─── Hero tag（详情头部的类型徽章） ───
+ * 用 brand-soft 底 + brand 色字,比通用 bg-elev-2 灰底更有"主体性"。
+ */
+.zpass-hero-tag {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 1.5px 8px;
+	background: var(--brand-soft);
+	color: var(--brand);
+	border-radius: 999px;
+	font-family: var(--font-mono);
+	font-size: 10.5px;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	font-weight: 500;
+}
+[data-theme="light"] .zpass-hero-tag {
+	box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.18);
+}
+
+/* ─── 详情 hero 底部分隔线 ───
+ * 不要用整条 border-bottom —— 桌面 app 常见做法是用 linear-gradient
+ * 让分隔线两端淡出,中段实色,与白纸的"软分割"语境更搭。
+ */
+.zpass-hero-divider {
+	position: relative;
+}
+.zpass-hero-divider::after {
+	content: "";
+	position: absolute;
+	left: 36px;
+	right: 36px;
+	bottom: -1px;
+	height: 1px;
+	background: linear-gradient(90deg, transparent, var(--line), transparent);
+}
+
+/* ─── 字段行：hover 时仅露出 action 按钮,不刷整行底色（macOS Settings 风） ───
+ * Web table 的"整行 hover 变深"是廉价感的最大来源之一。
+ * 桌面 app 的字段行只让操作按钮淡入,行底色至多升 28% 的 hover 色叠加。
+ *
+ * 用法：在字段行容器上加 .zpass-field-row,在操作按钮组上加 .zpass-field-actions。
+ */
+.zpass-field-row {
+	transition: background 100ms;
+}
+.zpass-field-row:hover {
+	background: color-mix(in srgb, var(--bg-hover) 28%, transparent);
+}
+.zpass-field-actions {
+	opacity: 0;
+	transition: opacity 120ms;
+}
+.zpass-field-row:hover .zpass-field-actions {
+	opacity: 1;
+}
+/* 键盘聚焦也让 actions 可见,否则键盘用户摸不到复制按钮 */
+.zpass-field-row:focus-within .zpass-field-actions {
+	opacity: 1;
+}
+
+/* ─── group card：字段成组的卡片容器 ───
+ * 与 design 稿对齐：bg-elev-2 + line-soft 描边 + 圆角 10。
+ * 浅色下补 shadow-sm 抬出"小浮起"。
+ */
+.zpass-group-card {
+	background: var(--bg-elev-2);
+	border: 1px solid var(--line-soft);
+	border-radius: var(--radius-lg);
+	overflow: hidden;
+}
+[data-theme="light"] .zpass-group-card {
+	box-shadow: var(--shadow-sm);
+}
+
+/* ─── meta-grid：详情底部元信息网格 ───
+ * 每格独立卡片观感（线条隔开 + bg-elev-2 网格底）。
+ */
+.zpass-meta-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+	gap: 1px;
+	background: var(--line-soft);
+	border: 1px solid var(--line-soft);
+	border-radius: var(--radius-lg);
+	overflow: hidden;
+}
+[data-theme="light"] .zpass-meta-grid {
+	box-shadow: var(--shadow-sm);
+}
+.zpass-meta-item {
+	background: var(--bg-elev-2);
+	padding: 12px 16px;
+}
+
+/* ─── 强度条（macOS Keychain Access 风格紧凑灯柱） ─── */
+.zpass-strength-bar {
+	flex: 1;
+	height: 4px;
+	background: var(--line);
+	border-radius: 2px;
+	transition: background 200ms;
+}
+.zpass-strength-bar.filled {
+	background: linear-gradient(
+		90deg,
+		var(--ok),
+		color-mix(in srgb, var(--ok) 80%, var(--brand))
+	);
+}
+
+/* ─── macOS NSSearchField 风格的搜索框聚焦 ───
+ * 用 inset 1px 内阴影 + 2px brand-soft 外环（不要 3px,3px 是 web focus
+ * ring 的标志味道）。在 :focus-within 容器上挂 .zpass-search-focus。
+ */
+.zpass-search-focus:focus-within {
+	border-color: var(--brand);
+	box-shadow:
+		inset 0 1px 1px rgba(0, 0, 0, 0.04),
+		0 0 0 2px var(--brand-soft);
+}
+[data-theme="light"] .zpass-search-focus:focus-within {
+	background: #ffffff;
+	box-shadow:
+		inset 0 1px 1.5px rgba(15, 15, 18, 0.05),
+		0 0 0 2px var(--brand-soft);
 }

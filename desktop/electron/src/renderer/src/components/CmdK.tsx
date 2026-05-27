@@ -412,7 +412,7 @@ export function CmdK() {
 			 * 视觉：使用 .zpass-glass 让面板带玻璃质感（轻微透出后景），
 			 * 配合外层 .zpass-backdrop 形成 visionOS 风的浮层层级。
 			 */}
-			<div className="zpass-glass flex flex-col overflow-hidden rounded-xl shadow-lg">
+			<div className="zpass-glass flex flex-col overflow-hidden rounded-(--radius-xl)">
 				{/* 输入条 */}
 				<div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-(--line-soft) px-4">
 					<Search size={15} strokeWidth={1.5} className="text-(--text-3)" />

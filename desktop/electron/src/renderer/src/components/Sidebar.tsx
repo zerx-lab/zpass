@@ -118,10 +118,12 @@ function NavRow({
 			className={({ isActive }) => {
 				const active = computeActive(isActive);
 				return clsx(
+					// data-active 让伪元素 indicator 仅在选中时出现，
+					// 替代过去 active 时把整行换成 --bg-active 的 web 化做法
 					"group relative mx-2 flex h-9 items-center gap-2.5 rounded-(--radius) transition-colors",
 					collapsed ? "justify-center px-0" : "px-2.5",
 					active
-						? "bg-(--bg-active) text-(--text)"
+						? "bg-(--bg-active) text-(--text) zpass-nav-active"
 						: "text-(--text-2) hover:bg-(--bg-hover) hover:text-(--text)",
 				);
 			}}
@@ -130,9 +132,13 @@ function NavRow({
 			{!collapsed && (
 				<>
 					<span className="flex-1 truncate text-[13px]">{label}</span>
-					{count != null && <span className="font-mono text-[11px] text-(--text-3)">{count}</span>}
+					{count != null && (
+						<span className="rounded-full border border-(--line-soft) bg-(--bg-elev-2) px-1.5 py-px font-mono text-[10.5px] text-(--text-3)">
+							{count}
+						</span>
+					)}
 					{badge && (
-						<span className="ml-auto rounded-sm border border-(--line) bg-(--bg-elev-2) px-1.5 py-0.5 font-mono text-[10px] text-(--text-2)">
+						<span className="ml-auto rounded-full border border-(--line) bg-(--bg-elev-2) px-1.5 py-px font-mono text-[10px] text-(--text-2)">
 							{badge}
 						</span>
 					)}
@@ -198,8 +204,11 @@ export function Sidebar({ sidebarState }: SidebarProps) {
 			className="relative flex h-full w-full flex-col"
 			data-sidebar-collapsed={collapsed ? "true" : "false"}
 		>
-			{/* ── 主体 aside ── */}
-			<aside className="flex h-full w-full min-w-0 flex-col bg-(--bg-elev) overflow-hidden">
+			{/* ── 主体 aside ──
+			 * 关键视觉锚点：在 bg-elev 底色之上叠 --bg-gradient 软渐晕（顶 brand 蓝 + 上方一丝白光），
+			 * 模拟 Linear / Arc 的"舞台灯"环境光，去掉过去大面积纯色 sidebar 的 web 廉价感。
+			 */}
+			<aside className="flex h-full w-full min-w-0 flex-col bg-(--bg-elev) zpass-bg-gradient overflow-hidden">
 				{/* WorkspaceSwitcher — 收起时显示 logo 方块 */}
 				<WorkspaceSwitcher collapsed={collapsed} />
 
@@ -301,8 +310,11 @@ export function Sidebar({ sidebarState }: SidebarProps) {
 					/>
 				</nav>
 
-				{/* ── 账户头像菜单（底部） ── */}
-				<div className="shrink-0 border-t border-(--line) bg-(--bg-elev) flex items-center gap-1.5 px-2.5 py-2">
+				{/* ── 账户头像菜单（底部）
+				 * border-top 改用 line-soft —— 实色 --line 在桌面 app 下显得"线太粗",
+				 * 软线只勾出层级而不抢视觉。
+				 */}
+				<div className="shrink-0 border-t border-(--line-soft) bg-(--bg-elev) flex items-center gap-1.5 px-2.5 py-2">
 					{/* 头像按钮 + Dropdown 菜单
 					 *   收起态：
 					 *     - 左键 → 展开侧边栏
@@ -384,7 +396,7 @@ export function Sidebar({ sidebarState }: SidebarProps) {
 								sideOffset={8}
 								collisionPadding={8}
 								className={clsx(
-									"z-50 min-w-45 zpass-glass rounded-(--radius) shadow-md",
+									"z-50 min-w-45 zpass-glass rounded-(--radius)",
 									"outline-none",
 									"origin-(--radix-dropdown-menu-content-transform-origin)",
 									"transition-[opacity,transform] duration-100 ease-out",

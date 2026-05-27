@@ -184,7 +184,6 @@ export const zh: Strings = {
 	unlock_greeting: "欢迎回来",
 	unlock_sub: "输入主密码解锁保险库",
 	unlock_placeholder: "主密码",
-	unlock_forgot: "忘记主密码？",
 	unlock_bio: "使用生物识别",
 	unlock_switch: "切换账户",
 	unlock_btn: "解锁",

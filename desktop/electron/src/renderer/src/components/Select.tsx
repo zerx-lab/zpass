@@ -238,7 +238,7 @@ state=open]`，Radix 自动加）—— border-(--text-2)
 					className={clsx(
 						"z-50 min-w-(--radix-select-trigger-width) overflow-hidden",
 						// 改用 .zpass-glass 让浮层带玻璃质感（与 CmdK / Dropdown 一致）
-						"zpass-glass rounded-(--radius) shadow-md",
+						"zpass-glass rounded-(--radius)",
 						// 说明：
 						//   早先此处用了 `animate-in / fade-in-0 / zoom-in-95` 等类名，
 						//   它们属于 `tw-animate-css` / `tailwindcss-animate` 插件。项目

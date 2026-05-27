@@ -1,0 +1,1851 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ZPass · Vault</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&family=Geist:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+
+    <style>
+      /* ============================================================
+       * ZPass Vault · 桌面首页视觉重构稿
+       * ------------------------------------------------------------
+       * 设计目标：
+       *   - 比当前生产 UI 更"桌面原生"——靠近 Linear / Arc / 1Password 8 /
+       *     Raycast 的 2026 PC GUI 审美
+       *   - 保留现有 token 体系（--bg / --bg-elev / --line / --text-N），
+       *     新增的视觉语言以 token 增量形式落地，便于回迁 React
+       *   - 引入三个新视觉系统：
+       *       1. 软渐变层 (--bg-gradient)：sidebar / detail hero 的高级感
+       *       2. 选中态品牌色条 (--accent-bar)：列表行的视觉锚点
+       *       3. 品牌色字段图标 (--icon-tint-N)：按 item type 配色
+       * ============================================================ */
+
+      :root {
+        /* —— 既有 token（与 desktop/electron/src/renderer/src/styles/tokens.css 同源） —— */
+        --bg: #0a0a0b;
+        --bg-elev: #0f0f11;
+        --bg-elev-2: #16161a;
+        --bg-hover: #18181c;
+        --bg-active: #1d1d22;
+        --line: #232328;
+        --line-soft: #1a1a1e;
+        --text: #ececec;
+        --text-2: #a8a8ac;
+        --text-3: #8a8a90;
+        --text-4: #5c5c62;
+        --accent: #ececec;
+        --accent-ink: #0c0c0d;
+        --danger: #e55a4a;
+        --warn: #c8934a;
+        --ok: #5ea47a;
+        --info: #6b9cc4;
+
+        --radius-sm: 5px;
+        --radius: 7px;
+        --radius-lg: 10px;
+        --radius-xl: 14px;
+
+        --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+        --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.35);
+        --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.55);
+
+        --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+        /* —— 新增视觉 token —— */
+
+        /* 软渐变背景：sidebar 顶 / 详情 hero 用 */
+        --bg-gradient: radial-gradient(
+            ellipse 80% 50% at 50% -10%,
+            rgba(120, 119, 198, 0.08),
+            transparent
+          ),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 200px);
+
+        /* 品牌色 —— 仅用于选中态指示条、键盘焦点环、关键操作 */
+        --brand: #7c7cf0;
+        --brand-soft: rgba(124, 124, 240, 0.12);
+        --brand-glow: rgba(124, 124, 240, 0.25);
+
+        /* item type → 品牌色映射（详情 hero 的 glyph 背景） */
+        --tint-login: #7c7cf0;
+        --tint-card: #d4a574;
+        --tint-note: #8acf85;
+        --tint-identity: #f47891;
+        --tint-ssh: #6cb5d3;
+        --tint-passkey: #c889e8;
+        --tint-totp: #5ea47a;
+      }
+
+      /* ─── Light 主题（一等公民，独立打磨而非 dark 镜像） ───
+       *
+       * 关键决策：
+       *   - bg 用偏暖的米白 #f6f6f2，避免纯灰白产生的"医院/Office"廉价感
+       *   - bg-elev 纯白卡片，与 bg 形成 9 点亮度差，层级一眼可见
+       *   - bg-elev-2 略带暖色 #fbfbf7，作为输入框/嵌入卡片
+       *   - brand 用 indigo #4f46e5（Linear / Vercel 浅色档同款），白底耐看
+       *   - tint 系列饱和度统一下调一档，避免在白底上过艳
+       *   - 阴影更细更软（浅色下阴影是层级唯一信号），加入第二层冷色光晕
+       *   - glyph 渐变改用相对柔和的 from→to，去掉 dark 模式的高对比 inset
+       */
+      [data-theme="light"] {
+        --bg: #f6f6f2;
+        --bg-elev: #ffffff;
+        --bg-elev-2: #fbfbf7;
+        --bg-hover: #efefea;
+        --bg-active: #e6e6e0;
+        --line: #dededa;
+        --line-soft: #ececea;
+        --text: #18181b;
+        --text-2: #3f3f46;
+        --text-3: #62626a;
+        --text-4: #9494a0;
+        --accent: #18181b;
+        --accent-ink: #ffffff;
+
+        /* indigo 系品牌色 —— Linear/Vercel 浅色档同款，白底耐看且现代 */
+        --brand: #4f46e5;
+        --brand-soft: rgba(79, 70, 229, 0.08);
+        --brand-glow: rgba(79, 70, 229, 0.14);
+
+        /* 浅色下软渐变改用 indigo + 一丝暖色，避免画面太冷 */
+        --bg-gradient: radial-gradient(
+            ellipse 90% 60% at 50% -20%,
+            rgba(79, 70, 229, 0.06),
+            transparent 50%
+          ),
+          radial-gradient(
+            ellipse 60% 40% at 100% 0%,
+            rgba(244, 120, 145, 0.04),
+            transparent 50%
+          ),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.6), transparent 240px);
+
+        /* 浅色 tint 系列 —— 饱和度比 dark 主题低一档，避免白底上过艳 */
+        --tint-login: #6366f1;
+        --tint-card: #b07a3a;
+        --tint-note: #4f9c4a;
+        --tint-identity: #db4d6b;
+        --tint-ssh: #3f8db0;
+        --tint-passkey: #a85fd0;
+        --tint-totp: #3d8a5f;
+
+        /* 浅色阴影：核心层级信号；多层叠加做出"纸张悬浮"质感 */
+        --shadow-sm:
+          0 1px 2px rgba(15, 15, 18, 0.04),
+          0 1px 1px rgba(15, 15, 18, 0.03);
+        --shadow-md:
+          0 1px 2px rgba(15, 15, 18, 0.04),
+          0 8px 24px -8px rgba(15, 15, 18, 0.12),
+          0 16px 40px -16px rgba(79, 70, 229, 0.1);
+        --shadow-lg:
+          0 4px 12px rgba(15, 15, 18, 0.06),
+          0 24px 60px -20px rgba(15, 15, 18, 0.2),
+          0 40px 80px -40px rgba(79, 70, 229, 0.14);
+      }
+
+      /* 浅色主题 glyph 改用更柔和的渐变（去掉 dark 的 inset 高光，
+       * 加上更细的 1px 边框作为白底上的形状界定）
+       */
+      [data-theme="light"] .item-glyph,
+      [data-theme="light"] .hero-glyph {
+        box-shadow:
+          inset 0 0 0 1px rgba(255, 255, 255, 0.4),
+          0 1px 2px rgba(15, 15, 18, 0.08),
+          0 2px 8px rgba(15, 15, 18, 0.06);
+      }
+      [data-theme="light"] .item-glyph.tint-login {
+        background: linear-gradient(135deg, #6366f1, #4338ca);
+      }
+      [data-theme="light"] .item-glyph.tint-card {
+        background: linear-gradient(135deg, #c08a4a, #8c6230);
+      }
+      [data-theme="light"] .item-glyph.tint-note {
+        background: linear-gradient(135deg, #5fb55a, #3d8a3a);
+      }
+      [data-theme="light"] .item-glyph.tint-identity {
+        background: linear-gradient(135deg, #ed5f7e, #c03a5a);
+      }
+      [data-theme="light"] .item-glyph.tint-ssh {
+        background: linear-gradient(135deg, #4f9fc2, #2d7390);
+      }
+      [data-theme="light"] .item-glyph.tint-passkey {
+        background: linear-gradient(135deg, #b96fda, #8a4ab0);
+      }
+      [data-theme="light"] .item-glyph.tint-totp {
+        background: linear-gradient(135deg, #4f9c70, #2d6f48);
+      }
+      [data-theme="light"] .hero-glyph {
+        background: linear-gradient(135deg, #6366f1, #4338ca);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.35),
+          inset 0 0 0 1px rgba(255, 255, 255, 0.18),
+          inset 0 -2px 6px rgba(0, 0, 0, 0.12),
+          0 1px 2px rgba(15, 15, 18, 0.12),
+          0 4px 12px rgba(79, 70, 229, 0.2),
+          0 16px 32px -8px rgba(79, 70, 229, 0.28);
+      }
+
+      /* 浅色 workspace-avatar 渐变重选 —— dark 上的紫色在白底上偏暗，
+       * 改成更鲜活的 indigo→violet，与 brand 色保持系列感 */
+      [data-theme="light"] .workspace-avatar {
+        background: linear-gradient(135deg, #6366f1, #8b5cf6);
+        box-shadow:
+          inset 0 0 0 1px rgba(255, 255, 255, 0.4),
+          0 1px 2px rgba(15, 15, 18, 0.06),
+          0 4px 12px rgba(79, 70, 229, 0.18);
+      }
+
+      /* 浅色 list-toolbar / detail-hero 上边缘的微妙下沉感 */
+      [data-theme="light"] .list-toolbar,
+      [data-theme="light"] .list-meta {
+        background: var(--bg-elev);
+      }
+
+      /* 浅色搜索框聚焦 —— macOS NSSearchField 视觉：
+       *   - 2px brand-soft 外环（不要 3px，3px 是 web focus ring 标志味道）
+       *   - 1px 内阴影模拟"凹下去"的输入感 */
+      [data-theme="light"] .search:focus-within {
+        background: #ffffff;
+        border-color: var(--brand);
+        box-shadow:
+          inset 0 1px 1.5px rgba(15, 15, 18, 0.05),
+          0 0 0 2px var(--brand-soft);
+      }
+
+      /* 浅色 hero-tag 在白底上需要更明确的存在感 */
+      [data-theme="light"] .hero-tag {
+        background: var(--brand-soft);
+        color: var(--brand);
+        box-shadow: inset 0 0 0 1px rgba(79, 70, 229, 0.15);
+      }
+
+      /* 浅色 primary 按钮 —— macOS Aqua 风格"实心暗按钮"：
+       *   - 用 zinc-900 而非纯黑（纯黑在白底视觉过重）
+       *   - 1px inset 高光 + 多层阴影做"凸起"质感
+       *   - hover/active 用纯背景色加深，无边框变化 */
+      [data-theme="light"] .btn.primary,
+      [data-theme="light"] .icon-btn.primary {
+        background: #18181b;
+        color: #ffffff;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.14),
+          0 1px 2px rgba(15, 15, 18, 0.18),
+          0 2px 6px rgba(15, 15, 18, 0.1);
+      }
+      [data-theme="light"] .btn.primary:hover,
+      [data-theme="light"] .icon-btn.primary:hover {
+        background: #27272a;
+        color: #ffffff;
+      }
+      [data-theme="light"] .btn.primary:active,
+      [data-theme="light"] .icon-btn.primary:active {
+        background: #09090b;
+        box-shadow:
+          inset 0 1px 2px rgba(0, 0, 0, 0.3),
+          0 1px 1px rgba(15, 15, 18, 0.12);
+      }
+
+      /* 浅色 .btn.danger 微调 —— 白底上稍微抬亮 danger 色让对比更舒服 */
+      [data-theme="light"] .btn.danger {
+        color: #c44535;
+      }
+      [data-theme="light"] .btn.danger:hover {
+        background: rgba(196, 69, 53, 0.08);
+        color: #c44535;
+      }
+
+      /* 浅色卡片 / group-card 加阴影衬出层级 */
+      [data-theme="light"] .group-card,
+      [data-theme="light"] .notes-card,
+      [data-theme="light"] .meta-grid {
+        box-shadow: var(--shadow-sm);
+      }
+
+      /* 浅色账户底栏的"ONLINE"绿点光晕弱化（白底上太刺眼） */
+      [data-theme="light"] .account-dot {
+        box-shadow: 0 0 6px rgba(53, 115, 79, 0.35);
+      }
+
+      /* 浅色 TOTP 大字号字段：indigo 在白底比 brand 紫更耐看 */
+      [data-theme="light"] .field.totp .field-value {
+        color: var(--brand);
+      }
+
+      /* 浅色 list-footer 区分背景 */
+      [data-theme="light"] .list-footer {
+        background: var(--bg-elev-2);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font-sans);
+        font-size: 13.5px;
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        text-rendering: geometricPrecision;
+        font-feature-settings:
+          "ss01" on,
+          "cv11" on,
+          "calt" on;
+        user-select: none;
+        overflow: hidden;
+        cursor: default;
+      }
+
+      input,
+      textarea,
+      .selectable {
+        user-select: text;
+        cursor: text;
+      }
+
+      button {
+        font-family: inherit;
+        color: inherit;
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        padding: 0;
+      }
+
+      /* ─── 应用主框架 grid（titlebar + sidebar + main） ─── */
+      .app {
+        display: grid;
+        grid-template-columns: 248px 1fr;
+        grid-template-rows: 36px 1fr;
+        height: 100vh;
+      }
+
+      /* ─── 自定义 Titlebar（macOS 风：左红绿灯，右窗口控件留空） ─── */
+      .titlebar {
+        grid-column: 1 / -1;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: var(--bg);
+        border-bottom: 1px solid var(--line-soft);
+        padding: 0 12px 0 16px;
+        -webkit-app-region: drag;
+        position: relative;
+      }
+      .traffic-lights {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .traffic-light {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--text-4);
+        opacity: 0.6;
+      }
+      .traffic-light.close {
+        background: #ff5f57;
+      }
+      .traffic-light.min {
+        background: #febc2e;
+      }
+      .traffic-light.max {
+        background: #28c840;
+      }
+      .titlebar-title {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 12px;
+        color: var(--text-3);
+        letter-spacing: 0.02em;
+        font-weight: 500;
+      }
+      .titlebar-actions {
+        display: flex;
+        gap: 4px;
+        -webkit-app-region: no-drag;
+      }
+      .titlebar-btn {
+        width: 22px;
+        height: 22px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: var(--radius-sm);
+        color: var(--text-3);
+        transition: background 120ms;
+      }
+      .titlebar-btn:hover {
+        background: color-mix(in srgb, var(--text) 8%, transparent);
+        color: var(--text);
+      }
+
+      /* ─── 主三栏布局：sidebar / list / detail ─── */
+      .layout {
+        display: grid;
+        grid-template-columns: 248px 320px 1fr;
+        min-height: 0;
+        grid-column: 1 / -1;
+      }
+
+      /* ─── Sidebar ─── */
+      .sidebar {
+        background: var(--bg);
+        background-image: var(--bg-gradient);
+        border-right: 1px solid var(--line-soft);
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+
+      .workspace {
+        padding: 12px 12px 8px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .workspace-avatar {
+        width: 28px;
+        height: 28px;
+        border-radius: 7px;
+        background: linear-gradient(135deg, var(--brand), #5252b8);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: 600;
+        font-size: 13px;
+        flex-shrink: 0;
+        box-shadow:
+          0 0 0 1px var(--line),
+          0 2px 6px rgba(0, 0, 0, 0.25);
+      }
+      .workspace-name {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text);
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .workspace-sub {
+        font-size: 10.5px;
+        font-family: var(--font-mono);
+        color: var(--text-4);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        margin-top: 1px;
+      }
+      .workspace-chevron {
+        color: var(--text-4);
+      }
+
+      .nav {
+        flex: 1;
+        overflow-y: auto;
+        padding: 4px 8px 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+      }
+      .nav-section {
+        margin-top: 14px;
+        padding: 0 8px 4px;
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--text-4);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .nav-section:first-child {
+        margin-top: 4px;
+      }
+      .nav-section button {
+        color: var(--text-4);
+        width: 18px;
+        height: 18px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: var(--radius-sm);
+      }
+      .nav-section button:hover {
+        background: var(--bg-hover);
+        color: var(--text-2);
+      }
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 9px;
+        border-radius: var(--radius);
+        font-size: 13px;
+        color: var(--text-2);
+        cursor: default;
+        transition: background 100ms;
+        position: relative;
+      }
+      .nav-item:hover {
+        background: var(--bg-hover);
+        color: var(--text);
+      }
+      .nav-item:active {
+        background: var(--bg-active);
+      }
+      .nav-item.active {
+        background: var(--bg-active);
+        color: var(--text);
+      }
+      .nav-item.active::before {
+        content: "";
+        position: absolute;
+        left: -8px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 2px;
+        height: 16px;
+        background: var(--brand);
+        border-radius: 0 2px 2px 0;
+      }
+      .nav-item .icon {
+        width: 14px;
+        height: 14px;
+        flex-shrink: 0;
+        opacity: 0.85;
+      }
+      .nav-item .label {
+        flex: 1;
+        min-width: 0;
+      }
+      .nav-item .count {
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        color: var(--text-4);
+        background: var(--bg-elev-2);
+        padding: 1px 6px;
+        border-radius: 999px;
+        border: 1px solid var(--line-soft);
+      }
+      .nav-item.active .count {
+        color: var(--text-3);
+        border-color: var(--line);
+      }
+
+      /* sidebar footer 账户 */
+      .account {
+        border-top: 1px solid var(--line-soft);
+        padding: 10px 12px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        background: var(--bg);
+      }
+      .account-avatar {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #ff8a65, #d4a574);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-size: 11px;
+        font-weight: 600;
+        flex-shrink: 0;
+      }
+      .account-name {
+        font-size: 12.5px;
+        color: var(--text);
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .account-status {
+        font-size: 10.5px;
+        font-family: var(--font-mono);
+        color: var(--ok);
+        letter-spacing: 0.04em;
+      }
+      .account-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--ok);
+        box-shadow: 0 0 6px rgba(94, 164, 122, 0.5);
+        flex-shrink: 0;
+      }
+
+      /* ─── 列表面板 ─── */
+      .list {
+        background: var(--bg-elev);
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        border-right: 1px solid var(--line-soft);
+        min-height: 0;
+      }
+
+      .list-toolbar {
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--line-soft);
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      /* 原生搜索框（NSSearchField 风格）：
+       * - hairline 边框（--line-soft 比 --line 更柔，不喧宾夺主）
+       * - 聚焦不再外发 3px 光晕（典型 web focus ring）；改用边框色 + 内阴影
+       *   做"凹下去"的输入感，参考 macOS Mail 的搜索框 */
+      .search {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 28px;
+        padding: 0 10px;
+        background: var(--bg-elev-2);
+        border: 1px solid var(--line-soft);
+        border-radius: 6px;
+        transition: border-color 100ms, box-shadow 100ms, background 100ms;
+      }
+      .search:hover {
+        background: var(--bg-hover);
+      }
+      .search:focus-within {
+        background: var(--bg-elev-2);
+        border-color: var(--brand);
+        box-shadow:
+          inset 0 1px 1px rgba(0, 0, 0, 0.04),
+          0 0 0 2px var(--brand-soft);
+      }
+      .search svg {
+        color: var(--text-3);
+        flex-shrink: 0;
+      }
+      .search input {
+        flex: 1;
+        min-width: 0;
+        background: transparent;
+        border: none;
+        outline: none;
+        color: var(--text);
+        font-size: 13px;
+      }
+      .search input::placeholder {
+        color: var(--text-4);
+      }
+      .search .kbd {
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        color: var(--text-3);
+        background: var(--bg);
+        border: 1px solid var(--line-soft);
+        border-radius: 4px;
+        padding: 1px 5px;
+      }
+
+      /* 原生 toolbar icon 按钮 —— 默认无边框，只用底色变化反馈 hover/active。
+       * 对标 macOS Mail / Finder toolbar、Linear / Raycast / 1Password 8。
+       * 边框 hover 变色是 web UI 的典型味道，桌面 app 几乎不这么做。 */
+      .icon-btn {
+        width: 28px;
+        height: 28px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: transparent;
+        border: none;
+        border-radius: 6px;
+        color: var(--text-2);
+        transition: background 80ms, color 80ms, transform 80ms;
+      }
+      .icon-btn:hover {
+        background: var(--bg-hover);
+        color: var(--text);
+      }
+      .icon-btn:active {
+        background: var(--bg-active);
+        transform: scale(0.96);
+      }
+      .icon-btn.primary {
+        background: var(--text);
+        color: var(--accent-ink);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.08),
+          0 1px 2px rgba(0, 0, 0, 0.18);
+      }
+      .icon-btn.primary:hover {
+        background: color-mix(in srgb, var(--text) 86%, transparent);
+      }
+      .icon-btn.primary:active {
+        background: color-mix(in srgb, var(--text) 78%, transparent);
+        transform: scale(0.96);
+      }
+
+      .list-meta {
+        padding: 8px 14px;
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--text-4);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 1px solid var(--line-soft);
+      }
+      .sort {
+        color: var(--text-3);
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .sort:hover {
+        color: var(--text);
+      }
+
+      .items {
+        flex: 1;
+        overflow-y: auto;
+        padding: 6px 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 9px;
+        border-radius: var(--radius);
+        cursor: default;
+        transition: background 100ms;
+        position: relative;
+      }
+      .item:hover {
+        background: var(--bg-hover);
+      }
+      .item:active {
+        background: var(--bg-active);
+      }
+      .item.active {
+        background: var(--bg-active);
+      }
+      .item.active::before {
+        content: "";
+        position: absolute;
+        left: -8px;
+        top: 8px;
+        bottom: 8px;
+        width: 2px;
+        background: var(--brand);
+        border-radius: 0 2px 2px 0;
+      }
+      .item-glyph {
+        width: 30px;
+        height: 30px;
+        border-radius: 8px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        font-family: var(--font-mono);
+        font-weight: 600;
+        font-size: 13px;
+        color: white;
+        position: relative;
+        box-shadow:
+          inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+          0 1px 2px rgba(0, 0, 0, 0.2);
+      }
+      .item-glyph.tint-login {
+        background: linear-gradient(135deg, #7c7cf0, #5252b8);
+      }
+      .item-glyph.tint-card {
+        background: linear-gradient(135deg, #d4a574, #b08350);
+      }
+      .item-glyph.tint-note {
+        background: linear-gradient(135deg, #8acf85, #5fa05a);
+      }
+      .item-glyph.tint-identity {
+        background: linear-gradient(135deg, #f47891, #c44b6a);
+      }
+      .item-glyph.tint-ssh {
+        background: linear-gradient(135deg, #6cb5d3, #4187a8);
+      }
+      .item-glyph.tint-passkey {
+        background: linear-gradient(135deg, #c889e8, #9a5fb8);
+      }
+      .item-glyph.tint-totp {
+        background: linear-gradient(135deg, #5ea47a, #3e7a55);
+      }
+      .item-body {
+        flex: 1;
+        min-width: 0;
+      }
+      .item-title {
+        font-size: 13px;
+        color: var(--text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .item-sub {
+        font-size: 11.5px;
+        color: var(--text-3);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        margin-top: 1px;
+      }
+      .item-time {
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        color: var(--text-4);
+        flex-shrink: 0;
+      }
+      .item-fav {
+        color: var(--warn);
+        flex-shrink: 0;
+      }
+
+      .list-footer {
+        border-top: 1px solid var(--line-soft);
+        background: var(--bg-elev-2);
+        padding: 6px 12px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-3);
+      }
+      .lock-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 8px;
+        border-radius: 5px;
+        background: transparent;
+        border: none;
+        color: var(--text-2);
+        font-size: 11.5px;
+        letter-spacing: normal;
+        text-transform: none;
+        font-family: var(--font-sans);
+        transition: background 80ms, color 80ms;
+      }
+      .lock-btn:hover {
+        background: var(--bg-hover);
+        color: var(--text);
+      }
+      .lock-btn:active {
+        background: var(--bg-active);
+      }
+
+      /* ─── 详情面板 ─── */
+      .detail {
+        background: var(--bg-elev);
+        background-image: var(--bg-gradient);
+        overflow-y: auto;
+        min-width: 0;
+      }
+
+      .detail-hero {
+        padding: 32px 36px 24px;
+        border-bottom: 1px solid var(--line-soft);
+        position: relative;
+      }
+      .detail-hero::after {
+        content: "";
+        position: absolute;
+        left: 36px;
+        right: 36px;
+        bottom: -1px;
+        height: 1px;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          var(--line),
+          transparent
+        );
+      }
+
+      .breadcrumb {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--text-4);
+        margin-bottom: 20px;
+      }
+      .breadcrumb svg {
+        opacity: 0.5;
+      }
+      .breadcrumb .crumb.active {
+        color: var(--text-3);
+      }
+
+      .hero-row {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+      }
+      /* macOS app icon 风格的 hero glyph：
+       *   - 顶部 1px 高光 + 底部主体渐变 + 外发光 + close shadow
+       *   - 字体放大、字重减弱（macOS app icon 上的字母通常不是粗体） */
+      .hero-glyph {
+        width: 64px;
+        height: 64px;
+        border-radius: 14px;
+        background: linear-gradient(135deg, var(--tint-login), #5252b8);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-family: var(--font-sans);
+        font-weight: 500;
+        font-size: 30px;
+        letter-spacing: -0.02em;
+        flex-shrink: 0;
+        position: relative;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.25),
+          inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+          inset 0 -2px 6px rgba(0, 0, 0, 0.18),
+          0 1px 2px rgba(0, 0, 0, 0.2),
+          0 12px 28px -8px rgba(124, 124, 240, 0.4);
+      }
+      .hero-info {
+        flex: 1;
+        min-width: 0;
+      }
+      .hero-title {
+        font-size: 22px;
+        font-weight: 600;
+        color: var(--text);
+        letter-spacing: -0.02em;
+        line-height: 1.2;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .hero-fav {
+        color: var(--warn);
+        cursor: pointer;
+      }
+      .hero-sub {
+        font-size: 12.5px;
+        color: var(--text-3);
+        margin-top: 4px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .hero-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 1.5px 8px;
+        background: var(--brand-soft);
+        color: var(--brand);
+        border-radius: 999px;
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        font-weight: 500;
+      }
+      .hero-dot {
+        width: 3px;
+        height: 3px;
+        border-radius: 50%;
+        background: var(--text-4);
+      }
+
+      /* macOS / Linear / Raycast 桌面按钮哲学：
+       *
+       *   secondary 按钮无边框、无背景，hover 才出现底色 ——
+       *   边框 hover 变色（border-color shift）是 Bootstrap/shadcn 等 web
+       *   组件库的标志性"hover 反馈"，桌面 app 从不这样做。原生应用靠
+       *   底色填充 + :active 缩放 + 微阴影传达层级，比边框语言更克制。
+       *
+       *   primary 按钮保持实色填充，加 1px 内高光 + 1px 外阴影 ——
+       *   这是 macOS Aqua 系按钮的"立体感"配方（即便在 BigSur 后扁平化，
+       *   核心按钮依然保留这种微妙的两层暗示）。 */
+      .hero-actions {
+        display: flex;
+        gap: 2px;
+        margin-top: 22px;
+        align-items: center;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 28px;
+        padding: 0 10px;
+        border-radius: 6px;
+        font-size: 12.5px;
+        font-weight: 500;
+        transition: background 80ms, color 80ms, transform 80ms;
+        border: none;
+        background: transparent;
+        color: var(--text-2);
+      }
+      .btn:hover {
+        background: var(--bg-hover);
+        color: var(--text);
+      }
+      .btn:active {
+        background: var(--bg-active);
+        transform: scale(0.97);
+      }
+      .btn.primary {
+        background: var(--text);
+        color: var(--accent-ink);
+        padding: 0 12px;
+        margin-right: 4px;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.1),
+          0 1px 2px rgba(0, 0, 0, 0.18);
+      }
+      .btn.primary:hover {
+        background: color-mix(in srgb, var(--text) 86%, transparent);
+        color: var(--accent-ink);
+      }
+      .btn.primary:active {
+        background: color-mix(in srgb, var(--text) 78%, transparent);
+        transform: scale(0.97);
+      }
+      .btn.danger {
+        color: var(--danger);
+      }
+      .btn.danger:hover {
+        background: color-mix(in srgb, var(--danger) 10%, transparent);
+        color: var(--danger);
+      }
+      .btn.danger:active {
+        background: color-mix(in srgb, var(--danger) 16%, transparent);
+        transform: scale(0.97);
+      }
+
+      /* ─── 详情字段区 ─── */
+      .fields {
+        padding: 28px 36px 36px;
+        display: flex;
+        flex-direction: column;
+        gap: 28px;
+      }
+
+      .group {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .group-title {
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--text-4);
+        padding-left: 1px;
+      }
+      .group-card {
+        background: var(--bg-elev-2);
+        border: 1px solid var(--line-soft);
+        border-radius: var(--radius-lg);
+        overflow: hidden;
+      }
+
+      .field {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--line-soft);
+        transition: background 100ms;
+      }
+      .field:last-child {
+        border-bottom: none;
+      }
+      /* macOS System Settings 字段 hover：只露出 action 按钮，
+       * 不把整行底色刷亮 —— 整行变色是 web table 的味道 */
+      .field:hover {
+        background: color-mix(in srgb, var(--bg-hover) 28%, transparent);
+      }
+      .field-icon {
+        width: 28px;
+        height: 28px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        color: var(--text-3);
+        background: var(--bg);
+        border: 1px solid var(--line-soft);
+        border-radius: 7px;
+      }
+      .field-body {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+      }
+      .field-label {
+        font-size: 11px;
+        color: var(--text-4);
+        font-family: var(--font-mono);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      .field-value {
+        font-size: 13px;
+        color: var(--text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        user-select: text;
+        cursor: text;
+      }
+      .field-value.mono {
+        font-family: var(--font-mono);
+        letter-spacing: 0.02em;
+      }
+      .field-value.mask {
+        letter-spacing: 0.15em;
+      }
+      .field-actions {
+        display: flex;
+        gap: 2px;
+        flex-shrink: 0;
+        opacity: 0;
+        transition: opacity 120ms;
+      }
+      .field:hover .field-actions {
+        opacity: 1;
+      }
+      .field-btn {
+        width: 26px;
+        height: 26px;
+        border-radius: 5px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-3);
+        transition: background 80ms, color 80ms, transform 80ms;
+      }
+      .field-btn:hover {
+        background: var(--bg-hover);
+        color: var(--text);
+      }
+      .field-btn:active {
+        background: var(--bg-active);
+        transform: scale(0.92);
+      }
+
+      /* TOTP 字段 —— 大字号 + 进度环（macOS Calculator 显示风） */
+      .field.totp .field-value {
+        font-family: var(--font-mono);
+        font-size: 24px;
+        letter-spacing: 0.1em;
+        font-weight: 500;
+        font-variant-numeric: tabular-nums;
+        color: var(--brand);
+      }
+      .totp-ring {
+        position: relative;
+        width: 28px;
+        height: 28px;
+        flex-shrink: 0;
+      }
+      .totp-ring svg {
+        transform: rotate(-90deg);
+        width: 28px;
+        height: 28px;
+      }
+      .totp-ring circle {
+        fill: none;
+        stroke-width: 2.2;
+      }
+      .totp-ring .track {
+        stroke: var(--line);
+      }
+      .totp-ring .progress {
+        stroke: var(--brand);
+        stroke-linecap: round;
+      }
+      .totp-ring .countdown {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--text-3);
+      }
+
+      /* 密码强度条 —— macOS Keychain Access 风格紧凑灯柱 */
+      .strength {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 14px 12px;
+        background: var(--bg);
+        border-top: 1px solid var(--line-soft);
+      }
+      .strength-bars {
+        display: flex;
+        gap: 2px;
+        flex: 1;
+      }
+      .strength-bar {
+        flex: 1;
+        height: 4px;
+        background: var(--line);
+        border-radius: 2px;
+        transition: background 200ms;
+      }
+      .strength-bar.filled {
+        background: linear-gradient(90deg, var(--ok), color-mix(in srgb, var(--ok) 80%, var(--brand)));
+      }
+      .strength-label {
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--ok);
+        font-weight: 500;
+      }
+
+      /* 备注卡片 */
+      .notes-card {
+        background: var(--bg-elev-2);
+        border: 1px solid var(--line-soft);
+        border-radius: var(--radius-lg);
+        padding: 14px 16px;
+        font-size: 13px;
+        color: var(--text-2);
+        line-height: 1.65;
+        user-select: text;
+        cursor: text;
+      }
+
+      /* 元信息 footer */
+      .meta-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 1px;
+        background: var(--line-soft);
+        border: 1px solid var(--line-soft);
+        border-radius: var(--radius-lg);
+        overflow: hidden;
+      }
+      .meta-item {
+        background: var(--bg-elev-2);
+        padding: 12px 16px;
+      }
+      .meta-key {
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--text-4);
+        margin-bottom: 4px;
+      }
+      .meta-val {
+        font-size: 12.5px;
+        color: var(--text-2);
+        font-family: var(--font-mono);
+      }
+
+      /* ─── 滚动条（macOS overlay 风格 8px） ─── */
+      *::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      *::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      *::-webkit-scrollbar-thumb {
+        background: transparent;
+        border: 2px solid transparent;
+        background-clip: padding-box;
+        border-radius: 8px;
+        transition: background-color 200ms;
+      }
+      *:hover::-webkit-scrollbar-thumb {
+        background: var(--line);
+        background-clip: padding-box;
+      }
+      *::-webkit-scrollbar-thumb:hover {
+        background: var(--text-4) !important;
+        background-clip: padding-box;
+      }
+
+      /* 主题切换悬浮按钮（仅 design 稿用，生产由 settings 控制） */
+      .theme-toggle {
+        position: fixed;
+        bottom: 18px;
+        right: 18px;
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        background: var(--bg-elev-2);
+        border: 1px solid var(--line);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-2);
+        box-shadow: var(--shadow-md);
+        z-index: 100;
+      }
+      .theme-toggle:hover {
+        background: var(--bg-hover);
+        color: var(--text);
+      }
+      .theme-toggle:active {
+        background: var(--bg-active);
+        transform: scale(0.94);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <!-- ============ Titlebar ============ -->
+      <header class="titlebar">
+        <div class="traffic-lights" aria-hidden="true">
+          <span class="traffic-light close"></span>
+          <span class="traffic-light min"></span>
+          <span class="traffic-light max"></span>
+        </div>
+        <div class="titlebar-title">ZPass</div>
+        <div class="titlebar-actions">
+          <button class="titlebar-btn" aria-label="settings">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- ============ 主三栏 ============ -->
+      <div class="layout">
+        <!-- ============ Sidebar ============ -->
+        <aside class="sidebar">
+          <div class="workspace">
+            <div class="workspace-avatar">Z</div>
+            <div style="flex: 1; min-width: 0">
+              <div class="workspace-name">个人空间</div>
+              <div class="workspace-sub">vault · 142 items</div>
+            </div>
+            <svg class="workspace-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </div>
+
+          <nav class="nav">
+            <div class="nav-section">收藏</div>
+            <div class="nav-item">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+              </svg>
+              <span class="label">星标条目</span>
+              <span class="count">8</span>
+            </div>
+            <div class="nav-item active">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+              </svg>
+              <span class="label">全部条目</span>
+              <span class="count">142</span>
+            </div>
+
+            <div class="nav-section">
+              <span>类别</span>
+              <button aria-label="add category">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              </button>
+            </div>
+            <div class="nav-item">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/>
+              </svg>
+              <span class="label">登录</span>
+              <span class="count">96</span>
+            </div>
+            <div class="nav-item">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/>
+              </svg>
+              <span class="label">银行卡</span>
+              <span class="count">6</span>
+            </div>
+            <div class="nav-item">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+              </svg>
+              <span class="label">安全笔记</span>
+              <span class="count">14</span>
+            </div>
+            <div class="nav-item">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M15 8h2"/><path d="M15 12h2"/><path d="M7 16h10"/>
+              </svg>
+              <span class="label">身份信息</span>
+              <span class="count">4</span>
+            </div>
+            <div class="nav-item">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="3" width="20" height="14" rx="2"/><polyline points="8 21 16 21"/><line x1="12" y1="17" x2="12" y2="21"/><polyline points="6 8 10 12 6 16"/><line x1="12" y1="16" x2="16" y2="16"/>
+              </svg>
+              <span class="label">SSH 密钥</span>
+              <span class="count">12</span>
+            </div>
+            <div class="nav-item">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="7" cy="14" r="4"/><path d="M10.5 11.5L17 5"/><path d="M14 8l3 3"/><path d="M17 5l2 2"/>
+              </svg>
+              <span class="label">Passkey</span>
+              <span class="count">3</span>
+            </div>
+            <div class="nav-item">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 12l2 2 4-4"/><path d="M21 12c0 4.97-9 11-9 11s-9-6.03-9-11a9 9 0 1 1 18 0z"/>
+              </svg>
+              <span class="label">TOTP 验证</span>
+              <span class="count">7</span>
+            </div>
+
+            <div class="nav-section">工具</div>
+            <div class="nav-item">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+              </svg>
+              <span class="label">密码生成器</span>
+            </div>
+            <div class="nav-item">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/>
+              </svg>
+              <span class="label">安全审计</span>
+              <span class="count">2</span>
+            </div>
+          </nav>
+
+          <div class="account">
+            <div class="account-avatar">L</div>
+            <div style="flex: 1; min-width: 0">
+              <div class="account-name">Local Vault</div>
+              <div class="account-status">
+                <span class="account-dot" style="display: inline-block; margin-right: 4px"></span>
+                ONLINE · ENCRYPTED
+              </div>
+            </div>
+            <button class="titlebar-btn" aria-label="account menu">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/>
+              </svg>
+            </button>
+          </div>
+        </aside>
+
+        <!-- ============ 列表面板 ============ -->
+        <section class="list">
+          <div class="list-toolbar">
+            <label class="search">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              <input type="text" placeholder="搜索条目 · 网站 · 用户名" />
+              <span class="kbd">/</span>
+            </label>
+            <button class="icon-btn" aria-label="filter">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+              </svg>
+            </button>
+            <button class="icon-btn primary" aria-label="new item">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+            </button>
+          </div>
+
+          <div class="list-meta">
+            <span>142 ITEMS · 全部</span>
+            <button class="sort">
+              最近修改
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </button>
+          </div>
+
+          <div class="items">
+            <div class="item active">
+              <div class="item-glyph tint-login">G</div>
+              <div class="item-body">
+                <div class="item-title">GitHub</div>
+                <div class="item-sub">zero@example.com · github.com</div>
+              </div>
+              <svg class="item-fav" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+              </svg>
+            </div>
+
+            <div class="item">
+              <div class="item-glyph tint-login">A</div>
+              <div class="item-body">
+                <div class="item-title">Anthropic Console</div>
+                <div class="item-sub">zero@example.com · console.anthropic.com</div>
+              </div>
+              <span class="item-time">2h</span>
+            </div>
+
+            <div class="item">
+              <div class="item-glyph tint-card">V</div>
+              <div class="item-body">
+                <div class="item-title">Visa · 4521</div>
+                <div class="item-sub">CARD · 2027/03</div>
+              </div>
+              <span class="item-time">3d</span>
+            </div>
+
+            <div class="item">
+              <div class="item-glyph tint-ssh">S</div>
+              <div class="item-body">
+                <div class="item-title">prod-web-01</div>
+                <div class="item-sub">SSH · ed25519 · 10.0.0.12</div>
+              </div>
+              <span class="item-time">5d</span>
+            </div>
+
+            <div class="item">
+              <div class="item-glyph tint-passkey">A</div>
+              <div class="item-body">
+                <div class="item-title">Apple ID</div>
+                <div class="item-sub">PASSKEY · apple.com</div>
+              </div>
+              <span class="item-time">1w</span>
+            </div>
+
+            <div class="item">
+              <div class="item-glyph tint-note">L</div>
+              <div class="item-body">
+                <div class="item-title">License Keys 2026</div>
+                <div class="item-sub">NOTE · 23 软件许可证</div>
+              </div>
+              <span class="item-time">2w</span>
+            </div>
+
+            <div class="item">
+              <div class="item-glyph tint-totp">G</div>
+              <div class="item-body">
+                <div class="item-title">Google 2FA</div>
+                <div class="item-sub">TOTP · 6-digit · 30s</div>
+              </div>
+              <span class="item-time">3w</span>
+            </div>
+
+            <div class="item">
+              <div class="item-glyph tint-identity">Z</div>
+              <div class="item-body">
+                <div class="item-title">Zero · 主身份</div>
+                <div class="item-sub">IDENTITY · clown16…@gmail.com</div>
+              </div>
+              <span class="item-time">1mo</span>
+            </div>
+
+            <div class="item">
+              <div class="item-glyph tint-login">N</div>
+              <div class="item-body">
+                <div class="item-title">Notion</div>
+                <div class="item-sub">zero@example.com · notion.so</div>
+              </div>
+              <span class="item-time">1mo</span>
+            </div>
+
+            <div class="item">
+              <div class="item-glyph tint-login">F</div>
+              <div class="item-body">
+                <div class="item-title">Figma</div>
+                <div class="item-sub">zero@example.com · figma.com</div>
+              </div>
+              <span class="item-time">2mo</span>
+            </div>
+          </div>
+
+          <div class="list-footer">
+            <span>142 TOTAL · 8 ★</span>
+            <button class="lock-btn">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </svg>
+              锁定
+              <span style="font-family: var(--font-mono); color: var(--text-4); margin-left: 4px">⌘L</span>
+            </button>
+          </div>
+        </section>
+
+        <!-- ============ 详情面板 ============ -->
+        <section class="detail">
+          <div class="detail-hero">
+            <div class="breadcrumb">
+              <span class="crumb">全部条目</span>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="9 18 15 12 9 6"/>
+              </svg>
+              <span class="crumb">登录</span>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="9 18 15 12 9 6"/>
+              </svg>
+              <span class="crumb active">GitHub</span>
+            </div>
+
+            <div class="hero-row">
+              <div class="hero-glyph">G</div>
+              <div class="hero-info">
+                <div class="hero-title">
+                  GitHub
+                  <svg class="hero-fav" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                  </svg>
+                </div>
+                <div class="hero-sub">
+                  <span class="hero-tag">
+                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/>
+                    </svg>
+                    LOGIN
+                  </span>
+                  <span>github.com</span>
+                  <span class="hero-dot"></span>
+                  <span>最近使用 2 小时前</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="hero-actions">
+              <button class="btn primary">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
+                复制密码
+                <span style="font-family: var(--font-mono); font-size: 10.5px; opacity: 0.7; margin-left: 4px">⌘⇧C</span>
+              </button>
+              <button class="btn">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                </svg>
+                打开网站
+              </button>
+              <button class="btn">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                </svg>
+                编辑
+              </button>
+              <button class="btn danger" style="margin-left: auto">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/>
+                </svg>
+                删除
+              </button>
+            </div>
+          </div>
+
+          <div class="fields">
+            <!-- ============ 凭证 ============ -->
+            <div class="group">
+              <div class="group-title">凭证</div>
+              <div class="group-card">
+                <div class="field">
+                  <div class="field-icon">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+                    </svg>
+                  </div>
+                  <div class="field-body">
+                    <div class="field-label">用户名</div>
+                    <div class="field-value selectable">zero@example.com</div>
+                  </div>
+                  <div class="field-actions">
+                    <button class="field-btn" title="复制">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="field">
+                  <div class="field-icon">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                    </svg>
+                  </div>
+                  <div class="field-body">
+                    <div class="field-label">密码</div>
+                    <div class="field-value mono mask selectable">••••••••••••••••</div>
+                  </div>
+                  <div class="field-actions">
+                    <button class="field-btn" title="显示">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+                      </svg>
+                    </button>
+                    <button class="field-btn" title="复制">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+                <div class="strength">
+                  <div class="strength-bars">
+                    <div class="strength-bar filled"></div>
+                    <div class="strength-bar filled"></div>
+                    <div class="strength-bar filled"></div>
+                    <div class="strength-bar filled"></div>
+                  </div>
+                  <div class="strength-label">STRONG · 24 chars</div>
+                </div>
+
+                <div class="field totp">
+                  <div class="field-icon" style="color: var(--brand); border-color: var(--brand-soft); background: var(--brand-soft)">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                    </svg>
+                  </div>
+                  <div class="field-body">
+                    <div class="field-label">一次性验证码 (TOTP)</div>
+                    <div class="field-value selectable">482 391</div>
+                  </div>
+                  <div class="totp-ring">
+                    <svg width="24" height="24" viewBox="0 0 24 24">
+                      <circle class="track" cx="12" cy="12" r="10"/>
+                      <circle class="progress" cx="12" cy="12" r="10" stroke-dasharray="62.83" stroke-dashoffset="20"/>
+                    </svg>
+                    <div class="countdown">19</div>
+                  </div>
+                  <div class="field-actions">
+                    <button class="field-btn" title="复制 OTP">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ============ 网站 ============ -->
+            <div class="group">
+              <div class="group-title">网站</div>
+              <div class="group-card">
+                <div class="field">
+                  <div class="field-icon">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                    </svg>
+                  </div>
+                  <div class="field-body">
+                    <div class="field-label">URL</div>
+                    <div class="field-value selectable" style="color: var(--info)">https://github.com/login</div>
+                  </div>
+                  <div class="field-actions">
+                    <button class="field-btn" title="打开">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ============ 备注 ============ -->
+            <div class="group">
+              <div class="group-title">备注</div>
+              <div class="notes-card selectable">
+                工作主账号，绑定公司邮箱与 YubiKey 5C NFC。<br/>
+                启用了 SSO 单点登录到 Anthropic、Vercel、Linear，恢复码已离线备份至硬件保险柜。
+              </div>
+            </div>
+
+            <!-- ============ 元信息 ============ -->
+            <div class="group">
+              <div class="group-title">元信息</div>
+              <div class="meta-grid">
+                <div class="meta-item">
+                  <div class="meta-key">创建于</div>
+                  <div class="meta-val">2024-08-12 14:22</div>
+                </div>
+                <div class="meta-item">
+                  <div class="meta-key">最近修改</div>
+                  <div class="meta-val">2026-05-25 09:48</div>
+                </div>
+                <div class="meta-item">
+                  <div class="meta-key">使用次数</div>
+                  <div class="meta-val">2,847</div>
+                </div>
+                <div class="meta-item">
+                  <div class="meta-key">条目 ID</div>
+                  <div class="meta-val">itm_8f2a91…</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <button
+      class="theme-toggle"
+      aria-label="切换主题"
+      onclick="
+        const r = document.documentElement;
+        const cur = r.getAttribute('data-theme');
+        r.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+      "
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+    </button>
+  </body>
+</html>

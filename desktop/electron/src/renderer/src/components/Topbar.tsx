@@ -247,41 +247,38 @@ export function Topbar() {
 
 			{/* 搜索触发 —— 点击打开 ⌘K 命令面板
 			 *
-			 * 响应式：< lg（1024px）窗口里把固定宽度收掉，避免挤占 New 按钮和
-			 * 主题切换；超宽窗口下保留 240px 让 placeholder 文字完整显示。
+			 * 桌面 app 化要点（与 design/vault-home.html `.search` 一致）：
+			 *   - hover 不变 border 色（"border-color shift on hover" 是 Bootstrap/shadcn 标志味）
+			 *     只换底色 + 微 inset 阴影，模拟 NSSearchField 的"凹陷"感
+			 *   - 响应式：< lg 收掉最小宽度
 			 */}
 			<button
 				type="button"
 				onClick={openCmdk}
-				className="flex h-8 min-w-44 items-center gap-2 rounded-(--radius) border border-(--line) bg-(--bg) px-3 text-[13px] text-(--text-3) transition-colors hover:border-(--text-4) hover:bg-(--bg-hover) lg:min-w-60"
+				className="flex h-8 min-w-44 items-center gap-2 rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) px-3 text-[13px] text-(--text-3) transition-colors hover:bg-(--bg-hover) hover:text-(--text-2) lg:min-w-60"
 			>
-				<Search size={14} />
+				<Search size={13} strokeWidth={1.8} />
 				<span className="hidden sm:inline">{t("topbar_search")}</span>
 				<div className="flex-1" />
-				{/* 跨平台快捷键 hint：mac → ⌘K，win/linux → Ctrl+K
-				 * 由 formatShortcut(SHORTCUTS.CMDK_OPEN) 统一渲染，避免硬编码 ⌘
-				 * 让 Windows 用户困惑。这里只渲染单个 kbd（合成文本），不再
-				 * 拆成"⌘ + K"两个块——win 下 "Ctrl+K" 拆块视觉上反而更乱。
-				 */}
-				<kbd className="rounded border border-(--line) bg-(--bg-elev-2) px-1.5 py-0.5 font-mono text-[10px] text-(--text-3)">
+				{/* 跨平台快捷键 hint：mac → ⌘K，win/linux → Ctrl+K */}
+				<kbd className="rounded border border-(--line-soft) bg-(--bg) px-1.5 py-0.5 font-mono text-[10px] text-(--text-3)">
 					{formatShortcut(SHORTCUTS.CMDK_OPEN)}
 				</kbd>
 			</button>
 
-			{/* 主题切换 —— 明暗切换是高频动作，保留在 Topbar */}
+			{/* 主题切换 —— 明暗切换是高频动作，保留在 Topbar
+			 * icon-only 按钮 hover 仅底色变化、active 微缩,对标 macOS Mail / Finder toolbar
+			 */}
 			<button
 				type="button"
 				onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
 				title={theme === "dark" ? t("topbar_theme_light") : t("topbar_theme_dark")}
-				className="flex h-8 w-8 items-center justify-center rounded-(--radius) text-(--text-2) transition-colors hover:bg-(--bg-hover) hover:text-(--text) active:scale-95"
+				className="flex h-8 w-8 items-center justify-center rounded-(--radius) text-(--text-2) transition-[background,color,transform] duration-100 hover:bg-(--bg-hover) hover:text-(--text) active:bg-(--bg-active) active:scale-[0.96]"
 			>
 				{theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
 			</button>
 
-			{/* 通知 —— 当前为占位，没有 panel/路由
-			 * 显式 aria-disabled + opacity 让用户不会误以为可点；
-			 * 接入真实通知中心后改回普通 button。
-			 */}
+			{/* 通知 —— 当前为占位，没有 panel/路由 */}
 			<button
 				type="button"
 				aria-disabled="true"
@@ -292,16 +289,20 @@ export function Topbar() {
 				<Bell size={14} />
 			</button>
 
-			{/*
-			 * 新建条目 —— 黑白高对比按钮
-			 *   - dark 主题：bg-(--text) 近白 + text-(--bg) 近黑 → 白底黑字
-			 *   - light 主题：bg-(--text) 近黑 + text-(--bg) 近白 → 黑底白字
-			 * 与 UnlockPage 的主按钮视觉保持一致，不使用 --accent。
+			{/* 新建条目 —— 黑白高对比按钮（macOS Aqua 实心按钮配方）
+			 *   - bg-(--text) / color-(--bg) 反差填充
+			 *   - inset 1px 白色高光（顶部"反光"）
+			 *   - 落影 2 层（1px 锐影 + 2px 散影）做出"凸起"质感
+			 * 桌面 app 的"主按钮立体感"= 内高光 + 多层外阴影,缺一回到 web 扁平
 			 */}
 			<button
 				type="button"
 				onClick={onNewClick}
 				className="flex h-8 items-center gap-1.5 rounded-(--radius) bg-(--text) px-3 text-[13px] font-medium text-(--bg) transition-[opacity,transform] duration-150 hover:opacity-90 active:scale-[0.97]"
+				style={{
+					boxShadow:
+						"inset 0 1px 0 rgba(255,255,255,0.12), 0 1px 2px rgba(0,0,0,0.18), 0 2px 6px rgba(0,0,0,0.08)",
+				}}
 				title={`${formatShortcut(SHORTCUTS.NEW_ITEM)} ${t("vault_kbd_new_label")}`}
 			>
 				<Plus size={14} />

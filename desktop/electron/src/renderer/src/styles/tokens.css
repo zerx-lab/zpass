@@ -86,8 +86,49 @@
 
 	/* 阴影（暗色更深） */
 	--shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-	--shadow-md: 0 2px 8px rgba(0, 0, 0, 0.35);
-	--shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.55);
+	--shadow-md: 0 8px 24px rgba(0, 0, 0, 0.35);
+	--shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.55);
+
+	/* ----- 桌面 app 视觉增量（与 design/vault-home.html 同源） -----
+	 * 这是把"web 套壳"升到"PC 桌面 app"的关键三件套：
+	 *   1. --brand / brand-soft / brand-glow —— 列表/导航选中态的视觉锚点；
+	 *      不用 --accent 覆盖整行，只画一根 2px brand 色 indicator
+	 *   2. --bg-gradient —— sidebar / detail hero 顶部的微妙径向渐晕，
+	 *      避免大面积纯色块的"网页背景"廉价感
+	 *   3. --tint-* —— item type 渐变背景色，列表/详情 hero 的 glyph
+	 *      按 type 走不同色温，原生 macOS app icon 调子
+	 * 严格不外泄到普通按钮/文字 —— 主色基调仍是黑白克制系。
+	 */
+
+	/* 软渐变背景：sidebar 顶 / 详情 hero 用
+	 * Dark 模式下用 systemBlue + 一丝顶部白光，模拟 Linear/Arc 的"舞台灯"环境光。
+	 * 主色严禁紫色（feedback memory: brand_color）—— 用蓝色相做软渐晕,
+	 * 既保留环境光感,又不出现 indigo/violet 偏紫色相。
+	 */
+	--bg-gradient:
+		radial-gradient(
+			ellipse 80% 50% at 50% -10%,
+			rgba(77, 142, 255, 0.08),
+			transparent
+		),
+		linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 200px);
+
+	/* 品牌色 —— 仅用于选中态 indicator / 键盘焦点环 / TOTP 大字号
+	 * macOS systemBlue 风（#4d8eff dark / #2563eb light）;严禁紫色相 */
+	--brand: #4d8eff;
+	--brand-soft: rgba(77, 142, 255, 0.14);
+	--brand-glow: rgba(77, 142, 255, 0.28);
+
+	/* item type → 渐变色端点（用在 .tint-* 类，于 globals.css 落地）
+	 * tint-login / passkey 是"账户类"类型,与 brand 蓝色保持系列感;
+	 * 严格不出现紫色/indigo */
+	--tint-login: #4d8eff;
+	--tint-card: #d4a574;
+	--tint-note: #8acf85;
+	--tint-identity: #f47891;
+	--tint-ssh: #6cb5d3;
+	--tint-passkey: #54b8d8;
+	--tint-totp: #5ea47a;
 
 	/* 字体族 */
 	--font-sans:
@@ -168,10 +209,51 @@
 	--titlebar-close-active: #b32519;
 	--titlebar-close-ink: #ffffff;
 
-	/* 浅色阴影：底色变白后必须靠 shadow 拉浮起感，不能只靠 line */
-	--shadow-sm: 0 1px 2px rgba(15, 15, 18, 0.06);
-	--shadow-md: 0 4px 14px rgba(15, 15, 18, 0.08);
-	--shadow-lg: 0 24px 60px rgba(15, 15, 18, 0.14);
+	/* 浅色阴影：底色变白后必须靠 shadow 拉浮起感，不能只靠 line。
+	 * 多层叠加做出"纸张悬浮"质感，第二层加 brand 蓝色光晕呼应 brand 色 ——
+	 * 单层灰阴影是 Bootstrap 网页味；多层 + 冷色光晕是 Linear / 1Password 8 桌面感。
+	 */
+	/* 浅色阴影多层叠加做"纸张悬浮"质感,第二层用蓝色光晕呼应 brand —— 严禁紫色相 */
+	--shadow-sm:
+		0 1px 2px rgba(15, 15, 18, 0.04),
+		0 1px 1px rgba(15, 15, 18, 0.03);
+	--shadow-md:
+		0 1px 2px rgba(15, 15, 18, 0.04),
+		0 8px 24px -8px rgba(15, 15, 18, 0.12),
+		0 16px 40px -16px rgba(37, 99, 235, 0.1);
+	--shadow-lg:
+		0 4px 12px rgba(15, 15, 18, 0.06),
+		0 24px 60px -20px rgba(15, 15, 18, 0.2),
+		0 40px 80px -40px rgba(37, 99, 235, 0.14);
+
+	/* 浅色档 brand —— 经典蓝（#2563eb,macOS systemBlue/Linear 蓝档同向），
+	 * 白底耐看且现代; 严禁紫色相（feedback: brand_color） */
+	--brand: #2563eb;
+	--brand-soft: rgba(37, 99, 235, 0.08);
+	--brand-glow: rgba(37, 99, 235, 0.16);
+
+	/* 浅色软渐变 —— brand 蓝 + 右上一丝暖色,避免画面太冷 */
+	--bg-gradient:
+		radial-gradient(
+			ellipse 90% 60% at 50% -20%,
+			rgba(37, 99, 235, 0.06),
+			transparent 50%
+		),
+		radial-gradient(
+			ellipse 60% 40% at 100% 0%,
+			rgba(244, 120, 145, 0.04),
+			transparent 50%
+		),
+		linear-gradient(180deg, rgba(255, 255, 255, 0.6), transparent 240px);
+
+	/* 浅色 tint 系列 —— 饱和度比 dark 主题低一档,避免白底上过艳;严禁紫色相 */
+	--tint-login: #2563eb;
+	--tint-card: #b07a3a;
+	--tint-note: #4f9c4a;
+	--tint-identity: #db4d6b;
+	--tint-ssh: #3f8db0;
+	--tint-passkey: #2d8aa3;
+	--tint-totp: #3d8a5f;
 }
 
 /* ----- 界面缩放 -----

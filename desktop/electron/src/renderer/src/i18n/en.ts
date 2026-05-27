@@ -174,7 +174,6 @@ export const en = {
 	unlock_greeting: "Welcome back",
 	unlock_sub: "Enter your master password to unlock",
 	unlock_placeholder: "Master password",
-	unlock_forgot: "Forgot master password?",
 	unlock_bio: "Use biometrics",
 	unlock_switch: "Switch account",
 	unlock_btn: "Unlock",

@@ -18,9 +18,9 @@
 //
 // 两种模式共享：
 //   - 同一份 MiniTitlebar（unlocked 前页面统一克制的窗口装饰）
-//   - 同一份卡片骨架（rounded-xl + border-(--line) + bg-(--bg-elev)）
-//   - 同一份品牌头 + 主标题 + 副标题三段式
-//   - 同一套黑白对比按钮（dark 白底黑字 / light 黑底白字）
+//   - 同一份卡片骨架（zpass-glass 玻璃浮层 + radius-xl 圆角 14px）
+//   - 同一份品牌头（zpass-glyph + zpass-tint-login）+ 主标题 + 副标题三段式
+//   - 同一套黑白对比按钮（dark 白底黑字 / light 黑底白字，附 zpass-btn-primary 凸起）
 //
 // ---------------------------------------------------------------------------
 // 副作用：成功后必须做的两件事
@@ -49,6 +49,19 @@
 //     - already-initialized → 极罕见的状态机错误（用户在创建中后端已被
 //                              别处初始化），重新探测 status 切到解锁模式
 //     - 其它 → 通用 unlock_err_unknown
+//
+// ---------------------------------------------------------------------------
+// 关于"忘记主密码"：当前版本**不提供**任何找回入口
+//
+//   零知识架构下，主密码本身从不离开本机，服务端没有任何能反推 DEK 的材料。
+//   一旦丢失，密码学上无法重置 —— 任何"找回"都必须依赖用户预先持有的离线
+//   恢复凭据（Emergency Kit 助记短语 / 硬件密钥 / 纸质恢复码）。
+//
+//   恢复凭据流程尚未设计完成，与其在 UI 上挂一个不可用的"忘记主密码"链接
+//   误导用户以为"点了能找回"，不如先彻底隐去 —— 把"无法找回"的预期写在
+//   创建模式的警告里（unlock_create_warn），避免给用户错误的安全心智模型。
+//
+//   等 Emergency Kit 流程落地后再在此处恢复入口。
 //
 // ---------------------------------------------------------------------------
 // 与原占位实现的差异（迁移记录）
@@ -91,19 +104,24 @@ type FormMode = "probing" | "create" | "unlock";
 /**
  * 解锁 / 创建主密码页
  *
- * 视觉：严格黑白高级感，与 WelcomePage / SignInPage / OnboardingPage 一致
- *   - 不使用任何 accent 彩色 —— 品牌方块、按钮、聚焦边框全部靠 text / line / bg 梯度
- *   - 输入框聚焦用 text 色描边（dark 下接近白、light 下接近黑），不出现绿色
- *   - 解锁按钮：dark 下白底黑字 / light 下黑底白字
+ * 视觉：保留黑白克制基调，按"全局桌面化设计"挂工具类，与 design/vault-home.html
+ *      / globals.css 中沉淀的 zpass-* 配方同源。
+ *   - 背景：zpass-bg-gradient 软渐变（顶部 brand 蓝舞台灯），避免大面积纯色底"网页味"
+ *   - 卡片：zpass-glass 玻璃浮层（半透明 + 重模糊 + inset 顶高光 + 多层落影）
+ *   - 品牌方块：zpass-glyph + zpass-tint-login（brand 蓝渐变，呼应 Sidebar 头部）
+ *   - 输入框：zpass-search-focus（macOS NSSearchField 风：brand 蓝描边 + 2px 外环）
+ *   - 主按钮：variant="default" 自带 zpass-btn-primary 凸起（inset 高光 + 双层落影）
+ *   - 状态点：zpass-status-dot（ok 色 + 微光晕）锚定"加密就绪"语义
  *   - 错误提示：例外允许 --danger 红色 —— 主密码错误是安全敏感失败，必须
  *     强信号识别，与 VaultPage / Health 的 --danger 用法一致
+ *   严禁紫色相（feedback: brand_color）—— 所有 brand 锚点都走蓝色相
  *
  * 对标设计：ZPassDesign/src/unlock.jsx
  *
  * 实现要点：
  *   - 用 useRef + useEffect 手动聚焦输入框，规避 biome/a11y `noAutofocus` 规则
- *   - "忘记主密码" 链接当前 mock：零知识架构下后端无法重置主密码，必须
- *     由用户自行持有恢复凭据；UI 留按钮但点击行为待恢复流程设计完成接入
+ *   - 解锁模式底部仅保留"生物识别"入口；"忘记主密码"已隐去（见文件顶部
+ *     注释），等 Emergency Kit 流程落地后再恢复
  *   - 平台差异：MiniTitlebar 内部已经按 isMacOS 分支处理（macOS 隐藏自定义
  *     关闭按钮让位给系统红绿灯），本页无需关心
  */
@@ -125,8 +143,6 @@ export function UnlockPage() {
 	const [password, setPassword] = useState("");
 	const [confirm, setConfirm] = useState("");
 	const [reveal, setReveal] = useState(false);
-	const [focused, setFocused] = useState(false);
-	const [confirmFocused, setConfirmFocused] = useState(false);
 	const [loading, setLoading] = useState(false);
 	const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -263,20 +279,13 @@ export function UnlockPage() {
 		}
 	};
 
-	const onForgot = () => {
-		// TODO: 恢复流程设计完成后接入
-		//   - 方案 A：Emergency Kit（助记短语）
-		//   - 方案 B：硬件安全密钥（WebAuthn）
-		//   - 方案 C：纸质恢复码
-		// 零知识架构下服务端无法重置主密码，必须由用户自行持有恢复凭据。
-	};
-
 	// 探测期间渲染极简占位 —— 避免短暂渲染错误模式后切换造成视觉抖动
 	if (mode === "probing") {
 		return (
-			<main className="unlock relative flex h-full flex-col items-stretch overflow-hidden bg-(--bg)">
+			<main className="unlock zpass-bg-gradient relative flex h-full flex-col items-stretch overflow-hidden bg-(--bg)">
 				<MiniTitlebar brand="ZPass" />
-				<div className="flex min-h-0 flex-1 items-center justify-center">
+				<div className="flex min-h-0 flex-1 items-center justify-center gap-2">
+					<span className="zpass-status-dot" aria-hidden />
 					<div className="font-mono text-[11px] tracking-wider text-(--text-4) uppercase">
 						{/* 占位文字 —— 不引入新 i18n key，复用品牌副文案 */}
 						{t("unlock_brand_sub")}
@@ -302,17 +311,21 @@ export function UnlockPage() {
 		 *   - 内容区 flex-1 + overflow-y-auto 独立滚动
 		 *   详见 features/unlock 头部 zoom 兼容性注释
 		 */
-		<main className="unlock relative flex h-full flex-col items-stretch overflow-hidden bg-(--bg)">
+		<main className="unlock zpass-bg-gradient relative flex h-full flex-col items-stretch overflow-hidden bg-(--bg)">
 			<MiniTitlebar brand="ZPass" />
 
 			<div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 py-6">
 				<form
 					onSubmit={onSubmit}
-					className="unlock-card flex w-full max-w-md shrink-0 flex-col gap-5 rounded-xl border border-(--line) bg-(--bg-elev) p-8"
+					className="unlock-card zpass-glass flex w-full max-w-md shrink-0 flex-col gap-6 rounded-(--radius-xl) p-8"
 				>
-					{/* Brand —— 纯黑白方块，去掉 accent 填色 */}
+					{/*
+					 * Brand —— brand 蓝渐变小方块（zpass-glyph + zpass-tint-login）
+					 * 与 Sidebar / 详情 hero 头部品牌锚点同源，把"端到端加密"的厚度
+					 * 立起来。tint-login 是蓝色相，不违反 brand 色禁紫约束。
+					 */}
 					<div className="flex items-center gap-3">
-						<div className="flex h-9 w-9 items-center justify-center rounded-(--radius) border border-(--line) bg-(--bg-elev-2) font-mono text-[15px] font-semibold text-(--text)">
+						<div className="zpass-glyph zpass-tint-login h-11 w-11 text-[15px]">
 							Z
 						</div>
 						<div className="flex flex-col leading-tight">
@@ -335,20 +348,21 @@ export function UnlockPage() {
 						</p>
 					</div>
 
-					{/* 主密码输入框 —— 聚焦用 text 色描边（中性），不出现 accent 绿色 */}
-					<label
-						className={`flex items-center gap-2 rounded-(--radius) border bg-(--bg-elev-2) px-2.5 py-1.5 transition-colors ${
-							focused ? "border-(--text)" : "border-(--line)"
-						}`}
-					>
+					{/*
+					 * 主密码输入框 —— 聚焦时切到 macOS NSSearchField 风格
+					 *   - idle: 中性 --line 描边 + bg-elev-2 底
+					 *   - focus-within: zpass-search-focus 提供 brand 蓝描边 +
+					 *     inset 内阴影 + 2px brand-soft 外环（不是 3px web focus
+					 *     ring，避免网页味）
+					 * 聚焦反馈由 CSS :focus-within 驱动，不再需要 React focused state
+					 */}
+					<label className="zpass-search-focus flex items-center gap-2 rounded-(--radius) border border-(--line) bg-(--bg-elev-2) px-2.5 py-2 transition-[box-shadow,border-color] duration-150">
 						<Lock size={13} className="text-(--text-3)" />
 						<input
 							ref={inputRef}
 							type={reveal ? "text" : "password"}
 							value={password}
 							onChange={(e) => setPassword(e.target.value)}
-							onFocus={() => setFocused(true)}
-							onBlur={() => setFocused(false)}
 							placeholder={
 								isCreate
 									? t("unlock_create_placeholder")
@@ -382,18 +396,12 @@ export function UnlockPage() {
 					 * 会在错误区显示提示，用户能理解差异。
 					 */}
 					{isCreate && (
-						<label
-							className={`flex items-center gap-2 rounded-(--radius) border bg-(--bg-elev-2) px-2.5 py-1.5 transition-colors ${
-								confirmFocused ? "border-(--text)" : "border-(--line)"
-							}`}
-						>
+						<label className="zpass-search-focus flex items-center gap-2 rounded-(--radius) border border-(--line) bg-(--bg-elev-2) px-2.5 py-2 transition-[box-shadow,border-color] duration-150">
 							<Lock size={13} className="text-(--text-3)" />
 							<input
 								type={reveal ? "text" : "password"}
 								value={confirm}
 								onChange={(e) => setConfirm(e.target.value)}
-								onFocus={() => setConfirmFocused(true)}
-								onBlur={() => setConfirmFocused(false)}
 								placeholder={t("unlock_create_confirm_placeholder")}
 								autoComplete="new-password"
 								className="flex-1 border-0 bg-transparent font-mono text-[13px] text-(--text) outline-none placeholder:text-(--text-4)"
@@ -421,10 +429,12 @@ export function UnlockPage() {
 					)}
 
 					{/*
-					 * 解锁模式：底部辅助操作行（忘记密码 / 生物识别）
+					 * 解锁模式：底部仅保留"生物识别"入口（右对齐）
 					 * 创建模式：底部警告（零知识 · 不可恢复）
 					 *
-					 * 两种文案都用 --text-3 低调处理，不抢主输入框的视觉焦点
+					 * "忘记主密码" 已隐去 —— 零知识架构下没有可走的找回路径前，
+					 * 不要给用户一个点了无反应（或导致误以为可重置）的入口。
+					 * 等 Emergency Kit 流程落地后再恢复，见文件顶部注释。
 					 */}
 					{isCreate ? (
 						<div className="flex items-start gap-2 rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2)/60 p-3 text-[11px] leading-relaxed text-(--text-3)">
@@ -436,10 +446,7 @@ export function UnlockPage() {
 							<span>{t("unlock_create_warn")}</span>
 						</div>
 					) : (
-						<div className="flex items-center justify-between text-xs">
-							<Button variant="link" size="sm" type="button" onClick={onForgot}>
-								{t("unlock_forgot")}
-							</Button>
+						<div className="flex items-center justify-end text-xs">
 							<Button
 								variant="link"
 								size="sm"
@@ -474,8 +481,15 @@ export function UnlockPage() {
 								: t("unlock_btn")}
 					</Button>
 
-					<div className="border-t border-(--line-soft) pt-4 text-center text-xs text-(--text-3)">
-						{t("unlock_foot")}
+					{/*
+					 * 底部 foot —— 加 zpass-status-dot（ok 色 + 微光晕）作为"加密
+					 * 就绪"语义锚点。文案保留 t("unlock_foot")（"你的密码永不离开
+					 * 此设备"），但视觉上从单行灰字升级为 dot + 文字组合，
+					 * 与 design 系统其它"在线 / 已加密"状态指示同源。
+					 */}
+					<div className="flex items-center justify-center gap-2 border-t border-(--line-soft) pt-4 text-xs text-(--text-3)">
+						<span className="zpass-status-dot" aria-hidden />
+						<span>{t("unlock_foot")}</span>
 					</div>
 				</form>
 			</div>

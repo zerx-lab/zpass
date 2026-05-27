@@ -340,7 +340,7 @@ function WorkspaceSwitcherMain({
 					collisionPadding={8}
 					className={clsx(
 						// 玻璃质感（与 CmdK / Select 浮层一致），替代原硬色 bg-(--bg-elev)
-						"z-50 w-61 zpass-glass rounded-(--radius) shadow-md",
+						"z-50 w-61 zpass-glass rounded-(--radius)",
 						"outline-none",
 						// 淡入淡出 —— 用 Radix 暴露的 data-state；不依赖额外动画插件
 						"origin-(--radix-dropdown-menu-content-transform-origin)",

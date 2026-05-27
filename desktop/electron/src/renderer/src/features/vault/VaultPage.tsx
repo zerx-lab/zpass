@@ -74,22 +74,24 @@ import {
 	X,
 } from "lucide-react";
 import type { ComponentType, ReactNode, SVGProps } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+	lazy,
+	Suspense,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/Button";
+import { ItemIcon } from "@/components/ItemIcon";
 import { PasswordStrength } from "@/components/PasswordStrength";
 import { TotpField } from "@/features/vault/TotpField";
-import { QrScannerPanel } from "@/features/vault/QrScannerPanel";
-import type { OtpauthMeta } from "@/lib/parse-otpauth";
-import {
-	SshKeyGeneratorPanel,
-	SshKeyModeTabs,
-	type GeneratedKeyPair,
-} from "@/features/sshagent/SshKeyGenerator";
-import { generateSshKeyPair, supportedSshAlgos } from "@/lib/sshagent-api";
 import { writeClipboard, writeClipboardEphemeral } from "@/lib/clipboard";
 import { formatShortcut, KEY_SYMBOL, SHORTCUTS } from "@/lib/keys";
+import type { OtpauthMeta } from "@/lib/parse-otpauth";
 import { DEFAULT_PASSWORD_OPTIONS, generatePassword } from "@/lib/password";
 import { vaultApi } from "@/lib/vault-api";
 import { useLockStore } from "@/stores/lock";
@@ -102,6 +104,32 @@ import {
 	type VaultItemSummary,
 	type VaultItemType,
 } from "@/stores/vault";
+
+// ---------------------------------------------------------------------------
+// 懒加载的弹层子面板
+//
+// QrScannerPanel 仅在 totp 字段展开扫码时挂载;SshKeyDialogSection 仅在
+// 新建 SSH 条目时挂载。把它们从 VaultPage 主 chunk 剥离 —— ItemDialog 首次
+// mount 不再吃这两块代码 + 它们的依赖(sshagent-api / SshKeyGenerator /
+// QrScanner 内部的 zxing / 文件解码工具链等)的解析成本。
+//
+// 命中策略:Vite 编译时会把 dynamic import 拆出独立 chunk,生产构建下首屏
+// 不会下载这些 chunk;用户首次点开扫码 / 新建 SSH 时才取(同源,基本无 RTT)。
+// dev 模式 Vite 走原生 ESM,lazy chunk 也是按需 fetch 同样省力。
+//
+// 默认导出协议:React.lazy 要求模块默认导出一个组件。QrScannerPanel 当前是
+// 命名导出,这里用 .then(m => ({ default: m.QrScannerPanel })) shim 一下,
+// 避免改源模块。SshKeyDialogSection 是新拆出来的,直接 default export。
+// ---------------------------------------------------------------------------
+
+const QrScannerPanel = lazy(() =>
+	import("@/features/vault/QrScannerPanel").then((m) => ({
+		default: m.QrScannerPanel,
+	})),
+);
+const SshKeyDialogSection = lazy(
+	() => import("@/features/vault/SshKeyDialogSection"),
+);
 
 // ---------------------------------------------------------------------------
 // 工具：把 unix ms 时间戳格式化为相对/简短文本
@@ -659,6 +687,45 @@ export function VaultPage() {
 	// 搜索输入引用 —— 用于 / 快捷键聚焦
 	const searchInputRef = useRef<HTMLInputElement>(null);
 
+	/**
+	 * 列表行 hover prefetch
+	 *
+	 * 鼠标停在条目上即开始 IPC + 解密拉详情,等用户真的点"编辑"时大概率
+	 * 已经缓存命中,弹层瞬开。配合 Step 1 的乐观打开:
+	 *   - hover ≥ ~100ms 即开始解密(IPC ~200-500ms)
+	 *   - 用户从 hover → 移到右键菜单 / 顶栏 → 点编辑,通常 > 500ms,
+	 *     缓存高概率命中,既无 await 也无 skeleton 闪烁
+	 *   - 即使没命中也无妨:乐观打开会显示 skeleton,体验仍优于原 await
+	 *
+	 * 防重保护:用 ref 维护 in-flight set,同一 id 在飞行中不会重复 fetch。
+	 * itemDetails 命中或已在飞行的直接跳过 → 鼠标快速划过 N 行,最多 N 次
+	 * 轻量 Map.has 检查,不会触发任何 IPC。
+	 *
+	 * 不放 useCallback 的 deps 包含 itemDetails:那会让每次 fetch 完成都
+	 * 重建 prefetchItem 引用,污染 VaultListRow 的 prop 引用。改用 ref
+	 * 读最新 itemDetails,callback 引用稳定。
+	 */
+	const itemDetailsRef = useRef(itemDetails);
+	useEffect(() => {
+		itemDetailsRef.current = itemDetails;
+	}, [itemDetails]);
+	const prefetchInflightRef = useRef<Set<string>>(new Set());
+	const prefetchItem = useCallback(
+		(id: string) => {
+			if (itemDetailsRef.current[id]) return;
+			if (prefetchInflightRef.current.has(id)) return;
+			prefetchInflightRef.current.add(id);
+			fetchItem(id)
+				.catch(() => {
+					/* 预取失败静默,真实编辑路径会再尝试一次 */
+				})
+				.finally(() => {
+					prefetchInflightRef.current.delete(id);
+				});
+		},
+		[fetchItem],
+	);
+
 	// ----- 列表面板宽度拖拽 -----
 	const ASIDE_MIN = 200;
 	const ASIDE_MAX = 480;
@@ -723,6 +790,64 @@ export function VaultPage() {
 		void fetchItem(selectedId);
 	}, [selectedId, itemDetails, fetchItem]);
 
+	// ── favicon 后台批量预加载 ──
+	//
+	// 行为：items 加载完成后，对 login / passkey 类型且 itemDetails 尚未缓存的条目，
+	// 后台并发（限 4）fetchItem 填充缓存，让 VaultListRow 取到 host 进而触发 favicon
+	// 显示——而不是用户必须点过一次条目才解密、才看到 favicon。
+	//
+	// 仅 login / passkey 范围内做：
+	//   - 这两种类型的 url / rpId 是 favicon 唯一线索
+	//   - card / note / identity / ssh / totp 没 favicon 语义，不浪费 CPU 解密
+	//
+	// 调度策略：
+	//   - chunk size 4：并发同时跑 4 个 fetchItem，跑完再起下一批；避免一次 N 百
+	//     条全部 race 把后端 / WAL 打爆
+	//   - cancel flag：组件卸载或 items 变化时停止后续批次
+	//   - 不 await 整个 chain（不阻塞 effect 返回），返回的 cleanup 仅切 cancel 旗
+	//
+	// 零知识 trade-off：把"按需解密"放宽为"启动后预解密 login/passkey 子集"。
+	// 主密钥已派生且常驻内存，detail 解密本就是常规链路；这里只是把时机前移。
+	// card / note / identity 等敏感更高的类型仍然按需解密，不动。
+	//
+	// biome-ignore lint/correctness/useExhaustiveDependencies: fetchItem 是 store action 引用稳定;itemDetails 故意不进 deps —— 进了会让每条 fetch 完都重新触发整个 effect 重新调度。
+	useEffect(() => {
+		if (items.length === 0) return;
+		const targets = items.filter(
+			(it) =>
+				(it.type === "login" || it.type === "passkey") &&
+				!itemDetails[it.id],
+		);
+		if (targets.length === 0) return;
+
+		let cancelled = false;
+		const CONCURRENCY = 4;
+
+		const runChunk = async (chunk: typeof targets) => {
+			await Promise.all(
+				chunk.map(async (it) => {
+					if (cancelled) return;
+					try {
+						await fetchItem(it.id);
+					} catch {
+						/* 单条失败不影响其它条目预加载 */
+					}
+				}),
+			);
+		};
+
+		(async () => {
+			for (let i = 0; i < targets.length; i += CONCURRENCY) {
+				if (cancelled) break;
+				await runChunk(targets.slice(i, i + CONCURRENCY));
+			}
+		})();
+
+		return () => {
+			cancelled = true;
+		};
+	}, [items, fetchItem]);
+
 	// 切换条目时复位"明文显示"状态 —— 否则用户切换会看到新条目密码
 	// 直接是明文，违反"默认隐藏"的安全直觉
 	//
@@ -751,15 +876,33 @@ export function VaultPage() {
 		setDialogMode("new");
 	}, []);
 
+	/**
+	 * 打开编辑对话框（乐观打开）
+	 *
+	 * 行为：
+	 *   1. 同步 selectItem + setDialogMode("edit") —— 弹层立即上屏
+	 *   2. 若 itemDetails 缓存未命中，非阻塞地 fetchItem 后台拉取；
+	 *      ItemDialog 在 `existing` 还没到位时显示禁用态字段骨架，
+	 *      payload 抵达后通过内部 useEffect 一次性回填本地表单 state。
+	 *
+	 * 这样把"等 IPC 解密"从用户感知里彻底拿掉。结果一致性靠 submit
+	 * 按钮在 existing 未就绪前 disabled 来保证 —— 详见 ItemDialog 内
+	 * isLoading 处。
+	 */
 	const openEditDialog = useCallback(
-		async (id: string | null = selectedId) => {
+		(id: string | null = selectedId) => {
 			if (!id) return;
 			if (id !== selectedId) {
 				selectItem(id);
 			}
 			if (!itemDetails[id]) {
-				const payload = await fetchItem(id);
-				if (!payload) return;
+				// 后台拉；若条目已被删除（返回 null）或解密失败则把弹层关掉，
+				// 恢复原 await 版本"item 不存在不打开"的语义。
+				fetchItem(id)
+					.then((payload) => {
+						if (!payload) setDialogMode(null);
+					})
+					.catch(() => setDialogMode(null));
 			}
 			setDialogMode("edit");
 		},
@@ -1152,15 +1295,30 @@ export function VaultPage() {
 						 * 紧贴 aside 左缘的 1Password 风格强调。
 						 */
 						<ul className="flex flex-col px-2 py-1.5 gap-0.5">
-							{visibleItems.map((it) => (
-								<VaultListRow
-									key={it.id}
-									item={it}
-									selected={selectedId === it.id}
-									onClick={() => selectItem(it.id)}
-									onContextMenu={(event) => openListContextMenu(event, it.id)}
-								/>
-							))}
+							{visibleItems.map((it) => {
+								// 从已缓存的 itemDetails 中尝试取 host —— 命中即用 favicon,
+								// 未命中保持字形(不为列表 row 触发 fetchItem,避免一次性
+								// 拉爆整库 detail 接口;选中后会自动 fetch)。
+								const cached = itemDetails[it.id];
+								const host =
+									fieldStr(cached?.fields, "url") ||
+									fieldStr(cached?.fields, "rpId") ||
+									fieldStr(cached?.fields, "host") ||
+									null;
+								return (
+									<VaultListRow
+										key={it.id}
+										item={it}
+										host={host}
+										selected={selectedId === it.id}
+										onClick={() => selectItem(it.id)}
+										onContextMenu={(event) =>
+											openListContextMenu(event, it.id)
+										}
+										onPrefetch={() => prefetchItem(it.id)}
+									/>
+								);
+							})}
 						</ul>
 					)}
 				</section>
@@ -1204,19 +1362,19 @@ export function VaultPage() {
 				<div className="resize-handle-line absolute top-0 left-1 h-full w-px bg-(--line) transition-colors group-hover:bg-(--text-3)" />
 			</div>
 
-			{/* ========== 右栏：详情 ========== */}
-			{/* 层次约定（自外向内）——
+			{/* ========== 右栏：详情 ==========
+			 * 层次约定（自外向内）——
 			 *
 			 *   外层 Sidebar / Topbar    --bg          灰画布（"工作区底色"）
 			 *   VaultPage 列表 / 详情    --bg-elev     主内容白纸（左右连贯一体）
 			 *   字段 / 控件 / 状态栏     --bg-elev-2   嵌入式控件（再凹一档）
 			 *
-			 * 对标 1Password / Bitwarden web / Linear / Raycast：导航灰画布托
-			 * 主区白纸，主区内部所有可交互控件统一向里凹一档形成"嵌入感"。
-			 * 列表与详情共享 --bg-elev 是关键 —— 它们靠中间 border-r 划分，
-			 * 整体仍是一张连贯的白纸，避免"灰列表 + 白详情"切两半的割裂感。
+			 * 详情区在 bg-elev 之上叠 --bg-gradient（顶 brand 蓝软晕 + 浅色档加暖色斑），
+			 * 制造 macOS 主区"舞台灯"环境光，避免大面积白纸的"网页背景"廉价感。
+			 * 列表与详情共享 --bg-elev 是关键 —— 靠中间 border-r 划分,整体仍是一张
+			 * 连贯的白纸,避免"灰列表 + 白详情"切两半的割裂感。
 			 */}
-			<section className="min-w-0 flex-1 overflow-y-auto bg-(--bg-elev)">
+			<section className="min-w-0 flex-1 overflow-y-auto bg-(--bg-elev) zpass-bg-gradient">
 				{!selectedSummary ? (
 					<EmptyDetail />
 				) : (
@@ -1284,23 +1442,31 @@ export function VaultPage() {
 
 function VaultListRow({
 	item,
+	host,
 	selected,
 	onClick,
 	onContextMenu,
+	onPrefetch,
 }: {
 	item: VaultItemSummary;
+	/** 可选 host(url/rpId/host),命中 itemDetails 缓存时由父传入,用于 favicon 加载 */
+	host?: string | null;
 	selected: boolean;
 	onClick: () => void;
 	onContextMenu: (event: React.MouseEvent<HTMLButtonElement>) => void;
+	/**
+	 * 鼠标进入时触发的预取回调 —— 父级把"未缓存才 fetch、in-flight 去重"
+	 * 全部封装好,这里只负责绑事件。可选,缺省即不预取(测试 / 单元复用)。
+	 */
+	onPrefetch?: () => void;
 }) {
-	const glyph = (Array.from(item.name)[0] ?? "·").toUpperCase();
-
 	return (
 		<li data-vault-item-id={item.id}>
 			<button
 				type="button"
 				onClick={onClick}
 				onContextMenu={onContextMenu}
+				onMouseEnter={onPrefetch}
 				// 阻止鼠标按下时把 DOM focus 转移到这个 button —— 配合
 				// tabIndex={-1} 把列表项整体移出 Tab 序列，让"当前选中项"
 				// 完全由 React state (selectedId) 表达（虚拟焦点模式，
@@ -1318,26 +1484,25 @@ function VaultListRow({
 				// 从根上消除该 bug。
 				onMouseDown={(e) => e.preventDefault()}
 				tabIndex={-1}
-				className={
+				className={clsx(
+					"relative flex w-full items-center gap-2.5 rounded-(--radius) px-2.5 py-2 text-left transition-colors focus:outline-none focus-visible:outline-none",
 					selected
-						? "flex w-full items-center gap-2.5 rounded-md bg-(--bg-active) px-2.5 py-2 text-left transition-colors focus:outline-none focus-visible:outline-none"
-						: "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-(--bg-hover) focus:outline-none focus-visible:outline-none"
-				}
+						? "bg-(--bg-active) zpass-row-active"
+						: "hover:bg-(--bg-hover)",
+				)}
 			>
-				{/* 缩略字形方块 ——
-				 * 此前右下角叠了一个 11px type 图标小方块，与 sublabel 中的
-				 * `LOGIN · 2h` 文字信息冗余，且 11px 图标在视觉上是噪点。
-				 * 类型信息由 sublabel 文字承担，更克制更高级。
+				{/* 条目头像 —— ItemIcon 优先 favicon,失败回退 type 渐变字形
+				 * - login / passkey:有 url/rpId/host 缓存即尝试 DuckDuckGo favicon
+				 * - 其它类型 / 无 host:tint 渐变 + 首字母（与之前一致）
+				 * 选中态不再翻整块为 --accent（web checkbox-list 味）,改为行左侧
+				 * 2px brand 色 indicator（.zpass-row-active）
 				 */}
-				<div
-					className={
-						selected
-							? "flex h-8 w-8 shrink-0 items-center justify-center rounded-(--radius) font-mono text-[12px] font-semibold transition-colors bg-(--accent) text-(--accent-ink)"
-							: "flex h-8 w-8 shrink-0 items-center justify-center rounded-(--radius) font-mono text-[12px] font-semibold transition-colors border border-(--line) bg-(--bg-elev-2) text-(--text-3)"
-					}
-				>
-					{glyph}
-				</div>
+				<ItemIcon
+					type={item.type}
+					name={item.name}
+					host={host}
+					variant="row"
+				/>
 				<div className="min-w-0 flex-1">
 					<div className="truncate text-[13px] text-(--text)">{item.name}</div>
 					<div className="truncate font-mono text-[10.5px] tracking-wider text-(--text-3) uppercase">
@@ -1394,7 +1559,7 @@ function VaultListContextMenu({
 	const dangerClass =
 		"flex h-8 cursor-default items-center gap-2.5 rounded-sm px-2.5 text-[13px] text-(--text-2) outline-none transition-colors select-none data-highlighted:bg-(--bg-hover) data-highlighted:text-(--danger)";
 	const subContentClass = clsx(
-		"z-50 min-w-48 zpass-glass rounded-(--radius) shadow-md p-1",
+		"z-50 min-w-48 zpass-glass rounded-(--radius) p-1",
 		"outline-none",
 		"origin-(--radix-dropdown-menu-content-transform-origin)",
 		"transition-[opacity,transform] duration-100 ease-out",
@@ -1422,7 +1587,7 @@ function VaultListContextMenu({
 					loop
 					collisionPadding={8}
 					className={clsx(
-						"z-50 min-w-58 zpass-glass rounded-(--radius) shadow-md p-1",
+						"z-50 min-w-58 zpass-glass rounded-(--radius) p-1",
 						"outline-none",
 						"origin-(--radix-dropdown-menu-content-transform-origin)",
 						"transition-[opacity,transform] duration-100 ease-out",
@@ -1557,9 +1722,11 @@ function EmptyHint({ text }: { text: string }) {
 function EmptyDetail() {
 	const { t } = useTranslation();
 	return (
-		<div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
-			<div className="flex h-12 w-12 items-center justify-center rounded-xl border border-dashed border-(--line) bg-(--bg-elev-2) text-(--text-3)">
-				<KeyRound size={20} strokeWidth={1.2} />
+		<div className="flex h-full flex-col items-center justify-center gap-5 px-6 text-center">
+			{/* 占位图标 —— 不用 dashed border 的 web "no-content placeholder" 风,
+			 * 改用与 hero-glyph 同源的圆角矩形 + 内描边 + 微落影,让"空"也有桌面 app 质感 */}
+			<div className="flex h-14 w-14 items-center justify-center rounded-(--radius-xl) bg-(--bg-elev-2) text-(--text-3) shadow-(--shadow-sm)" style={{ boxShadow: "inset 0 0 0 1px var(--line-soft), 0 1px 2px rgba(0,0,0,0.06)" }}>
+				<KeyRound size={22} strokeWidth={1.2} />
 			</div>
 			<div className="flex flex-col gap-1">
 				<p className="text-[13px] text-(--text-2)">{t("detail_empty")}</p>
@@ -1652,29 +1819,39 @@ function VaultDetail({
 	const notes = fieldStr(detail?.fields, "notes");
 
 	const justCopied = (key: string) => Boolean(copiedAt[key]);
-	const glyph = (Array.from(summary.name)[0] ?? "·").toUpperCase();
 	const TypeIcon = TYPE_ICONS[summary.type] ?? LogInIcon;
+	const heroHost =
+		fieldStr(detail?.fields, "url") ||
+		fieldStr(detail?.fields, "rpId") ||
+		fieldStr(detail?.fields, "host") ||
+		null;
 
 	return (
-		<div className="mx-auto flex max-w-2xl flex-col gap-5 px-8 py-8">
-			{/* 头部：glyph + name + 类型 + 编辑/删除按钮 */}
+		<div className="mx-auto flex max-w-2xl flex-col gap-6 px-8 py-8">
+			{/* 头部：macOS app icon 风格的 hero glyph(64x64) + name + 类型徽章 + 操作按钮
+			 * - login / passkey:有 url/rpId/host 即尝试 favicon,失败回退 tint 字形
+			 * - 其它类型:始终 tint 渐变字形
+			 * - 类型角标移除 —— 类型语义由 hero-tag 文字徽章承担,避免双重表达
+			 */}
 			<div className="flex items-start justify-between gap-4">
-				<div className="flex min-w-0 flex-1 items-center gap-3">
-					<div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-(--radius) border border-(--line) bg-(--bg-elev-2) font-mono text-lg font-semibold text-(--text)">
-						{glyph}
-						{/* 类型角标：用 --bg-elev 与右栏主区同色，视觉上像"穿透"
-						 * 字形卡片露出底层主区，比之前的 --bg 与画布同色更克制。 */}
-						<span className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-md border border-(--line) bg-(--bg-elev) text-(--text-2)">
-							<TypeIcon size={11} strokeWidth={1.5} />
-						</span>
-					</div>
+				<div className="flex min-w-0 flex-1 items-center gap-4">
+					<ItemIcon
+						type={summary.type}
+						name={summary.name}
+						host={heroHost}
+						variant="hero"
+					/>
 					<div className="min-w-0 flex-1">
-						<div className="truncate text-xl font-semibold tracking-tight text-(--text)">
+						<div className="truncate text-[22px] font-semibold tracking-tight text-(--text) leading-tight">
 							{summary.name}
 						</div>
-						<div className="font-mono text-[10.5px] tracking-wider text-(--text-3) uppercase">
-							{t(typeLabelKey(summary.type))} ·{" "}
-							{relativeTime(summary.updatedAt)}
+						<div className="mt-1.5 flex items-center gap-2 text-[12.5px] text-(--text-3)">
+							<span className="zpass-hero-tag">
+								<TypeIcon size={9} strokeWidth={2} />
+								{t(typeLabelKey(summary.type))}
+							</span>
+							<span aria-hidden className="inline-block h-[3px] w-[3px] rounded-full bg-(--text-4)" />
+							<span>{relativeTime(summary.updatedAt)}</span>
 						</div>
 					</div>
 				</div>
@@ -2122,12 +2299,27 @@ function ItemDialog({
 	// 类型决策优先级：edit 模式锁定 existing.type > new 模式 presetType > 兜底 login
 	//
 	// 这里故意用 const 派生量而非 useState：
-	//   - edit 模式：existing.type 在 dialog 生命周期里不会变
+	//   - edit 模式：existing.type 在 dialog 生命周期里不会变（payload 抵达后
+	//     existing.type 一次性赋值，不会再改）
 	//   - new 模式：VaultPage 在打开 dialog 前才 setPresetType，dialog 关闭后
 	//     才会被卸载并重建实例，期间 presetType prop 引用稳定
 	//   既然不存在"对话框打开后类型还要变"的合法路径（用户已无切换 UI），
 	//   就不应让 useState 引入"初始值快照"的歧义。
 	const type: VaultItemType = existing?.type ?? presetType ?? "login";
+
+	/**
+	 * 乐观打开 loading 标志
+	 *
+	 * edit 模式下 VaultPage 不再 await fetchItem，弹层先上屏、payload 后到。
+	 * 这段窗口内：
+	 *   - 表单主体显示骨架占位（隐藏未知 type 的字段）
+	 *   - Submit 按钮 disabled，避免用户在解密前提交空表
+	 *   - existing 抵达后内部 useEffect 一次性回填 name/fields/customFields
+	 *
+	 * new 模式下 existing 永远是 undefined，但 mode === "new" 排除掉 isLoading
+	 * 为 true 的可能，所以新建路径不受影响。
+	 */
+	const isLoading = mode === "edit" && !existing;
 	// name
 	const [name, setName] = useState(existing?.name ?? "");
 	// fields —— 用 Record<string, string> 存所有字段值，渲染时按 type 取需要的
@@ -2166,6 +2358,51 @@ function ItemDialog({
 
 	const [loading, setLoading] = useState(false);
 	const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+	/**
+	 * edit 模式乐观打开：existing 异步抵达时回填本地表单 state。
+	 *
+	 * - 仅在 existing.id 变化时触发（fetchItem 完成 → store 写入缓存 →
+	 *   父级 detail prop 翻成实值 → 此 effect 跑一次）
+	 * - inputs 在 isLoading 期间被骨架完全替换，用户没有机会在此期间编辑，
+	 *   故 setName/setFields 不会覆盖用户输入
+	 * - new 模式下 existing 永远 undefined，guard 直接 return
+	 *
+	 * biome 误判：initialFields / initialCustomFields 是 useMemo 由 existing
+	 * 推导，不需要单列进 deps；只用 existing?.id 作为唯一触发条件，避免
+	 * 同一对象引用变化导致重复回填。
+	 */
+	// biome-ignore lint/correctness/useExhaustiveDependencies: existing.id 是唯一触发依据
+	useEffect(() => {
+		if (mode !== "edit" || !existing) return;
+		setName(existing.name);
+		setFields(initialFields);
+		setCustomFields(initialCustomFields);
+	}, [existing?.id]);
+
+	/**
+	 * skeleton → 真实表单切换瞬间把焦点搬到 name 输入框
+	 *
+	 * 弹层挂载时 onOpenAutoFocus 跑过一次,但 isLoading 期间 nameRef.current
+	 * 还是 null,焦点落在 dialog frame 上。payload 抵达后第一次切到真实字段
+	 * 时需要把焦点抢回来,体验和"已命中缓存直接开"对齐。
+	 *
+	 * 用 ref 锁住"只在首次 loading→ready 切换时触发",避免后续 isLoading
+	 * 在理论上再变回 true 又变回 false 时重复抢焦点。
+	 *
+	 * rAF 延迟一帧:让上一个 effect 触发的 setName/setFields 先 commit,
+	 * 否则 .select() 选中的是更新前的空字符串。
+	 */
+	const hadLoadingRef = useRef(isLoading);
+	useEffect(() => {
+		if (!hadLoadingRef.current || isLoading) return;
+		hadLoadingRef.current = false;
+		const id = requestAnimationFrame(() => {
+			nameRef.current?.focus();
+			nameRef.current?.select();
+		});
+		return () => cancelAnimationFrame(id);
+	}, [isLoading]);
 
 	// QR 扫码面板展开状态 —— 仅在 totp 字段下方展示。
 	//
@@ -2281,6 +2518,9 @@ function ItemDialog({
 	const onSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
 		if (loading) return;
+		// 乐观打开期 existing 还在路上,任何提交都会用空 fields 覆盖真实数据。
+		// 按钮 disabled 已挡住鼠标点击,这里挡住 Enter 键隐式提交的兜底。
+		if (isLoading) return;
 
 		const trimmedName = name.trim();
 		if (!trimmedName) {
@@ -2413,7 +2653,7 @@ function ItemDialog({
 						//   - max-h 限制整体不超过视口
 						//   - 不再设全局 padding，padding 下放到三段各自维护
 						"w-full max-w-lg max-h-[88vh] overflow-hidden",
-						"zpass-glass rounded-xl shadow-lg",
+						"zpass-glass rounded-(--radius-xl)",
 						"flex flex-col",
 						"data-[state=open]:animate-[zpass-dialog-in_180ms_ease-out]",
 						"focus:outline-none",
@@ -2454,8 +2694,16 @@ function ItemDialog({
 						 *   - flex-1 + min-h-0 让它在 flex-col 容器里能正确收缩并出现滚动条
 						 *   - overflow-y-auto 仅在此区生效，标题/底部不会被一起滚走
 						 *   - gap 与内边距与原版一致，避免视觉位移
+						 *
+						 * isLoading（edit 模式 + payload 未到）走骨架占位：保留外层
+						 * padding/scroll 容器结构,避免布局抖动；payload 抵达后
+						 * useEffect 已把 state 回填到位，分支 swap 到真实字段。
 						 */}
 						<div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-7 py-5">
+							{isLoading ? (
+								<ItemDialogSkeleton />
+							) : (
+								<>
 							{/* 原"条目类型"选择行已删除：类型由侧边栏分类决定，dialog 内不再可切换 */}
 
 							{/* 字段：name */}
@@ -2471,15 +2719,26 @@ function ItemDialog({
 								/>
 							</DialogField>
 
-							{/* SSH 专属：生成 / 导入 mode 切换 + 生成器面板 */}
+							{/* SSH 专属：生成 / 导入 mode 切换 + 生成器面板 *
+								* lazy chunk:首次进入 SSH 新建路径时拉。fallback 用空 div
+								* 占位避免布局抖动 —— chunk 一般 <50ms 到位,几乎无感知。 */}
 							{type === "ssh" && mode === "new" && (
-								<SshKeyDialogSection
-									mode={sshKeyMode}
-									onModeChange={setSshKeyMode}
-									itemName={name}
-									fields={fields}
-									setField={setField}
-								/>
+								<Suspense
+									fallback={
+										<div
+											aria-hidden
+											className="h-24 rounded-(--radius) bg-(--bg-elev-2)"
+										/>
+									}
+								>
+									<SshKeyDialogSection
+										mode={sshKeyMode}
+										onModeChange={setSshKeyMode}
+										itemName={name}
+										fields={fields}
+										setField={setField}
+									/>
+								</Suspense>
 							)}
 
 							{/* 按 type 渲染所有字段 */}
@@ -2662,12 +2921,21 @@ function ItemDialog({
 											{showGenerator && value && (
 												<PasswordStrength password={value} size="sm" />
 											)}
-											{/* totp 字段展开的二维码扫描面板 */}
+											{/* totp 字段展开的二维码扫描面板(lazy chunk) */}
 											{showQrImport && qrPanelOpen && (
-												<QrScannerPanel
-													onClose={() => setQrPanelOpen(false)}
-													onApply={applyQrResult}
-												/>
+												<Suspense
+													fallback={
+														<div
+															aria-hidden
+															className="h-40 rounded-(--radius) bg-(--bg-elev-2)"
+														/>
+													}
+												>
+													<QrScannerPanel
+														onClose={() => setQrPanelOpen(false)}
+														onApply={applyQrResult}
+													/>
+												</Suspense>
 											)}
 										</div>
 									);
@@ -2708,6 +2976,8 @@ function ItemDialog({
 									<span>{errorMsg}</span>
 								</div>
 							)}
+								</>
+							)}
 						</div>
 						{/* /中间可滚动主体结束 */}
 
@@ -2723,6 +2993,7 @@ function ItemDialog({
 								variant="default"
 								size="md"
 								loading={loading}
+								disabled={isLoading}
 							>
 								{loading
 									? mode === "new"
@@ -2737,6 +3008,37 @@ function ItemDialog({
 				</RadixDialog.Content>
 			</RadixDialog.Portal>
 		</RadixDialog.Root>
+	);
+}
+
+// ---------------------------------------------------------------------------
+// 子组件：编辑乐观打开 skeleton
+//
+// VaultPage.openEditDialog 不再 await fetchItem，dialog 立即上屏；
+// 在 existing payload 抵达前用本组件占位，避免出现"空字段闪一下"或
+// 误用 login 兜底字段渲染错误 type 的瞬态。
+//
+// 设计意图：
+//   - 4 行（label + input 双横条）模拟最常见的 4 字段表单密度
+//   - 颜色用 --bg-elev-2，与字段输入框背景同源，落差最弱
+//   - 不加 animate-pulse：dialog 入场 180ms 内绝大多数 payload 已到，
+//     pulse 还没触发肉眼可见的明暗循环就被替换；加了反而显得"卡"
+// ---------------------------------------------------------------------------
+
+function ItemDialogSkeleton() {
+	return (
+		<div
+			aria-hidden
+			className="flex flex-col gap-4 py-1"
+			data-testid="item-dialog-skeleton"
+		>
+			{[0, 1, 2, 3].map((i) => (
+				<div key={i} className="flex flex-col gap-1.5">
+					<div className="h-2.5 w-20 rounded bg-(--bg-elev-2)" />
+					<div className="h-9 w-full rounded-(--radius) bg-(--bg-elev-2)" />
+				</div>
+			))}
+		</div>
 	);
 }
 
@@ -2845,7 +3147,7 @@ function CustomFieldsEditor({
 							sideOffset={6}
 							collisionPadding={8}
 							className={clsx(
-								"z-50 min-w-64 zpass-glass rounded-(--radius) shadow-md p-1",
+								"z-50 min-w-64 zpass-glass rounded-(--radius) p-1",
 								"outline-none",
 								"origin-(--radix-dropdown-menu-content-transform-origin)",
 								"transition-[opacity,transform] duration-100 ease-out",
@@ -3091,7 +3393,7 @@ function DeleteConfirmDialog({
 					className={clsx(
 						"fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2",
 						"w-full max-w-sm",
-						"zpass-glass rounded-xl shadow-lg p-6",
+						"zpass-glass rounded-(--radius-xl) p-6",
 						"flex flex-col gap-4",
 						"data-[state=open]:animate-[zpass-dialog-in_180ms_ease-out]",
 						"focus:outline-none",
@@ -3128,94 +3430,5 @@ function DeleteConfirmDialog({
 
 export default VaultPage;
 
-// ---------------------------------------------------------------------------
-// SshKeyDialogSection —— SSH item dialog 中的「生成/导入」面板
-// ---------------------------------------------------------------------------
-
-/**
- * SshKeyDialogSection - SSH item 新建 dialog 的顶部面板
- *
- * 职责：
- *   - 渲染 mode tabs（生成 / 导入）
- *   - 生成模式下展示 SshKeyGeneratorPanel；调后端生成后把 private_key /
- *     public_key 填进 dialog 的 fields state
- *   - 导入模式下什么也不渲染（原有的 private_key / passphrase 字段会
- *     由 ItemDialog 的 fieldDefs.map 正常渲染）
- *
- * 不直接放进 ItemDialog 避免这个 1700+ 行函数更肿胀；不抽成独立文件
- * 避免转出一堆 dialog 内部状态接口。放在同一文件末尾是好妥协。
- */
-function SshKeyDialogSection({
-	mode,
-	onModeChange,
-	itemName,
-	fields,
-	setField,
-}: {
-	mode: "generate" | "import";
-	onModeChange: (m: "generate" | "import") => void;
-	/**
-	 * SSH item 的名称（由 ItemDialog 传入）。与 Bitwarden 一致：SSH 条目的
-	 * 「用户名」语义完全由 item.name 承担，不再有独立 username 字段。
-	 * 该值带入 SshKeyGeneratorPanel 作为默认 comment。
-	 */
-	itemName: string;
-	fields: Record<string, string>;
-	setField: (k: string, v: string) => void;
-}) {
-	const [algos, setAlgos] = useState<string[]>([
-		"ed25519",
-		"rsa-3072",
-		"rsa-4096",
-		"ecdsa-p256",
-	]);
-
-	// 启动时从后端拉最新支持的算法列表 —— 让未来后端加新算法不需要同步前端
-	useEffect(() => {
-		let cancelled = false;
-		supportedSshAlgos()
-			.then((list) => {
-				if (!cancelled && list.length > 0) setAlgos(list);
-			})
-			.catch(() => {
-				/* 保留默认 fallback */
-			});
-		return () => {
-			cancelled = true;
-		};
-	}, []);
-
-	// 生成成功 → 填进 fields state
-	const handleGenerated = useCallback(
-		(kp: GeneratedKeyPair) => {
-			setField("private_key", kp.privateKeyPem);
-			setField("public_key", kp.publicKeyOpenSsh);
-			// 用户没填 passphrase 时留空 —— 生成的私钥本身就是不加密的
-			// OpenSSH PEM，vault 加密已够，不需要额外口令
-		},
-		[setField],
-	);
-
-	// 预填 comment：优先 item.name@host，其次 item.name。与后端 composeComment 一致。
-	const defaultComment = (() => {
-		const n = (itemName || "").trim();
-		const h = (fields.host || "").trim();
-		if (n && h) return `${n}@${h}`;
-		if (n) return n;
-		return "";
-	})();
-
-	return (
-		<div className="flex flex-col gap-3">
-			<SshKeyModeTabs mode={mode} onChange={onModeChange} />
-			{mode === "generate" && (
-				<SshKeyGeneratorPanel
-					defaultComment={defaultComment}
-					supportedAlgos={algos}
-					onGenerate={generateSshKeyPair}
-					onGenerated={handleGenerated}
-				/>
-			)}
-		</div>
-	);
-}
+// 注:SshKeyDialogSection 已抽到 ./SshKeyDialogSection.tsx,由 lazy chunk
+// 按需加载 —— 详见文件顶部的 lazy import 注释。

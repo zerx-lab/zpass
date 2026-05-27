@@ -169,7 +169,7 @@ export function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
 						"fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2",
 						// min-w 保底 —— 避免内容窄时底部按钮区因父级宽度收缩而换行
 						"w-full min-w-[480px] max-w-xl max-h-[88vh] overflow-hidden",
-						"zpass-glass rounded-xl shadow-lg",
+						"zpass-glass rounded-(--radius-xl)",
 						"flex flex-col",
 						"data-[state=open]:animate-[zpass-dialog-in_180ms_ease-out]",
 						"focus:outline-none",

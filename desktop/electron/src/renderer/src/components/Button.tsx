@@ -55,24 +55,38 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 
 // ─── variant → className ───────────────────────────────────────────────────
 
+// 桌面 app 化按钮配方 —— 关键差异点（见 design/vault-home.html 注释）：
+//   1. primary（default / danger / warn）：实心填充 + inset 1px 高光 + 双层
+//      外阴影。这是 macOS Aqua 的"凸起"配方,即便 BigSur 后扁平化仍保留;
+//      缺这两层(高光 + 阴影)就回到 web 扁平按钮观感
+//   2. secondary：去掉 hover 时 border 变色(Bootstrap/shadcn 标志味),
+//      只换底色,active 才微缩
+//   3. ghost：透明底,完全无边框,只靠 hover 底色反馈
+//
+// CSS-level 阴影必须用 [box-shadow:...] arbitrary value 套进 Tailwind,
+// 这样可与 hover/active 状态切换。
 const VARIANT_CLASSES: Record<Variant, string> = {
 	default:
+		"zpass-btn-primary " +
 		"bg-(--text) text-(--bg) font-semibold border border-transparent " +
 		"hover:opacity-90 active:scale-[0.97]",
 
 	secondary:
-		"bg-(--bg-elev-2) text-(--text) font-medium border border-(--line) " +
-		"hover:border-(--text-3) hover:bg-(--bg-hover) active:scale-[0.97]",
+		// 去掉 hover:border-(--text-3) —— 桌面 app 不做边框色 hover 反馈
+		"bg-(--bg-elev-2) text-(--text) font-medium border border-(--line-soft) " +
+		"hover:bg-(--bg-hover) active:scale-[0.97] active:bg-(--bg-active)",
 
 	ghost:
 		"bg-transparent text-(--text-2) font-medium border border-transparent " +
-		"hover:bg-(--bg-hover) hover:text-(--text) active:scale-[0.97]",
+		"hover:bg-(--bg-hover) hover:text-(--text) active:scale-[0.97] active:bg-(--bg-active)",
 
 	danger:
+		"zpass-btn-primary " +
 		"bg-(--danger) text-(--danger-ink) font-semibold border border-transparent " +
 		"hover:opacity-90 active:scale-[0.97]",
 
 	warn:
+		"zpass-btn-primary " +
 		"bg-(--warn) text-(--warn-ink) font-semibold border border-transparent " +
 		"hover:opacity-90 active:scale-[0.97]",
 
