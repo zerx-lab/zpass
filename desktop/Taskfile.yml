@@ -149,13 +149,16 @@ tasks:
 
   build:
     desc: Produce an unpacked Electron app (out/<app>-<platform>-<arch>/) with the Go sidecar bundled
-    deps: [build:go, build:agent, build:nativehost, codegen, typecheck, icons]
+    # `icns` 仅 darwin 跑, 其它平台 task 会因 platforms:[darwin] 自动 skip,
+    # 所以可以无脑放在 deps 里; forge.config.ts 在 darwin 下需要 .icns 才能给
+    # .app 正确套上品牌图标.
+    deps: [build:go, build:agent, build:nativehost, codegen, typecheck, icons, icns]
     cmds:
       - pnpm run package
 
   make:
     desc: Produce distributable installers/archives via Electron Forge makers
-    deps: [build:go, build:agent, build:nativehost, codegen, typecheck, icons]
+    deps: [build:go, build:agent, build:nativehost, codegen, typecheck, icons, icns]
     cmds:
       - pnpm run make
 
@@ -194,6 +197,40 @@ tasks:
       - assets/logo/png/zpass-128.png
       - assets/logo/png/zpass-256.png
       - assets/logo/png/zpass-512.png
+
+  icns:
+    # macOS 专用: forge.config.ts 的 icon 字段在 darwin 下会找 assets/logo/zpass.icns,
+    # 不存在的话 Forge 静默回退到 Electron 默认蓝色原子图标 -> .app / dmg / Dock /
+    # Finder 全部显示成 Electron logo. 用 macOS 自带的 sips + iconutil 把 task icons
+    # 已经渲染好的 PNG 组装成 .iconset 再封成 .icns; 跨平台 alt 工具 (png2icns 之类)
+    # 又要引依赖, 反正 dmg 也只能在 macOS runner 上做, 索性 darwin-only.
+    desc: Generate assets/logo/zpass.icns from multi-size PNGs (macOS only)
+    platforms: [darwin]
+    deps: [icons]
+    cmds:
+      - rm -rf assets/logo/zpass.iconset
+      - mkdir -p assets/logo/zpass.iconset
+      - sips -z 16 16   assets/logo/png/zpass-16.png  --out assets/logo/zpass.iconset/icon_16x16.png
+      - sips -z 32 32   assets/logo/png/zpass-32.png  --out assets/logo/zpass.iconset/icon_16x16@2x.png
+      - sips -z 32 32   assets/logo/png/zpass-32.png  --out assets/logo/zpass.iconset/icon_32x32.png
+      - sips -z 64 64   assets/logo/png/zpass-64.png  --out assets/logo/zpass.iconset/icon_32x32@2x.png
+      - sips -z 128 128 assets/logo/png/zpass-128.png --out assets/logo/zpass.iconset/icon_128x128.png
+      - sips -z 256 256 assets/logo/png/zpass-256.png --out assets/logo/zpass.iconset/icon_128x128@2x.png
+      - sips -z 256 256 assets/logo/png/zpass-256.png --out assets/logo/zpass.iconset/icon_256x256.png
+      - sips -z 512 512 assets/logo/png/zpass-512.png --out assets/logo/zpass.iconset/icon_256x256@2x.png
+      - sips -z 512 512 assets/logo/png/zpass-512.png --out assets/logo/zpass.iconset/icon_512x512.png
+      - iconutil --convert icns assets/logo/zpass.iconset --output assets/logo/zpass.icns
+      - rm -rf assets/logo/zpass.iconset
+    sources:
+      - assets/logo/png/zpass-16.png
+      - assets/logo/png/zpass-32.png
+      - assets/logo/png/zpass-48.png
+      - assets/logo/png/zpass-64.png
+      - assets/logo/png/zpass-128.png
+      - assets/logo/png/zpass-256.png
+      - assets/logo/png/zpass-512.png
+    generates:
+      - assets/logo/zpass.icns
 
   install:desktop:
     desc: Install hicolor icons + zpass.desktop into ~/.local/share (Linux dev only)

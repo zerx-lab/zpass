@@ -120,15 +120,17 @@
 	--brand-glow: rgba(77, 142, 255, 0.28);
 
 	/* item type → 渐变色端点（用在 .tint-* 类，于 globals.css 落地）
-	 * tint-login / passkey 是"账户类"类型,与 brand 蓝色保持系列感;
-	 * 严格不出现紫色/indigo */
-	--tint-login: #4d8eff;
-	--tint-card: #d4a574;
-	--tint-note: #8acf85;
-	--tint-identity: #f47891;
-	--tint-ssh: #6cb5d3;
-	--tint-passkey: #54b8d8;
-	--tint-totp: #5ea47a;
+	 * 只在 ItemIcon 没拿到 favicon 时显示。列表里数量众多,因此走"低饱和水洗
+	 * 色"路线 —— 保留色相做类型识别（蓝=login,绿=note,红=identity...）,
+	 * 但饱和度大幅压低,避免与 brand 锚点（Z logo / 主 CTA）抢视觉。
+	 * 严格不出现紫色/indigo（feedback: brand_color） */
+	--tint-login: #4a6d9c;
+	--tint-card: #8a7355;
+	--tint-note: #5d8059;
+	--tint-identity: #94627c;
+	--tint-ssh: #5f8492;
+	--tint-passkey: #587f8c;
+	--tint-totp: #5b7d69;
 
 	/* 字体族 */
 	--font-sans:
@@ -246,14 +248,15 @@
 		),
 		linear-gradient(180deg, rgba(255, 255, 255, 0.6), transparent 240px);
 
-	/* 浅色 tint 系列 —— 饱和度比 dark 主题低一档,避免白底上过艳;严禁紫色相 */
-	--tint-login: #2563eb;
-	--tint-card: #b07a3a;
-	--tint-note: #4f9c4a;
-	--tint-identity: #db4d6b;
-	--tint-ssh: #3f8db0;
-	--tint-passkey: #2d8aa3;
-	--tint-totp: #3d8a5f;
+	/* 浅色 tint 系列 —— 与 dark 同向的"低饱和水洗色"。白字 + 中等深度灰调
+	 * 色保证可读对比,同时让白底卡片不被多个高饱和方块"扎眼";严禁紫色相 */
+	--tint-login: #5377b0;
+	--tint-card: #9c7d50;
+	--tint-note: #6a9265;
+	--tint-identity: #b56b80;
+	--tint-ssh: #618ea2;
+	--tint-passkey: #558a99;
+	--tint-totp: #5d8c70;
 }
 
 /* ----- 界面缩放 -----

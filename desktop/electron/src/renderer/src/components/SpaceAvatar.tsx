@@ -73,16 +73,16 @@ export function SpaceAvatar({
 
 	// 文字回退 —— glyph 已由 deriveGlyph 保证非空，但仍做一次防御
 	const text = space.glyph || "·";
-	// 桌面 app 化的 workspace 头像：brand 蓝色系渐变 + 白字 + inner highlight。
-	// 不再走"灰底 + line 描边 + 黑字"的 web 化方块（那是 Bootstrap 头像味）；
-	// 改用 brand 蓝色渐变 + inner 1px 白边 + 外发光,在 Sidebar 软渐晕底上显得
-	// "原生 app 标识"。严禁紫色相（memory: feedback_brand_color）。
+	// 中性灰底 + 深字方块。早期版本用 brand 蓝渐变 + 白字,但 sidebar 顶/底
+	// 两处同时出现时与列表的 tint 头像、右上 CTA 共同抢视觉,品牌色失去
+	// "指向 CTA"的语义。现在退到中性,字色 / 描边 / 阴影全部交由
+	// .zpass-workspace-avatar 定义,组件这里只负责形状 + 字符 fallback。
 	return (
 		<div
 			className={clsx(
 				"zpass-workspace-avatar",
 				"flex shrink-0 items-center justify-center",
-				"font-mono font-semibold text-white",
+				"font-mono font-semibold",
 				className,
 				textClassName,
 			)}

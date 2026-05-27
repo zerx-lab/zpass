@@ -4,7 +4,7 @@
 // 弹窗：修改主密码 / 启用信任设备 / 空间管理（全部走 primitives + Sheet 样式）
 
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   StyleSheet,
   View,
@@ -13,7 +13,7 @@ import {
   Platform,
   Modal,
   TextInput,
-  KeyboardAvoidingView,
+  Keyboard,
   Pressable,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -637,7 +637,7 @@ function ModalField({
       <TextInput
         style={[
           modalStyles.fieldInput,
-          { color: c.text, backgroundColor: c.bg },
+          { color: c.text, backgroundColor: c.bgElev },
         ]}
         value={value}
         onChangeText={onChange}
@@ -668,6 +668,29 @@ function SheetModal({
   children: React.ReactNode;
 }) {
   const { colors: c } = useTheme();
+  const [kbInset, setKbInset] = useState(0);
+
+  useEffect(() => {
+    if (!visible) {
+      setKbInset(0);
+      return;
+    }
+    const showEvt =
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvt =
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const s1 = Keyboard.addListener(showEvt, (e) => {
+      setKbInset(e.endCoordinates.height);
+    });
+    const s2 = Keyboard.addListener(hideEvt, () => {
+      setKbInset(0);
+    });
+    return () => {
+      s1.remove();
+      s2.remove();
+    };
+  }, [visible]);
+
   return (
     <Modal
       visible={visible}
@@ -676,38 +699,36 @@ function SheetModal({
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      <Pressable
-        onPress={onClose}
-        style={[modalStyles.backdrop, { backgroundColor: c.overlay }]}
-      >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          style={modalStyles.kavWrap}
-          pointerEvents="box-none"
+      <View style={[modalStyles.kavWrap, { paddingBottom: kbInset }]}>
+        <Pressable
+          onPress={onClose}
+          style={[
+            StyleSheet.absoluteFillObject,
+            { backgroundColor: c.overlay },
+          ]}
+        />
+        <Pressable
+          onPress={(e) => e.stopPropagation()}
+          style={[modalStyles.card, { backgroundColor: c.bgElev2 }]}
         >
-          <Pressable
-            onPress={(e) => e.stopPropagation()}
-            style={[modalStyles.card, { backgroundColor: c.bgElev2 }]}
-          >
-            <View style={modalStyles.cardHandle}>
-              <View
-                style={[
-                  modalStyles.handleBar,
-                  { backgroundColor: c.line },
-                ]}
-              />
-            </View>
-            <Text style={[modalStyles.title, { color: c.text }]}>{title}</Text>
-            {subtitle ? (
-              <Text style={[modalStyles.subtitle, { color: c.text3 }]}>
-                {subtitle}
-              </Text>
-            ) : null}
-            <View style={{ height: Spacing.md }} />
-            {children}
-          </Pressable>
-        </KeyboardAvoidingView>
-      </Pressable>
+          <View style={modalStyles.cardHandle}>
+            <View
+              style={[
+                modalStyles.handleBar,
+                { backgroundColor: c.line },
+              ]}
+            />
+          </View>
+          <Text style={[modalStyles.title, { color: c.text }]}>{title}</Text>
+          {subtitle ? (
+            <Text style={[modalStyles.subtitle, { color: c.text3 }]}>
+              {subtitle}
+            </Text>
+          ) : null}
+          <View style={{ height: Spacing.md }} />
+          {children}
+        </Pressable>
+      </View>
     </Modal>
   );
 }
@@ -936,7 +957,8 @@ const modalStyles = StyleSheet.create({
     justifyContent: "flex-end",
   },
   kavWrap: {
-    width: "100%",
+    flex: 1,
+    justifyContent: "flex-end",
   },
   card: {
     paddingHorizontal: Spacing.lg,

@@ -445,6 +445,7 @@ function DialogView({ state, c }: { state: DialogState; c: Palette }) {
               value={value}
               onChange={setValue}
               c={c}
+              spacingTop={!state.message && state.title ? Spacing.md : 0}
             />
           ) : null}
 
@@ -470,14 +471,16 @@ function DialogInput({
   value,
   onChange,
   c,
+  spacingTop = 0,
 }: {
   cfg: DialogInputConfig;
   value: string;
   onChange: (v: string) => void;
   c: Palette;
+  spacingTop?: number;
 }) {
   return (
-    <View style={{ marginBottom: Spacing.md + 2 }}>
+    <View style={{ marginTop: spacingTop, marginBottom: Spacing.md + 2 }}>
       {cfg.hint ? (
         <Text
           style={{

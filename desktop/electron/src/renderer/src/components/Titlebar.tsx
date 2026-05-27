@@ -5,6 +5,7 @@ import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { isMacOS } from "@/lib/platform";
+import { usePrefsStore } from "@/stores/prefs";
 
 /**
  * 自定义标题栏（Custom Titlebar）—— Wails 3 版本
@@ -18,12 +19,9 @@ import { isMacOS } from "@/lib/platform";
  * 设计约束（与 AGENTS.md 对齐）：
  *   - 高度 36px，属于设计系统内"紧凑头部"档位
  *   - 窗口控件 / 文字全部走 --text / --text-2 / --text-3 等中性 token；
- *     唯一例外是左上角品牌点阵 Z —— 这是品牌标识本体，硬编码 #d4ff3a
- *     (荧光黄绿)，与系统托盘/任务栏图标 (assets/logo/png/*.png 和 zpass.ico)
- *     像素颜色严格一致，避免"任务栏绿、窗口标题栏黑"的视觉割裂。
- *     注意：本端 --accent token 被刻意重定义为单色 (#ececec/#141416, 见
- *     styles/tokens.css "黑白高级感主题")，所以这里不能走 var(--accent)
- *     —— 要直接写品牌色 hex.
+ *     唯一例外是左上角品牌衰线 Z —— 与 assets/logo-{light,dark}.svg 同源，
+ *     按 prefs.theme 切换 fill: dark → #F5F1E8（米白）、light → #0A2540（深海军蓝），
+ *     与 assets/logo/png/*.png 系统托盘/任务栏图标主色调一致。
  *   - 圆角仅用 5/7/10/14；此处窗口按钮不带圆角（平切矩形，与系统控件一致）
  *   - 悬停色走 --titlebar-btn-hover / --titlebar-close-hover，对齐 Windows 11
  *     Fluent 规范（见 src/styles/tokens.css 里的注释）；按下态用更浅/更深的
@@ -109,6 +107,9 @@ export function Titlebar() {
   // 平台判断仅在渲染期读一次 —— initPlatform 在 main.tsx 启动时已经写入
   // <html data-platform>；组件挂载时属性已就绪，无需订阅更新（平台不会变）。
   const mac = isMacOS();
+  // 品牌标识颜色随主题切换 —— 与 assets/logo-{light,dark}.svg 颜色策略一致
+  const theme = usePrefsStore((s) => s.theme);
+  const brandFill = theme === "dark" ? "#F5F1E8" : "#0A2540";
 
   // 订阅窗口尺寸/状态变化，保持最大化图标与真实状态同步
   useEffect(() => {
@@ -262,17 +263,10 @@ export function Titlebar() {
       onContextMenu={onDragRegionContextMenu}
     >
       {/*
-				左侧品牌标识 —— 仅保留 logo（7×7 Z 点阵），不再渲染 "ZPass" 文字。
-				logo 与桌面端 appicon (build/appicon.icon/Assets/wails_icon_vector.svg)
-				设计同源：7×7 圆点矩阵 + 中部对角线构成字母 Z，呼应 "OTP FEEL"。
-
-				- viewBox 0 0 7 7：每格 1 单位，圆心 (col+0.5, row+0.5)，r=0.45 —— 紧凑
-				  几何让 18×18px 渲染下点阵仍清晰可辨。
-				- 不画中部浅灰底纹：小尺寸下浅灰会变成视觉噪点，反而损害 Z 字辨识度；
-				  大尺寸 appicon 才保留底纹（颗粒底）。
-				- fill 直接写死 #d4ff3a（荧光黄绿品牌色）：与系统托盘 / 任务栏图标
-				  (assets/logo/png/*.png、zpass.ico) 像素颜色严格一致；不随主题切换。
-				  本端 --accent 已被改成单色，所以这里必须用 hex 而非 var()。
+				左侧品牌标识 —— 新衰线 Z（assets/logo-{light,dark}.svg 同源）。
+				- viewBox 0 0 100 100：与 logo-light.svg / logo-dark.svg 几何一致。
+				- 不画圆底：18×18 px 下圆底压缩成色块，Z 字本体反而更清晰。
+				- fill 按当前 prefs.theme 切换：dark → 米白 (#F5F1E8)，light → 深海军蓝 (#0A2540)。
 				- 不做交互（无 hover / click），与原品牌标识一致。
 			*/}
       <div
@@ -286,52 +280,20 @@ export function Titlebar() {
         <svg
           width="18"
           height="18"
-          viewBox="0 0 7 7"
+          viewBox="0 0 100 100"
           xmlns="http://www.w3.org/2000/svg"
           role="img"
           aria-hidden="true"
           focusable="false"
         >
-          <g fill="#d4ff3a">
-            {/* 行 0 / 1：上横（7 列） */}
-            <circle cx="0.5" cy="0.5" r="0.45" />
-            <circle cx="1.5" cy="0.5" r="0.45" />
-            <circle cx="2.5" cy="0.5" r="0.45" />
-            <circle cx="3.5" cy="0.5" r="0.45" />
-            <circle cx="4.5" cy="0.5" r="0.45" />
-            <circle cx="5.5" cy="0.5" r="0.45" />
-            <circle cx="6.5" cy="0.5" r="0.45" />
-            <circle cx="0.5" cy="1.5" r="0.45" />
-            <circle cx="1.5" cy="1.5" r="0.45" />
-            <circle cx="2.5" cy="1.5" r="0.45" />
-            <circle cx="3.5" cy="1.5" r="0.45" />
-            <circle cx="4.5" cy="1.5" r="0.45" />
-            <circle cx="5.5" cy="1.5" r="0.45" />
-            <circle cx="6.5" cy="1.5" r="0.45" />
-            {/* 行 2：对角线右侧 cols 4,5 */}
-            <circle cx="4.5" cy="2.5" r="0.45" />
-            <circle cx="5.5" cy="2.5" r="0.45" />
-            {/* 行 3：对角线中间 cols 3,4 */}
-            <circle cx="3.5" cy="3.5" r="0.45" />
-            <circle cx="4.5" cy="3.5" r="0.45" />
-            {/* 行 4：对角线左侧 cols 2,3 */}
-            <circle cx="2.5" cy="4.5" r="0.45" />
-            <circle cx="3.5" cy="4.5" r="0.45" />
-            {/* 行 5 / 6：下横（7 列） */}
-            <circle cx="0.5" cy="5.5" r="0.45" />
-            <circle cx="1.5" cy="5.5" r="0.45" />
-            <circle cx="2.5" cy="5.5" r="0.45" />
-            <circle cx="3.5" cy="5.5" r="0.45" />
-            <circle cx="4.5" cy="5.5" r="0.45" />
-            <circle cx="5.5" cy="5.5" r="0.45" />
-            <circle cx="6.5" cy="5.5" r="0.45" />
-            <circle cx="0.5" cy="6.5" r="0.45" />
-            <circle cx="1.5" cy="6.5" r="0.45" />
-            <circle cx="2.5" cy="6.5" r="0.45" />
-            <circle cx="3.5" cy="6.5" r="0.45" />
-            <circle cx="4.5" cy="6.5" r="0.45" />
-            <circle cx="5.5" cy="6.5" r="0.45" />
-            <circle cx="6.5" cy="6.5" r="0.45" />
+          <g fill={brandFill}>
+            <rect x="20" y="22" width="60" height="12" />
+            <rect x="20" y="22" width="6" height="20" />
+            <rect x="74" y="22" width="6" height="20" />
+            <rect x="20" y="66" width="60" height="12" />
+            <rect x="20" y="58" width="6" height="20" />
+            <rect x="74" y="58" width="6" height="20" />
+            <polygon points="68,34 80,34 32,66 20,66" />
           </g>
         </svg>
       </div>

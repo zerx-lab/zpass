@@ -676,12 +676,15 @@ html[data-window-blurred] [data-mini-titlebar] {
 	border-radius: var(--radius-xl);
 	position: relative;
 	overflow: hidden;
+	/* 多层阴影做 macOS app icon 凸起感。tint 色块已降饱和（蓝/绿/红/灰系都有）,
+	 * 不再固定用 brand 蓝色光晕兜底 —— 那会和灰红/灰绿头像撞色,显得"灯打错色"。
+	 * 改用中性黑色落影,与任何 tint 颜色都协调。 */
 	box-shadow:
 		inset 0 1px 0 rgba(255, 255, 255, 0.25),
 		inset 0 0 0 1px rgba(255, 255, 255, 0.08),
 		inset 0 -2px 6px rgba(0, 0, 0, 0.18),
 		0 1px 2px rgba(0, 0, 0, 0.2),
-		0 12px 28px -8px rgba(77, 142, 255, 0.42);
+		0 12px 28px -8px rgba(0, 0, 0, 0.32);
 }
 
 [data-theme="light"] .zpass-hero-glyph {
@@ -690,8 +693,8 @@ html[data-window-blurred] [data-mini-titlebar] {
 		inset 0 0 0 1px rgba(255, 255, 255, 0.18),
 		inset 0 -2px 6px rgba(0, 0, 0, 0.12),
 		0 1px 2px rgba(15, 15, 18, 0.12),
-		0 4px 12px rgba(37, 99, 235, 0.2),
-		0 16px 32px -8px rgba(37, 99, 235, 0.28);
+		0 4px 12px rgba(15, 15, 18, 0.08),
+		0 16px 32px -8px rgba(15, 15, 18, 0.18);
 }
 
 /* hero-glyph 内嵌 favicon 图片占满方块,继承外层圆角 */
@@ -701,51 +704,69 @@ html[data-window-blurred] [data-mini-titlebar] {
 	object-fit: cover;
 }
 
+/* ─── 品牌锚点（Z logo / 启动卡片头部） ───
+ * 唯一允许保留鲜艳 brand 蓝渐变的"色块"。其它头像（SpaceAvatar / ItemIcon
+ * fallback）必须走中性/低饱和方案，避免画面里多个高饱和方块互相抢视觉。
+ * 与早期把 Z logo 复用 zpass-tint-login 的做法分离开 —— 数据头像可以独立
+ * 降饱和，品牌标志不受影响。
+ */
+.zpass-brand-mark {
+	background: linear-gradient(135deg, var(--brand), #1f5fbf);
+}
+[data-theme="light"] .zpass-brand-mark {
+	background: linear-gradient(135deg, #2563eb, #1e40af);
+}
+
 /* tint 配色 —— login 默认,其它按 type 类后缀切换
  * 严禁紫色相（feedback: brand_color）—— login/passkey 用蓝绿系而非 indigo/violet
+ *
+ * 注意：这些色块只用在 ItemIcon 的 favicon 兜底场景（没拿到 favicon 时显示
+ * 首字母方块）。整列出现时数量众多,过去用饱和深色渐变会让列表"花里胡哨",
+ * 因此 dark 主题端点统一降一档饱和度（往灰蓝/灰红/灰绿靠拢）,light 主题
+ * 改成 pastel 浅底 + 深色字（由 .zpass-glyph 在 light 主题下另外处理字色）。
  */
 .zpass-tint-login {
-	background: linear-gradient(135deg, var(--tint-login), #1f5fbf);
+	background: linear-gradient(135deg, var(--tint-login), #2f4870);
 }
 .zpass-tint-card {
-	background: linear-gradient(135deg, var(--tint-card), #b08350);
+	background: linear-gradient(135deg, var(--tint-card), #604c36);
 }
 .zpass-tint-note {
-	background: linear-gradient(135deg, var(--tint-note), #5fa05a);
+	background: linear-gradient(135deg, var(--tint-note), #3f5c3c);
 }
 .zpass-tint-identity {
-	background: linear-gradient(135deg, var(--tint-identity), #c44b6a);
+	background: linear-gradient(135deg, var(--tint-identity), #6c4458);
 }
 .zpass-tint-ssh {
-	background: linear-gradient(135deg, var(--tint-ssh), #4187a8);
+	background: linear-gradient(135deg, var(--tint-ssh), #3e5b68);
 }
 .zpass-tint-passkey {
-	background: linear-gradient(135deg, var(--tint-passkey), #2d7a92);
+	background: linear-gradient(135deg, var(--tint-passkey), #365662);
 }
 .zpass-tint-totp {
-	background: linear-gradient(135deg, var(--tint-totp), #3e7a55);
+	background: linear-gradient(135deg, var(--tint-totp), #3a5544);
 }
 
 [data-theme="light"] .zpass-tint-login {
-	background: linear-gradient(135deg, #2563eb, #1e40af);
+	background: linear-gradient(135deg, #5377b0, #3d5878);
 }
 [data-theme="light"] .zpass-tint-card {
-	background: linear-gradient(135deg, #c08a4a, #8c6230);
+	background: linear-gradient(135deg, #9c7d50, #7a5e3a);
 }
 [data-theme="light"] .zpass-tint-note {
-	background: linear-gradient(135deg, #5fb55a, #3d8a3a);
+	background: linear-gradient(135deg, #6a9265, #4d6f4a);
 }
 [data-theme="light"] .zpass-tint-identity {
-	background: linear-gradient(135deg, #ed5f7e, #c03a5a);
+	background: linear-gradient(135deg, #b56b80, #8b4f60);
 }
 [data-theme="light"] .zpass-tint-ssh {
-	background: linear-gradient(135deg, #4f9fc2, #2d7390);
+	background: linear-gradient(135deg, #618ea2, #446a80);
 }
 [data-theme="light"] .zpass-tint-passkey {
-	background: linear-gradient(135deg, #3e98b5, #1f6a82);
+	background: linear-gradient(135deg, #558a99, #3a6273);
 }
 [data-theme="light"] .zpass-tint-totp {
-	background: linear-gradient(135deg, #4f9c70, #2d6f48);
+	background: linear-gradient(135deg, #5d8c70, #406b52);
 }
 
 /* ─── Toast HUD —— macOS "Action Confirmation" 风 ───
@@ -805,22 +826,28 @@ html[data-window-blurred] [data-mini-titlebar] {
 		0 1px 1px rgba(15, 15, 18, 0.12);
 }
 
-/* ─── Workspace avatar 渐变方块（SpaceAvatar 文字回退） ───
- * brand 蓝色系渐变 + inner 1px 白边 + 落影; 严禁紫色相（feedback: brand_color）
+/* ─── Workspace avatar 中性方块（SpaceAvatar 文字回退） ───
+ * 过去用 brand 蓝渐变 + 白字,sidebar 顶/底两处同时出现时与列表里的
+ * tint 头像、右上 CTA 按钮共同制造"多个高饱和方块抢视觉"的乱感。
+ * 现统一改为中性灰底 + 深字:
+ *   - dark : elev-2 底 + 软线描边 + text-2 字
+ *   - light: 浅灰底 + 软线描边 + text-2 字
+ * 不再外发光、不再渐变 —— 让品牌色只在登录卡片 Z logo / 选中态 indicator /
+ * 主 CTA 三处出现,保险库标识退后到"安静的元数据"地位。
  */
 .zpass-workspace-avatar {
-	background: linear-gradient(135deg, var(--brand), #1f5fbf);
+	background: var(--bg-elev-2);
+	color: var(--text-2);
 	box-shadow:
-		inset 0 0 0 1px rgba(255, 255, 255, 0.12),
-		0 1px 2px rgba(0, 0, 0, 0.25),
-		0 2px 6px rgba(0, 0, 0, 0.18);
+		inset 0 0 0 1px var(--line-soft),
+		0 1px 1px rgba(0, 0, 0, 0.12);
 }
 [data-theme="light"] .zpass-workspace-avatar {
-	background: linear-gradient(135deg, #2563eb, #1e40af);
+	background: var(--bg-elev-2);
+	color: var(--text-2);
 	box-shadow:
-		inset 0 0 0 1px rgba(255, 255, 255, 0.4),
-		0 1px 2px rgba(15, 15, 18, 0.06),
-		0 4px 12px rgba(37, 99, 235, 0.18);
+		inset 0 0 0 1px var(--line-soft),
+		0 1px 1px rgba(15, 15, 18, 0.04);
 }
 
 /* ─── Sidebar NavRow 选中态 brand indicator ───

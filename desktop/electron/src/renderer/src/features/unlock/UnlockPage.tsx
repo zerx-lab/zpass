@@ -320,12 +320,12 @@ export function UnlockPage() {
 					className="unlock-card zpass-glass flex w-full max-w-md shrink-0 flex-col gap-6 rounded-(--radius-xl) p-8"
 				>
 					{/*
-					 * Brand —— brand 蓝渐变小方块（zpass-glyph + zpass-tint-login）
-					 * 与 Sidebar / 详情 hero 头部品牌锚点同源，把"端到端加密"的厚度
-					 * 立起来。tint-login 是蓝色相，不违反 brand 色禁紫约束。
+					 * Brand —— 唯一保留 brand 蓝渐变的"品牌锚点"色块（zpass-brand-mark）。
+					 * 不再复用 zpass-tint-login —— 数据头像系列已统一降饱和,品牌标志
+					 * 必须独立保持鲜艳,否则解锁页连最显眼的品牌识别都没了。
 					 */}
 					<div className="flex items-center gap-3">
-						<div className="zpass-glyph zpass-tint-login h-11 w-11 text-[15px]">
+						<div className="zpass-glyph zpass-brand-mark h-11 w-11 text-[15px]">
 							Z
 						</div>
 						<div className="flex flex-col leading-tight">

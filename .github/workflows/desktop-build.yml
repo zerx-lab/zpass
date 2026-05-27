@@ -503,9 +503,17 @@ jobs:
           CGO_ENABLED: "1"
         run: task make
 
-      # 校验 ad-hoc 签名状态. 失败也只警告不阻塞 (`|| true`), 因为我们更关心
-      # 后续 dmg 能不能产出; 真正的最终验收靠用户机器上的 Gatekeeper.
-      - name: Verify ad-hoc signature on .app
+      # @electron/osx-sign 会签 .app/Contents/MacOS 下的 Electron 主二进制 +
+      # Frameworks/, 但 extraResource (./bin/ + ./assets/logo/) 拷到
+      # Contents/Resources/ 后, 里面的 Go sidecar / agent / native-host
+      # **不会**被 osx-sign 主动识别签上. 在 Apple Silicon (macOS 14+) 上,
+      # 任何未签名的 Mach-O 子进程 spawn 时都会被 dyld 直接拒载, 父进程
+      # 接到 SIGKILL -> 用户看到 "zpass 意外退出" 弹窗.
+      #
+      # 这里显式自己来: 先 ad-hoc 签所有 Resources/bin 下的二进制 (内层),
+      # 再对整个 .app 走 --deep --force 兜底 (外层). 顺序必须从内往外,
+      # 因为 codesign 校验时外层签名包含内层 hash.
+      - name: Deep-sign .app (ad-hoc) over nested sidecar binaries
         run: |
           APP="out/zpass-darwin-arm64/zpass.app"
           if [ ! -d "$APP" ]; then
@@ -513,12 +521,27 @@ jobs:
             ls -la out/ || true
             exit 1
           fi
-          codesign --verify --deep --strict --verbose=2 "$APP" || true
-          codesign -dvv "$APP" 2>&1 | head -n 20 || true
+          find "$APP/Contents/Resources/bin" -type f \
+            -exec codesign --force --sign - {} \;
+          codesign --force --deep --sign - "$APP"
+
+      # 校验 ad-hoc 签名状态. 这次**不**吞错: 没签上就直接红, 否则相当于把坏包
+      # 推给用户. 真正的最终验收仍然在用户机器的 Gatekeeper.
+      - name: Verify ad-hoc signature on .app
+        run: |
+          APP="out/zpass-darwin-arm64/zpass.app"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dvv "$APP" 2>&1 | head -n 20
 
       # forge.config.ts 里没启 MakerDMG (避免引新依赖), 直接用 macOS 自带的
       # hdiutil 把已经 ad-hoc 签好名的 .app 包成只读压缩 dmg (UDZO).
       # 跟 zip 同一个源 .app, 所以签名状态一致.
+      #
+      # `-volicon` 把 ZPass 图标贴到 dmg 卷宗本身, 这样:
+      #   1. Finder 显示 dmg 文件时是 ZPass 图标, 不是默认磁盘图标
+      #   2. 双击挂载后弹出的安装窗口左上角也是品牌图标
+      # 走的是 task icns 产出的 assets/logo/zpass.icns (Taskfile 已经把
+      # icns 串进 build/make 的 deps).
       - name: Create DMG from signed .app
         run: |
           APP="out/zpass-darwin-arm64/zpass.app"
@@ -526,6 +549,7 @@ jobs:
           hdiutil create \
             -volname "ZPass" \
             -srcfolder "$APP" \
+            -volicon assets/logo/zpass.icns \
             -ov -format UDZO \
             out/make/dmg/ZPass-darwin-arm64.dmg
 
