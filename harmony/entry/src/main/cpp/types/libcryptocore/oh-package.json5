@@ -1,0 +1,6 @@
+{
+  "name": "libcryptocore.so",
+  "types": "./index.d.ts",
+  "version": "0.1.0",
+  "description": "ZPass cryptocore (Argon2id + XChaCha20-Poly1305) HarmonyOS NAPI 桥的 TypeScript 类型声明"
+}
