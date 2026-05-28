@@ -5,7 +5,7 @@
 // 与 phone/app/vault/[id].tsx 行为对齐：展示字段 + 复制按钮 + 编辑入口。
 // 密码 / cvv / API key / TOTP secret 等敏感字段默认遮蔽，点击眼睛 reveal。
 
-import { ZColors, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
+import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
 import { vaultStore } from '../state/VaultStore';
 import type { ItemPayload } from '../lib/VaultService';
 import { typeLabel, relativeTime, faviconColor, faviconInitials } from '../lib/Format';
@@ -25,6 +25,7 @@ interface VisibleField {
 @ComponentV2
 struct ItemDetail {
   @Local safeArea: SafeAreaState = safeAreaState;
+  @Local zc: ZColorsClass = ZColors;
 
   @Local item: ItemPayload | null = null;
   @Local revealed: Record<string, boolean> = JSON.parse('{}') as Record<string, boolean>;
@@ -153,19 +154,19 @@ struct ItemDetail {
       Row({ space: ZSpacing.sm }) {
         Text('返回')
           .fontSize(ZType.bodySize)
-          .fontColor(ZColors.text2)
+          .fontColor(this.zc.text2)
           .onClick(() => router.back());
         Text(this.item?.name ?? '')
           .fontSize(ZType.title2Size)
           .fontWeight(FontWeight.Bold)
-          .fontColor(ZColors.text)
+          .fontColor(this.zc.text)
           .layoutWeight(1)
           .textAlign(TextAlign.Center)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis });
         Text('编辑')
           .fontSize(ZType.bodySize)
-          .fontColor(ZColors.accent)
+          .fontColor(this.zc.accent)
           .onClick(() => this.onEdit());
       }
       .width('100%')
@@ -179,7 +180,7 @@ struct ItemDetail {
       if (this.errorText) {
         Text(this.errorText)
           .fontSize(ZType.footnoteSize)
-          .fontColor(ZColors.danger)
+          .fontColor(this.zc.danger)
           .width('100%')
           .padding(ZSpacing.lg);
       }
@@ -193,7 +194,7 @@ struct ItemDetail {
                 Text(faviconInitials(this.item.name))
                   .fontSize(20)
                   .fontWeight(FontWeight.Bold)
-                  .fontColor('#ECECEC');
+                  .fontColor(this.zc.faviconInk);
               }
               .width(56)
               .height(56)
@@ -204,10 +205,10 @@ struct ItemDetail {
 
               Text(typeLabel(this.item.type))
                 .fontSize(ZType.footnoteSize)
-                .fontColor(ZColors.text3);
+                .fontColor(this.zc.text3);
               Text(`修改于 ${relativeTime(this.item.updatedAt)}`)
                 .fontSize(ZType.captionSize)
-                .fontColor(ZColors.text3);
+                .fontColor(this.zc.text3);
             }
             .width('100%')
             .alignItems(HorizontalAlign.Center)
@@ -231,7 +232,10 @@ struct ItemDetail {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(ZColors.bg)
+    .justifyContent(FlexAlign.Start)
+    .alignItems(HorizontalAlign.Start)
+    .align(Alignment.TopStart)
+    .backgroundColor(this.zc.bg)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM]);
   }
 
@@ -241,17 +245,17 @@ struct ItemDetail {
       Row() {
         Text(field.label)
           .fontSize(ZType.footnoteSize)
-          .fontColor(ZColors.text3)
+          .fontColor(this.zc.text3)
           .layoutWeight(1);
         if (field.sensitive) {
           Text(this.revealed[field.key] ? '隐藏' : '显示')
             .fontSize(ZType.footnoteSize)
-            .fontColor(ZColors.text2)
+            .fontColor(this.zc.text2)
             .onClick(() => this.toggleReveal(field.key));
         }
         Text('复制')
           .fontSize(ZType.footnoteSize)
-          .fontColor(ZColors.accent)
+          .fontColor(this.zc.accent)
           .margin({ left: ZSpacing.md })
           .onClick(() => this.onCopy(field));
       }
@@ -262,7 +266,7 @@ struct ItemDetail {
           : field.value,
       )
         .fontSize(ZType.bodySize)
-        .fontColor(ZColors.text)
+        .fontColor(this.zc.text)
         .fontFamily(field.sensitive ? 'HarmonyOS Sans' : 'HarmonyOS Sans')
         .width('100%')
         .copyOption(CopyOptions.LocalDevice);
@@ -270,7 +274,7 @@ struct ItemDetail {
     .alignItems(HorizontalAlign.Start)
     .width('100%')
     .padding(ZSpacing.lg)
-    .backgroundColor(ZColors.bgElev)
+    .backgroundColor(this.zc.bgElev)
     .borderRadius(ZRadius.xl);
   }
 }

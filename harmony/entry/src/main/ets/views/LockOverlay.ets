@@ -7,7 +7,7 @@
 //
 // 显示规则由 pages/Index 控制；本组件只关心解锁动作。
 
-import { ZColors, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
+import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
 import { vaultStore, type VaultStore } from '../state/VaultStore';
 import { vaultService } from '../lib/VaultService';
 import { promptAction } from '@kit.ArkUI';
@@ -16,6 +16,7 @@ import { safeAreaState, SafeAreaState } from '../state/SafeArea';
 @ComponentV2
 export struct LockOverlay {
   @Local safeArea: SafeAreaState = safeAreaState;
+  @Local zc: ZColorsClass = ZColors;
   @Local store: VaultStore = vaultStore;
 
   @Local password: string = '';
@@ -77,12 +78,12 @@ export struct LockOverlay {
             Text('Z')
               .fontSize(28)
               .fontWeight(FontWeight.Bold)
-              .fontColor(ZColors.text);
+              .fontColor(this.zc.text);
           }
           .width(72)
           .height(72)
           .borderRadius(ZRadius.xl)
-          .backgroundColor(ZColors.bgElev)
+          .backgroundColor(this.zc.bgElev)
           .justifyContent(FlexAlign.Center)
           .alignItems(HorizontalAlign.Center)
           .margin({ bottom: ZSpacing.md });
@@ -90,10 +91,10 @@ export struct LockOverlay {
           Text('ZPass')
             .fontSize(ZType.largeTitleSize)
             .fontWeight(FontWeight.Bold)
-            .fontColor(ZColors.text);
+            .fontColor(this.zc.text);
           Text('输入主密码解锁')
             .fontSize(ZType.footnoteSize)
-            .fontColor(ZColors.text3);
+            .fontColor(this.zc.text3);
         }
         .alignItems(HorizontalAlign.Center);
 
@@ -101,11 +102,11 @@ export struct LockOverlay {
         Column({ space: ZSpacing.sm }) {
           TextInput({ placeholder: '主密码', text: this.password })
             .type(InputType.Password)
-            .placeholderColor(ZColors.text3)
+            .placeholderColor(this.zc.text3)
             .placeholderFont({ size: ZType.bodySize })
-            .fontColor(ZColors.text)
+            .fontColor(this.zc.text)
             .fontSize(ZType.bodySize)
-            .backgroundColor(ZColors.bgElev)
+            .backgroundColor(this.zc.bgElev)
             .borderRadius(ZRadius.lg)
             .padding({ left: ZSpacing.md, right: ZSpacing.md })
             .height(48)
@@ -119,7 +120,7 @@ export struct LockOverlay {
           if (this.errorText) {
             Text(this.errorText)
               .fontSize(ZType.footnoteSize)
-              .fontColor(ZColors.danger)
+              .fontColor(this.zc.danger)
               .width('100%')
               .textAlign(TextAlign.Start);
           }
@@ -127,8 +128,8 @@ export struct LockOverlay {
           Text(this.store.busy ? '解锁中…' : '解锁')
             .fontSize(ZType.bodySize)
             .fontWeight(FontWeight.Medium)
-            .fontColor(ZColors.accentInk)
-            .backgroundColor(this.store.busy ? ZColors.text3 : ZColors.accent)
+            .fontColor(this.zc.accentInk)
+            .backgroundColor(this.store.busy ? this.zc.text3 : this.zc.accent)
             .borderRadius(ZRadius.lg)
             .height(48)
             .width('100%')
@@ -139,8 +140,8 @@ export struct LockOverlay {
           if (this.trustedSupported) {
             Text('使用设备解锁')
               .fontSize(ZType.bodySize)
-              .fontColor(ZColors.text2)
-              .backgroundColor(ZColors.bgElev)
+              .fontColor(this.zc.text2)
+              .backgroundColor(this.zc.bgElev)
               .borderRadius(ZRadius.lg)
               .height(48)
               .width('100%')
@@ -152,14 +153,22 @@ export struct LockOverlay {
       }
       .layoutWeight(1)
       .width('100%')
-      .padding({ left: ZSpacing.xl, right: ZSpacing.xl })
-      .justifyContent(FlexAlign.Center);
+      .padding({
+        left: ZSpacing.xl,
+        right: ZSpacing.xl,
+        top: ZSpacing.xxxl + ZSpacing.xl,
+      })
+      .justifyContent(FlexAlign.Start)
+      .alignItems(HorizontalAlign.Center);
 
       Row().height(this.safeArea.bottom).width('100%');
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(ZColors.bg)
+    .justifyContent(FlexAlign.Start)
+    .alignItems(HorizontalAlign.Start)
+    .align(Alignment.TopStart)
+    .backgroundColor(this.zc.bg)
     // 键盘弹出时主动让出底部空间（沉浸式窗口下 ArkUI 默认 KeyboardAvoidMode 失效）
     .padding({ bottom: this.safeArea.keyboard });
   }

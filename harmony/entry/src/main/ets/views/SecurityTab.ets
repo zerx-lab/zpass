@@ -3,7 +3,7 @@
 // 与 phone/(tabs)/security.tsx 行为对齐（基础版本，仅本地审计；
 // 泄露检测需要 HIBP API 网络访问，后续 Phase 5 接入）。
 
-import { ZColors, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
+import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
 import { vaultStore, type VaultStore } from '../state/VaultStore';
 import { estimateStrength } from '../lib/Password';
 import { safeAreaState, SafeAreaState } from '../state/SafeArea';
@@ -18,6 +18,7 @@ interface Audit {
 @ComponentV2
 export struct SecurityTab {
   @Local safeArea: SafeAreaState = safeAreaState;
+  @Local zc: ZColorsClass = ZColors;
   @Local store: VaultStore = vaultStore;
 
   /**
@@ -54,7 +55,7 @@ export struct SecurityTab {
         Text('安全')
           .fontSize(ZType.titleSize)
           .fontWeight(FontWeight.Bold)
-          .fontColor(ZColors.text)
+          .fontColor(this.zc.text)
           .layoutWeight(1);
       }
       .width('100%')
@@ -71,21 +72,21 @@ export struct SecurityTab {
             '登录条目',
             `${this.audit.total}`,
             `其中有密码 ${this.audit.loginsWithPassword}`,
-            ZColors.text,
+            this.zc.text,
           );
           this.metricCard(
             '弱密码',
             `${this.audit.weak}`,
             '强度低于 50',
-            this.audit.weak > 0 ? ZColors.danger : ZColors.ok,
+            this.audit.weak > 0 ? this.zc.danger : this.zc.ok,
           );
           this.metricCard(
             '重复密码',
             `${this.audit.duplicates}`,
             '多个条目共用同一密码',
-            this.audit.duplicates > 0 ? ZColors.warn : ZColors.ok,
+            this.audit.duplicates > 0 ? this.zc.warn : this.zc.ok,
           );
-          this.metricCard('泄露检测', '—', '需要联网（Phase 5 接入）', ZColors.text3);
+          this.metricCard('泄露检测', '—', '需要联网（Phase 5 接入）', this.zc.text3);
 
           Row().height(80).width('100%');
         }
@@ -97,7 +98,10 @@ export struct SecurityTab {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(ZColors.bg);
+    .justifyContent(FlexAlign.Start)
+    .alignItems(HorizontalAlign.Start)
+    .align(Alignment.TopStart)
+    .backgroundColor(this.zc.bg);
   }
 
   @Builder
@@ -106,7 +110,7 @@ export struct SecurityTab {
       Row() {
         Text(label)
           .fontSize(ZType.calloutSize)
-          .fontColor(ZColors.text2)
+          .fontColor(this.zc.text2)
           .layoutWeight(1);
         Text(value)
           .fontSize(28)
@@ -117,11 +121,11 @@ export struct SecurityTab {
 
       Text(hint)
         .fontSize(ZType.footnoteSize)
-        .fontColor(ZColors.text3);
+        .fontColor(this.zc.text3);
     }
     .width('100%')
     .padding(ZSpacing.lg)
-    .backgroundColor(ZColors.bgElev)
+    .backgroundColor(this.zc.bgElev)
     .borderRadius(ZRadius.xl);
   }
 }

@@ -9,7 +9,7 @@
 //
 // 本文件保持轻量；具体页面在 ../views/* 实现。
 
-import { ZColors } from '../theme/Tokens';
+import { ZColors, ZColorsClass } from '../theme/Tokens';
 import { vaultStore, type VaultStore } from '../state/VaultStore';
 import { safeAreaState, SafeAreaState } from '../state/SafeArea';
 import { VaultTab } from '../views/VaultTab';
@@ -36,6 +36,7 @@ const TABS: TabSpec[] = [
 @ComponentV2
 struct Index {
   @Local safeArea: SafeAreaState = safeAreaState;
+  @Local zc: ZColorsClass = ZColors;
   @Local store: VaultStore = vaultStore;
   @Local activeTab: string = 'vault';
 
@@ -50,7 +51,7 @@ struct Index {
   }
 
   build() {
-    Stack() {
+    Stack({ alignContent: Alignment.TopStart }) {
       Column() {
         if (!this.store.status.initialized) {
           // 未初始化 —— 设置主密码
@@ -80,8 +81,9 @@ struct Index {
           .vertical(false)
           .barMode(BarMode.Fixed)
           .barHeight(56 + this.safeArea.bottom)
-          .barBackgroundColor(ZColors.bg)
+          .barBackgroundColor(this.zc.bg)
           .scrollable(false)
+          .animationDuration(0)
           .onChange((idx: number) => {
             if (idx >= 0 && idx < TABS.length) {
               this.activeTab = TABS[idx].key;
@@ -93,11 +95,14 @@ struct Index {
       }
       .width('100%')
       .height('100%')
-      .backgroundColor(ZColors.bg);
+      .justifyContent(FlexAlign.Start)
+      .alignItems(HorizontalAlign.Start)
+      .align(Alignment.TopStart)
+      .backgroundColor(this.zc.bg);
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(ZColors.bg)
+    .backgroundColor(this.zc.bg)
     .expandSafeArea(
       [SafeAreaType.SYSTEM],
       [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM],
@@ -110,10 +115,10 @@ struct Index {
       Text(tab.glyph)
         .fontSize(16)
         .fontWeight(FontWeight.Bold)
-        .fontColor(this.activeTab === tab.key ? ZColors.text : ZColors.text3);
+        .fontColor(this.activeTab === tab.key ? this.zc.text : this.zc.text3);
       Text(tab.label)
         .fontSize(11)
-        .fontColor(this.activeTab === tab.key ? ZColors.text : ZColors.text3);
+        .fontColor(this.activeTab === tab.key ? this.zc.text : this.zc.text3);
     }
     .width('100%')
     .height(56 + this.safeArea.bottom)

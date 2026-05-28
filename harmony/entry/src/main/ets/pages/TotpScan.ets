@@ -8,7 +8,7 @@
 // 鸿蒙优势：用 ScanKit 比 phone 自实现 BarCodeScanner 简单一大截 ——
 // 系统级 UI + 权限弹窗 + 解码全包了。
 
-import { ZColors, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
+import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
 import { vaultStore } from '../state/VaultStore';
 import { parseOtpauth, type OtpMeta } from '../lib/Totp';
 import { scanBarcode, scanCore } from '@kit.ScanKit';
@@ -20,6 +20,7 @@ import { safeAreaState, SafeAreaState } from '../state/SafeArea';
 @ComponentV2
 struct TotpScan {
   @Local safeArea: SafeAreaState = safeAreaState;
+  @Local zc: ZColorsClass = ZColors;
 
   @Local raw: string = '';
   @Local meta: OtpMeta | null = null;
@@ -96,18 +97,18 @@ struct TotpScan {
       Row({ space: ZSpacing.sm }) {
         Text('返回')
           .fontSize(ZType.bodySize)
-          .fontColor(ZColors.text2)
+          .fontColor(this.zc.text2)
           .onClick(() => router.back());
         Text('扫码添加 TOTP')
           .fontSize(ZType.title2Size)
           .fontWeight(FontWeight.Bold)
-          .fontColor(ZColors.text)
+          .fontColor(this.zc.text)
           .layoutWeight(1)
           .textAlign(TextAlign.Center);
         if (this.meta) {
           Text('保存')
             .fontSize(ZType.bodySize)
-            .fontColor(ZColors.accent)
+            .fontColor(this.zc.accent)
             .onClick(() => this.saveAsItem());
         } else {
           Text(' ').fontSize(ZType.bodySize);
@@ -128,8 +129,8 @@ struct TotpScan {
             Text('打开相机扫描')
               .fontSize(ZType.bodySize)
               .fontWeight(FontWeight.Medium)
-              .fontColor(ZColors.accentInk)
-              .backgroundColor(ZColors.accent)
+              .fontColor(this.zc.accentInk)
+              .backgroundColor(this.zc.accent)
               .borderRadius(ZRadius.lg)
               .height(48)
               .width('100%')
@@ -138,30 +139,30 @@ struct TotpScan {
 
             Text('支持 otpauth:// 二维码（Google Authenticator / Authy 等通用格式）')
               .fontSize(ZType.footnoteSize)
-              .fontColor(ZColors.text3)
+              .fontColor(this.zc.text3)
               .width('100%')
               .textAlign(TextAlign.Center);
           }
           .width('100%')
           .padding(ZSpacing.lg)
-          .backgroundColor(ZColors.bgElev)
+          .backgroundColor(this.zc.bgElev)
           .borderRadius(ZRadius.xl);
 
           // 手动输入
           Column({ space: ZSpacing.sm }) {
             Text('或手动粘贴 otpauth:// URI')
               .fontSize(ZType.footnoteSize)
-              .fontColor(ZColors.text3)
+              .fontColor(this.zc.text3)
               .width('100%');
             TextArea({
               placeholder: 'otpauth://totp/Issuer:user@example.com?secret=...',
               text: this.manualInput,
             })
-              .placeholderColor(ZColors.text3)
+              .placeholderColor(this.zc.text3)
               .placeholderFont({ size: ZType.footnoteSize })
-              .fontColor(ZColors.text)
+              .fontColor(this.zc.text)
               .fontSize(ZType.footnoteSize)
-              .backgroundColor(ZColors.bgElev)
+              .backgroundColor(this.zc.bgElev)
               .borderRadius(ZRadius.lg)
               .padding(ZSpacing.md)
               .width('100%')
@@ -170,8 +171,8 @@ struct TotpScan {
 
             Text('解析')
               .fontSize(ZType.bodySize)
-              .fontColor(ZColors.text)
-              .backgroundColor(ZColors.bgElev)
+              .fontColor(this.zc.text)
+              .backgroundColor(this.zc.bgElev)
               .borderRadius(ZRadius.lg)
               .height(44)
               .width('100%')
@@ -191,14 +192,14 @@ struct TotpScan {
             }
             .width('100%')
             .padding(ZSpacing.lg)
-            .backgroundColor(ZColors.bgElev)
+            .backgroundColor(this.zc.bgElev)
             .borderRadius(ZRadius.xl);
           }
 
           if (this.errorText) {
             Text(this.errorText)
               .fontSize(ZType.footnoteSize)
-              .fontColor(ZColors.danger)
+              .fontColor(this.zc.danger)
               .width('100%');
           }
 
@@ -214,7 +215,10 @@ struct TotpScan {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(ZColors.bg)
+    .justifyContent(FlexAlign.Start)
+    .alignItems(HorizontalAlign.Start)
+    .align(Alignment.TopStart)
+    .backgroundColor(this.zc.bg)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     .padding({ bottom: this.safeArea.keyboard });
   }
@@ -224,11 +228,11 @@ struct TotpScan {
     Row() {
       Text(label)
         .fontSize(ZType.footnoteSize)
-        .fontColor(ZColors.text3)
+        .fontColor(this.zc.text3)
         .layoutWeight(1);
       Text(value)
         .fontSize(ZType.bodySize)
-        .fontColor(ZColors.text)
+        .fontColor(this.zc.text)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
         .maxLines(1);
     }

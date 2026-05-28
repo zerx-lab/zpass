@@ -3,7 +3,7 @@
 // 从原 pages/Index.ets 抽出。算法走 lib/PassGen.ets（已存在），
 // 与 phone/(tabs)/generator.tsx 行为对齐。
 
-import { ZColors, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
+import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
 import { safeAreaState, SafeAreaState } from '../state/SafeArea';
 import {
   calcStrength,
@@ -20,6 +20,7 @@ import { promptAction } from '@kit.ArkUI';
 @ComponentV2
 export struct GeneratorTab {
   @Local safeArea: SafeAreaState = safeAreaState;
+  @Local zc: ZColorsClass = ZColors;
 
   @Local genMode: GenMode = 'password';
   @Local genLength: number = 18;
@@ -77,10 +78,10 @@ export struct GeneratorTab {
 
   private strengthColor(): string {
     const s = this.genStrength.score;
-    if (s >= 80) return ZColors.ok;
-    if (s >= 50) return ZColors.warn;
-    if (s > 0) return ZColors.danger;
-    return ZColors.text3;
+    if (s >= 80) return this.zc.ok;
+    if (s >= 50) return this.zc.warn;
+    if (s > 0) return this.zc.danger;
+    return this.zc.text3;
   }
 
   build() {
@@ -91,7 +92,7 @@ export struct GeneratorTab {
         Text('生成器')
           .fontSize(ZType.titleSize)
           .fontWeight(FontWeight.Bold)
-          .fontColor(ZColors.text)
+          .fontColor(this.zc.text)
           .layoutWeight(1);
       }
       .width('100%')
@@ -109,7 +110,7 @@ export struct GeneratorTab {
             Text(this.genResult.length > 0 ? this.genResult : '— 点击重新生成 —')
               .fontSize(this.genResult.length > 20 ? 18 : 22)
               .fontWeight(FontWeight.Medium)
-              .fontColor(ZColors.text)
+              .fontColor(this.zc.text)
               .fontFamily('HarmonyOS Sans')
               .textAlign(TextAlign.Center)
               .width('100%');
@@ -127,7 +128,7 @@ export struct GeneratorTab {
                 .width('100%')
                 .height(3)
                 .borderRadius(2)
-                .backgroundColor(ZColors.lineSoft);
+                .backgroundColor(this.zc.lineSoft);
               Row()
                 .width(`${this.genStrength.score}%`)
                 .height(3)
@@ -139,7 +140,7 @@ export struct GeneratorTab {
           }
           .width('100%')
           .padding(ZSpacing.lg)
-          .backgroundColor(ZColors.bgElev)
+          .backgroundColor(this.zc.bgElev)
           .borderRadius(ZRadius.xl);
 
           // 按钮行
@@ -147,8 +148,8 @@ export struct GeneratorTab {
             Text('重新生成')
               .fontSize(ZType.bodySize)
               .fontWeight(FontWeight.Medium)
-              .fontColor(ZColors.accentInk)
-              .backgroundColor(ZColors.accent)
+              .fontColor(this.zc.accentInk)
+              .backgroundColor(this.zc.accent)
               .borderRadius(ZRadius.lg)
               .height(44)
               .layoutWeight(1)
@@ -157,8 +158,8 @@ export struct GeneratorTab {
             Text('复制')
               .fontSize(ZType.bodySize)
               .fontWeight(FontWeight.Medium)
-              .fontColor(ZColors.text)
-              .backgroundColor(ZColors.bgElev)
+              .fontColor(this.zc.text)
+              .backgroundColor(this.zc.bgElev)
               .borderRadius(ZRadius.lg)
               .height(44)
               .layoutWeight(1)
@@ -175,7 +176,7 @@ export struct GeneratorTab {
           }
           .width('100%')
           .padding(2)
-          .backgroundColor(ZColors.bgElev)
+          .backgroundColor(this.zc.bgElev)
           .borderRadius(ZRadius.lg);
 
           // 选项区
@@ -199,7 +200,10 @@ export struct GeneratorTab {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(ZColors.bg);
+    .justifyContent(FlexAlign.Start)
+    .alignItems(HorizontalAlign.Start)
+    .align(Alignment.TopStart)
+    .backgroundColor(this.zc.bg);
   }
 
   @Builder
@@ -207,8 +211,8 @@ export struct GeneratorTab {
     Text(label)
       .fontSize(ZType.subheadSize)
       .fontWeight(FontWeight.Medium)
-      .fontColor(this.genMode === mode ? ZColors.accentInk : ZColors.text2)
-      .backgroundColor(this.genMode === mode ? ZColors.accent : '#00000000')
+      .fontColor(this.genMode === mode ? this.zc.accentInk : this.zc.text2)
+      .backgroundColor(this.genMode === mode ? this.zc.accent : '#00000000')
       .borderRadius(ZRadius.md)
       .height(34)
       .layoutWeight(1)
@@ -227,12 +231,12 @@ export struct GeneratorTab {
         Row() {
           Text('长度')
             .fontSize(ZType.bodySize)
-            .fontColor(ZColors.text)
+            .fontColor(this.zc.text)
             .layoutWeight(1);
           Text(`${this.genLength}`)
             .fontSize(ZType.bodySize)
             .fontWeight(FontWeight.Medium)
-            .fontColor(ZColors.text);
+            .fontColor(this.zc.text);
         }
         .width('100%');
 
@@ -243,9 +247,9 @@ export struct GeneratorTab {
           step: 1,
           style: SliderStyle.OutSet,
         })
-          .blockColor(ZColors.text)
-          .selectedColor(ZColors.text)
-          .trackColor(ZColors.lineSoft)
+          .blockColor(this.zc.text)
+          .selectedColor(this.zc.text)
+          .trackColor(this.zc.lineSoft)
           .width('100%')
           .onChange((v: number) => {
             this.genLength = Math.round(v);
@@ -254,7 +258,7 @@ export struct GeneratorTab {
       }
       .width('100%')
       .padding(ZSpacing.md)
-      .backgroundColor(ZColors.bgElev)
+      .backgroundColor(this.zc.bgElev)
       .borderRadius(ZRadius.lg);
 
       this.toggleRow('大写字母', 'A-Z', this.genUpper, (v: boolean) => {
@@ -288,12 +292,12 @@ export struct GeneratorTab {
         Row() {
           Text('单词数')
             .fontSize(ZType.bodySize)
-            .fontColor(ZColors.text)
+            .fontColor(this.zc.text)
             .layoutWeight(1);
           Text(`${this.genWordCount}`)
             .fontSize(ZType.bodySize)
             .fontWeight(FontWeight.Medium)
-            .fontColor(ZColors.text);
+            .fontColor(this.zc.text);
         }
         .width('100%');
 
@@ -304,9 +308,9 @@ export struct GeneratorTab {
           step: 1,
           style: SliderStyle.OutSet,
         })
-          .blockColor(ZColors.text)
-          .selectedColor(ZColors.text)
-          .trackColor(ZColors.lineSoft)
+          .blockColor(this.zc.text)
+          .selectedColor(this.zc.text)
+          .trackColor(this.zc.lineSoft)
           .width('100%')
           .onChange((v: number) => {
             this.genWordCount = Math.round(v);
@@ -315,7 +319,7 @@ export struct GeneratorTab {
       }
       .width('100%')
       .padding(ZSpacing.md)
-      .backgroundColor(ZColors.bgElev)
+      .backgroundColor(this.zc.bgElev)
       .borderRadius(ZRadius.lg);
     }
     .width('100%');
@@ -328,12 +332,12 @@ export struct GeneratorTab {
         Row() {
           Text('位数')
             .fontSize(ZType.bodySize)
-            .fontColor(ZColors.text)
+            .fontColor(this.zc.text)
             .layoutWeight(1);
           Text(`${this.genPinLength}`)
             .fontSize(ZType.bodySize)
             .fontWeight(FontWeight.Medium)
-            .fontColor(ZColors.text);
+            .fontColor(this.zc.text);
         }
         .width('100%');
 
@@ -344,9 +348,9 @@ export struct GeneratorTab {
           step: 1,
           style: SliderStyle.OutSet,
         })
-          .blockColor(ZColors.text)
-          .selectedColor(ZColors.text)
-          .trackColor(ZColors.lineSoft)
+          .blockColor(this.zc.text)
+          .selectedColor(this.zc.text)
+          .trackColor(this.zc.lineSoft)
           .width('100%')
           .onChange((v: number) => {
             this.genPinLength = Math.round(v);
@@ -355,7 +359,7 @@ export struct GeneratorTab {
       }
       .width('100%')
       .padding(ZSpacing.md)
-      .backgroundColor(ZColors.bgElev)
+      .backgroundColor(this.zc.bgElev)
       .borderRadius(ZRadius.lg);
     }
     .width('100%');
@@ -365,15 +369,15 @@ export struct GeneratorTab {
   toggleRow(label: string, sub: string, value: boolean, onChange: (v: boolean) => void) {
     Row() {
       Column({ space: 2 }) {
-        Text(label).fontSize(ZType.bodySize).fontColor(ZColors.text);
-        Text(sub).fontSize(ZType.footnoteSize).fontColor(ZColors.text3);
+        Text(label).fontSize(ZType.bodySize).fontColor(this.zc.text);
+        Text(sub).fontSize(ZType.footnoteSize).fontColor(this.zc.text3);
       }
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1);
 
       Toggle({ type: ToggleType.Switch, isOn: value })
-        .selectedColor(ZColors.text)
-        .switchPointColor(ZColors.accentInk)
+        .selectedColor(this.zc.text)
+        .switchPointColor(this.zc.accentInk)
         .onChange((isOn: boolean) => onChange(isOn));
     }
     .width('100%')
@@ -383,7 +387,7 @@ export struct GeneratorTab {
       top: ZSpacing.md,
       bottom: ZSpacing.md,
     })
-    .backgroundColor(ZColors.bgElev)
+    .backgroundColor(this.zc.bgElev)
     .borderRadius(ZRadius.lg);
   }
 }

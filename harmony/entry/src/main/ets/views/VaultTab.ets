@@ -4,7 +4,7 @@
 //
 // 数据源：state/VaultStore.ets 的全局单例 vaultStore。
 
-import { ZColors, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
+import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
 import { safeAreaState, SafeAreaState } from '../state/SafeArea';
 import { vaultStore, type VaultStore, type VaultFilterType } from '../state/VaultStore';
 import type { ItemPayload } from '../lib/VaultService';
@@ -32,6 +32,7 @@ const FILTER_CHIPS: FilterChip[] = [
 @ComponentV2
 export struct VaultTab {
   @Local safeArea: SafeAreaState = safeAreaState;
+  @Local zc: ZColorsClass = ZColors;
 
   /** 全局 store —— Local 引用同一个对象；@Trace 字段变更触发本组件重渲 */
   @Local store: VaultStore = vaultStore;
@@ -85,12 +86,12 @@ export struct VaultTab {
             Text(deriveGlyph(this.activeSpaceName()))
               .fontSize(14)
               .fontWeight(FontWeight.Bold)
-              .fontColor(ZColors.text);
+              .fontColor(this.zc.text);
           }
           .width(28)
           .height(28)
           .borderRadius(14)
-          .backgroundColor(ZColors.bgElev)
+          .backgroundColor(this.zc.bgElev)
           .justifyContent(FlexAlign.Center)
           .alignItems(HorizontalAlign.Center);
 
@@ -98,10 +99,10 @@ export struct VaultTab {
             Text(this.activeSpaceName())
               .fontSize(ZType.title2Size)
               .fontWeight(FontWeight.Bold)
-              .fontColor(ZColors.text);
+              .fontColor(this.zc.text);
             Text(`${this.store.items.length} 项`)
               .fontSize(ZType.footnoteSize)
-              .fontColor(ZColors.text3);
+              .fontColor(this.zc.text3);
           }
           .alignItems(HorizontalAlign.Start);
         }
@@ -114,12 +115,12 @@ export struct VaultTab {
         Text('＋')
           .fontSize(20)
           .fontWeight(FontWeight.Bold)
-          .fontColor(ZColors.text)
+          .fontColor(this.zc.text)
           .width(36)
           .height(36)
           .textAlign(TextAlign.Center)
           .borderRadius(18)
-          .backgroundColor(ZColors.bgElev)
+          .backgroundColor(this.zc.bgElev)
           .onClick(() => this.onTapNew());
       }
       .width('100%')
@@ -149,9 +150,9 @@ export struct VaultTab {
       // ── 搜索 ──
       Row({ space: ZSpacing.sm }) {
         TextInput({ placeholder: '搜索', text: this.store.query })
-          .placeholderColor(ZColors.text3)
+          .placeholderColor(this.zc.text3)
           .placeholderFont({ size: ZType.bodySize })
-          .fontColor(ZColors.text)
+          .fontColor(this.zc.text)
           .fontSize(ZType.bodySize)
           .backgroundColor('#00000000')
           .borderRadius(0)
@@ -164,7 +165,7 @@ export struct VaultTab {
       .width('100%')
       .height(38)
       .padding({ left: ZSpacing.md, right: ZSpacing.md })
-      .backgroundColor(ZColors.bgElev)
+      .backgroundColor(this.zc.bgElev)
       .borderRadius(ZRadius.lg)
       .margin({
         left: ZSpacing.lg,
@@ -202,12 +203,15 @@ export struct VaultTab {
         .layoutWeight(1)
         .width('100%')
         .scrollBar(BarState.Off)
-        .divider({ strokeWidth: 0.5, color: ZColors.lineSoft });
+        .divider({ strokeWidth: 0.5, color: this.zc.lineSoft });
       }
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(ZColors.bg)
+    .justifyContent(FlexAlign.Start)
+    .alignItems(HorizontalAlign.Start)
+    .align(Alignment.TopStart)
+    .backgroundColor(this.zc.bg)
     .padding({ bottom: this.safeArea.keyboard });
   }
 
@@ -215,8 +219,8 @@ export struct VaultTab {
   spaceChip(sp: Space) {
     Text(sp.name)
       .fontSize(ZType.subheadSize)
-      .fontColor(this.store.activeSpaceId === sp.id ? ZColors.accentInk : ZColors.text2)
-      .backgroundColor(this.store.activeSpaceId === sp.id ? ZColors.accent : ZColors.bgElev)
+      .fontColor(this.store.activeSpaceId === sp.id ? this.zc.accentInk : this.zc.text2)
+      .backgroundColor(this.store.activeSpaceId === sp.id ? this.zc.accent : this.zc.bgElev)
       .borderRadius(ZRadius.md)
       .padding({ left: ZSpacing.md, right: ZSpacing.md, top: 6, bottom: 6 })
       .onClick(() => {
@@ -228,8 +232,8 @@ export struct VaultTab {
   filterChip(chip: FilterChip) {
     Text(chip.label)
       .fontSize(ZType.subheadSize)
-      .fontColor(this.store.filterType === chip.key ? ZColors.accentInk : ZColors.text2)
-      .backgroundColor(this.store.filterType === chip.key ? ZColors.accent : ZColors.bgElev)
+      .fontColor(this.store.filterType === chip.key ? this.zc.accentInk : this.zc.text2)
+      .backgroundColor(this.store.filterType === chip.key ? this.zc.accent : this.zc.bgElev)
       .borderRadius(ZRadius.md)
       .padding({
         left: ZSpacing.md,
@@ -250,7 +254,7 @@ export struct VaultTab {
         Text(faviconInitials(item.name))
           .fontSize(15)
           .fontWeight(FontWeight.Bold)
-          .fontColor('#ECECEC');
+          .fontColor(this.zc.faviconInk);
       }
       .width(40)
       .height(40)
@@ -264,19 +268,19 @@ export struct VaultTab {
           Text(item.name)
             .fontSize(ZType.bodySize)
             .fontWeight(FontWeight.Medium)
-            .fontColor(ZColors.text)
+            .fontColor(this.zc.text)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .layoutWeight(1);
           Text(relativeTime(item.updatedAt))
             .fontSize(ZType.captionSize)
-            .fontColor(ZColors.text3);
+            .fontColor(this.zc.text3);
         }
         .width('100%');
 
         Text(this.getSubtitle(item))
           .fontSize(ZType.footnoteSize)
-          .fontColor(ZColors.text3)
+          .fontColor(this.zc.text3)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis });
       }
@@ -290,7 +294,7 @@ export struct VaultTab {
       top: ZSpacing.md,
       bottom: ZSpacing.md,
     })
-    .backgroundColor(ZColors.bg);
+    .backgroundColor(this.zc.bg);
   }
 
   /** 在 ArkTS 里直接调 itemSubtitle 需要 VaultItem 形状；ItemPayload 与之不同
@@ -328,12 +332,12 @@ export struct VaultTab {
         Text('K')
           .fontSize(20)
           .fontWeight(FontWeight.Bold)
-          .fontColor(ZColors.text3);
+          .fontColor(this.zc.text3);
       }
       .width(56)
       .height(56)
       .borderRadius(ZRadius.xl)
-      .backgroundColor(ZColors.bgElev)
+      .backgroundColor(this.zc.bgElev)
       .justifyContent(FlexAlign.Center)
       .alignItems(HorizontalAlign.Center)
       .margin({ bottom: ZSpacing.sm });
@@ -341,15 +345,19 @@ export struct VaultTab {
       Text(this.store.items.length === 0 ? '保险库为空' : '没有匹配的条目')
         .fontSize(ZType.title2Size)
         .fontWeight(FontWeight.Bold)
-        .fontColor(ZColors.text);
+        .fontColor(this.zc.text);
       Text(this.store.items.length === 0 ? '点击右上角 + 创建第一个条目' : '调整搜索或筛选条件')
         .fontSize(ZType.footnoteSize)
-        .fontColor(ZColors.text3);
+        .fontColor(this.zc.text3);
     }
     .width('100%')
     .layoutWeight(1)
-    .justifyContent(FlexAlign.Center)
+    .justifyContent(FlexAlign.Start)
     .alignItems(HorizontalAlign.Center)
-    .padding({ left: ZSpacing.xl, right: ZSpacing.xl });
+    .padding({
+      left: ZSpacing.xl,
+      right: ZSpacing.xl,
+      top: ZSpacing.xxxl,
+    });
   }
 }

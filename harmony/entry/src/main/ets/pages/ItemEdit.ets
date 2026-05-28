@@ -8,7 +8,7 @@
 //   - 所有 7 种类型用同一个表单，按 type 显示不同字段
 //   - 保存时序列化为 ItemPayload.fields 透传 vaultService
 
-import { ZColors, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
+import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
 import { vaultStore, type VaultStore } from '../state/VaultStore';
 import type { UpdateItemPatch, VaultItemType } from '../lib/VaultService';
 import { typeLabel } from '../lib/Format';
@@ -34,6 +34,7 @@ const TYPE_OPTIONS: TypeOption[] = [
 @ComponentV2
 struct ItemEdit {
   @Local safeArea: SafeAreaState = safeAreaState;
+  @Local zc: ZColorsClass = ZColors;
   @Local store: VaultStore = vaultStore;
 
   @Local mode: string = 'create';
@@ -203,8 +204,8 @@ struct ItemEdit {
       title: '删除条目？',
       message: '将立即移到回收站，可在同步对端找回。',
       buttons: [
-        { text: '取消', color: ZColors.text2 },
-        { text: '删除', color: ZColors.danger },
+        { text: '取消', color: this.zc.text2 },
+        { text: '删除', color: this.zc.danger },
       ],
     });
     if (r.index === 1) {
@@ -222,17 +223,17 @@ struct ItemEdit {
       Row({ space: ZSpacing.sm }) {
         Text('取消')
           .fontSize(ZType.bodySize)
-          .fontColor(ZColors.text2)
+          .fontColor(this.zc.text2)
           .onClick(() => router.back());
         Text(this.mode === 'edit' ? '编辑' : '新建')
           .fontSize(ZType.title2Size)
           .fontWeight(FontWeight.Bold)
-          .fontColor(ZColors.text)
+          .fontColor(this.zc.text)
           .layoutWeight(1)
           .textAlign(TextAlign.Center);
         Text('保存')
           .fontSize(ZType.bodySize)
-          .fontColor(ZColors.accent)
+          .fontColor(this.zc.accent)
           .onClick(() => this.onSave());
       }
       .width('100%')
@@ -250,7 +251,7 @@ struct ItemEdit {
             Column({ space: ZSpacing.sm }) {
               Text('类型')
                 .fontSize(ZType.calloutSize)
-                .fontColor(ZColors.text2)
+                .fontColor(this.zc.text2)
                 .width('100%');
               Scroll() {
                 Row({ space: ZSpacing.sm }) {
@@ -267,7 +268,7 @@ struct ItemEdit {
           } else {
             Text(typeLabel(this.itemType))
               .fontSize(ZType.footnoteSize)
-              .fontColor(ZColors.text3)
+              .fontColor(this.zc.text3)
               .width('100%');
           }
 
@@ -309,15 +310,15 @@ struct ItemEdit {
           if (this.errorText) {
             Text(this.errorText)
               .fontSize(ZType.footnoteSize)
-              .fontColor(ZColors.danger)
+              .fontColor(this.zc.danger)
               .width('100%');
           }
 
           if (this.mode === 'edit') {
             Text('删除条目')
               .fontSize(ZType.bodySize)
-              .fontColor(ZColors.danger)
-              .backgroundColor(ZColors.bgElev)
+              .fontColor(this.zc.danger)
+              .backgroundColor(this.zc.bgElev)
               .borderRadius(ZRadius.lg)
               .height(48)
               .width('100%')
@@ -338,7 +339,10 @@ struct ItemEdit {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(ZColors.bg)
+    .justifyContent(FlexAlign.Start)
+    .alignItems(HorizontalAlign.Start)
+    .align(Alignment.TopStart)
+    .backgroundColor(this.zc.bg)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     .padding({ bottom: this.safeArea.keyboard });
   }
@@ -347,8 +351,8 @@ struct ItemEdit {
   typeChip(opt: TypeOption) {
     Text(opt.label)
       .fontSize(ZType.subheadSize)
-      .fontColor(this.itemType === opt.key ? ZColors.accentInk : ZColors.text2)
-      .backgroundColor(this.itemType === opt.key ? ZColors.accent : ZColors.bgElev)
+      .fontColor(this.itemType === opt.key ? this.zc.accentInk : this.zc.text2)
+      .backgroundColor(this.itemType === opt.key ? this.zc.accent : this.zc.bgElev)
       .borderRadius(ZRadius.md)
       .padding({
         left: ZSpacing.md,
@@ -362,13 +366,13 @@ struct ItemEdit {
   @Builder
   field(label: string, value: string, placeholder: string, onChange: (v: string) => void) {
     Column({ space: ZSpacing.xs }) {
-      Text(label).fontSize(ZType.footnoteSize).fontColor(ZColors.text3);
+      Text(label).fontSize(ZType.footnoteSize).fontColor(this.zc.text3);
       TextInput({ placeholder: placeholder, text: value })
-        .placeholderColor(ZColors.text3)
+        .placeholderColor(this.zc.text3)
         .placeholderFont({ size: ZType.bodySize })
-        .fontColor(ZColors.text)
+        .fontColor(this.zc.text)
         .fontSize(ZType.bodySize)
-        .backgroundColor(ZColors.bgElev)
+        .backgroundColor(this.zc.bgElev)
         .borderRadius(ZRadius.lg)
         .padding({ left: ZSpacing.md, right: ZSpacing.md })
         .height(44)
@@ -382,14 +386,14 @@ struct ItemEdit {
   @Builder
   passwordField(label: string, value: string, onChange: (v: string) => void) {
     Column({ space: ZSpacing.xs }) {
-      Text(label).fontSize(ZType.footnoteSize).fontColor(ZColors.text3);
+      Text(label).fontSize(ZType.footnoteSize).fontColor(this.zc.text3);
       TextInput({ placeholder: '', text: value })
         .type(InputType.Password)
-        .placeholderColor(ZColors.text3)
+        .placeholderColor(this.zc.text3)
         .placeholderFont({ size: ZType.bodySize })
-        .fontColor(ZColors.text)
+        .fontColor(this.zc.text)
         .fontSize(ZType.bodySize)
-        .backgroundColor(ZColors.bgElev)
+        .backgroundColor(this.zc.bgElev)
         .borderRadius(ZRadius.lg)
         .padding({ left: ZSpacing.md, right: ZSpacing.md })
         .height(44)
@@ -403,13 +407,13 @@ struct ItemEdit {
   @Builder
   multilineField(label: string, value: string, onChange: (v: string) => void) {
     Column({ space: ZSpacing.xs }) {
-      Text(label).fontSize(ZType.footnoteSize).fontColor(ZColors.text3);
+      Text(label).fontSize(ZType.footnoteSize).fontColor(this.zc.text3);
       TextArea({ placeholder: '', text: value })
-        .placeholderColor(ZColors.text3)
+        .placeholderColor(this.zc.text3)
         .placeholderFont({ size: ZType.bodySize })
-        .fontColor(ZColors.text)
+        .fontColor(this.zc.text)
         .fontSize(ZType.bodySize)
-        .backgroundColor(ZColors.bgElev)
+        .backgroundColor(this.zc.bgElev)
         .borderRadius(ZRadius.lg)
         .padding(ZSpacing.md)
         .width('100%')

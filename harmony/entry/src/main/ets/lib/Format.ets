@@ -1,6 +1,7 @@
 // 展示层格式化工具 —— 与 phone/lib/format.ts 对齐
 
 import type { VaultItemType } from '../model/Vault';
+import { ZColors } from '../theme/Tokens';
 
 /* ----------------------------------------------------------------------------
  * 相对时间
@@ -25,18 +26,18 @@ export function relativeTime(ts: number): string {
  * 字形标记 / 品牌配色
  * -------------------------------------------------------------------------- */
 
-const FAVICON_COLORS: string[] = [
-  '#1a1a2e', '#5e6ad2', '#2c2c2c', '#ff7262',
-  '#141414', '#ff9900', '#f38020', '#635bff',
-  '#c8292b', '#1e4d2b', '#3b6ea5', '#7d4f9e',
-];
-
+/**
+ * favicon 头像底色 —— 走 ZColors.faviconColors（@ObservedV2 单例）
+ * 主题切换时 palette 自动切板，调用点（组件 build / @Builder）会因
+ * 依赖了同一实例的其他 @Trace 字段而触发重渲，自然拿到新色。
+ */
 export function faviconColor(name: string): string {
+  const palette = ZColors.faviconColors;
   let h = 0;
   for (let i = 0; i < name.length; i++) {
     h = (h * 31 + name.charCodeAt(i)) >>> 0;
   }
-  return FAVICON_COLORS[h % FAVICON_COLORS.length];
+  return palette[h % palette.length];
 }
 
 export function faviconInitials(name: string): string {

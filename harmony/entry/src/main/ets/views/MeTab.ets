@@ -3,7 +3,7 @@
 // 与 phone/(tabs)/me.tsx 对齐（基础版本，不含云备份 / 信任设备 / 详细的设置项；
 // 后续 Phase 5 补齐）。
 
-import { ZColors, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
+import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
 import { vaultStore, type VaultStore } from '../state/VaultStore';
 import { promptAction, router } from '@kit.ArkUI';
 import { exportVaultToFile, importVaultFromFile } from '../lib/Transfer';
@@ -13,6 +13,7 @@ import { safeAreaState, SafeAreaState } from '../state/SafeArea';
 @ComponentV2
 export struct MeTab {
   @Local safeArea: SafeAreaState = safeAreaState;
+  @Local zc: ZColorsClass = ZColors;
   @Local store: VaultStore = vaultStore;
 
   private async onLock(): Promise<void> {
@@ -27,8 +28,8 @@ export struct MeTab {
         message:
           '将永久删除所有条目与主密码。该操作不可撤销。如果你启用了同步，请先在其它设备完成同步备份。',
         buttons: [
-          { text: '取消', color: ZColors.text2 },
-          { text: '永久重置', color: ZColors.danger },
+          { text: '取消', color: this.zc.text2 },
+          { text: '永久重置', color: this.zc.danger },
         ],
       })
       .then(async (r) => {
@@ -62,8 +63,8 @@ export struct MeTab {
       title: '从明文 JSON 导入？',
       message: '导入文件不走厄重装，会为每条 item 生成新 id 追加。仅信任自己刚刚导出的文件。',
       buttons: [
-        { text: '取消', color: ZColors.text2 },
-        { text: '选文件', color: ZColors.info },
+        { text: '取消', color: this.zc.text2 },
+        { text: '选文件', color: this.zc.info },
       ],
     });
     if (r.index !== 1) return;
@@ -85,7 +86,7 @@ export struct MeTab {
         Text('我的')
           .fontSize(ZType.titleSize)
           .fontWeight(FontWeight.Bold)
-          .fontColor(ZColors.text)
+          .fontColor(this.zc.text)
           .layoutWeight(1);
       }
       .width('100%')
@@ -103,15 +104,15 @@ export struct MeTab {
             Text(this.store.status.unlocked ? '已解锁' : '已锁定')
               .fontSize(ZType.title2Size)
               .fontWeight(FontWeight.Bold)
-              .fontColor(this.store.status.unlocked ? ZColors.ok : ZColors.text2);
+              .fontColor(this.store.status.unlocked ? this.zc.ok : this.zc.text2);
             Text(`${this.store.status.itemCount} 个条目`)
               .fontSize(ZType.footnoteSize)
-              .fontColor(ZColors.text3);
+              .fontColor(this.zc.text3);
           }
           .width('100%')
           .alignItems(HorizontalAlign.Start)
           .padding(ZSpacing.lg)
-          .backgroundColor(ZColors.bgElev)
+          .backgroundColor(this.zc.bgElev)
           .borderRadius(ZRadius.xl);
 
           // 操作组
@@ -125,7 +126,7 @@ export struct MeTab {
             this.rowAction('从 JSON 导入', '追加到当前 vault', () => this.onImport());
           }
           .width('100%')
-          .backgroundColor(ZColors.bgElev)
+          .backgroundColor(this.zc.bgElev)
           .borderRadius(ZRadius.xl)
           .clip(true);
 
@@ -134,7 +135,7 @@ export struct MeTab {
             this.rowDanger('重置保险库', '永久删除所有条目', () => this.onReset());
           }
           .width('100%')
-          .backgroundColor(ZColors.bgElev)
+          .backgroundColor(this.zc.bgElev)
           .borderRadius(ZRadius.xl)
           .clip(true);
 
@@ -148,19 +149,22 @@ export struct MeTab {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(ZColors.bg);
+    .justifyContent(FlexAlign.Start)
+    .alignItems(HorizontalAlign.Start)
+    .align(Alignment.TopStart)
+    .backgroundColor(this.zc.bg);
   }
 
   @Builder
   rowAction(label: string, sub: string, onTap: () => void) {
     Row() {
       Column({ space: 2 }) {
-        Text(label).fontSize(ZType.bodySize).fontColor(ZColors.text);
-        Text(sub).fontSize(ZType.footnoteSize).fontColor(ZColors.text3);
+        Text(label).fontSize(ZType.bodySize).fontColor(this.zc.text);
+        Text(sub).fontSize(ZType.footnoteSize).fontColor(this.zc.text3);
       }
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1);
-      Text('›').fontSize(20).fontColor(ZColors.text3);
+      Text('›').fontSize(20).fontColor(this.zc.text3);
     }
     .width('100%')
     .padding({
@@ -176,8 +180,8 @@ export struct MeTab {
   rowDanger(label: string, sub: string, onTap: () => void) {
     Row() {
       Column({ space: 2 }) {
-        Text(label).fontSize(ZType.bodySize).fontColor(ZColors.danger);
-        Text(sub).fontSize(ZType.footnoteSize).fontColor(ZColors.text3);
+        Text(label).fontSize(ZType.bodySize).fontColor(this.zc.danger);
+        Text(sub).fontSize(ZType.footnoteSize).fontColor(this.zc.text3);
       }
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1);
@@ -194,6 +198,6 @@ export struct MeTab {
 
   @Builder
   divider() {
-    Divider().strokeWidth(0.5).color(ZColors.line).margin({ left: ZSpacing.lg, right: ZSpacing.lg });
+    Divider().strokeWidth(0.5).color(this.zc.line).margin({ left: ZSpacing.lg, right: ZSpacing.lg });
   }
 }

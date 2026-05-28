@@ -6,7 +6,7 @@
 //
 // 主密码不可找回 —— 用户应当读懂"不可恢复"提示后再设置。
 
-import { ZColors, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
+import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
 import { vaultStore, type VaultStore } from '../state/VaultStore';
 import { estimateStrength, type Strength } from '../lib/Password';
 import { safeAreaState, SafeAreaState } from '../state/SafeArea';
@@ -14,6 +14,7 @@ import { safeAreaState, SafeAreaState } from '../state/SafeArea';
 @ComponentV2
 export struct OnboardingOverlay {
   @Local safeArea: SafeAreaState = safeAreaState;
+  @Local zc: ZColorsClass = ZColors;
   @Local store: VaultStore = vaultStore;
 
   @Local password: string = '';
@@ -40,10 +41,10 @@ export struct OnboardingOverlay {
   }
 
   private strengthColor(score: number): string {
-    if (score >= 80) return ZColors.ok;
-    if (score >= 50) return ZColors.warn;
-    if (score > 0) return ZColors.danger;
-    return ZColors.text3;
+    if (score >= 80) return this.zc.ok;
+    if (score >= 50) return this.zc.warn;
+    if (score > 0) return this.zc.danger;
+    return this.zc.text3;
   }
 
   /** 随 this.password 变化自动重算的密码强度。build() 内不能写 const 语句 */
@@ -62,10 +63,10 @@ export struct OnboardingOverlay {
             Text('设置主密码')
               .fontSize(ZType.largeTitleSize)
               .fontWeight(FontWeight.Bold)
-              .fontColor(ZColors.text);
+              .fontColor(this.zc.text);
             Text('主密码用于派生加密密钥；忘记将无法找回，请妥善保存。')
               .fontSize(ZType.footnoteSize)
-              .fontColor(ZColors.text3)
+              .fontColor(this.zc.text3)
               .lineHeight(18);
           }
           .alignItems(HorizontalAlign.Start)
@@ -75,11 +76,11 @@ export struct OnboardingOverlay {
           Column({ space: ZSpacing.sm }) {
             TextInput({ placeholder: '主密码（≥ 8 位）', text: this.password })
               .type(InputType.Password)
-              .placeholderColor(ZColors.text3)
+              .placeholderColor(this.zc.text3)
               .placeholderFont({ size: ZType.bodySize })
-              .fontColor(ZColors.text)
+              .fontColor(this.zc.text)
               .fontSize(ZType.bodySize)
-              .backgroundColor(ZColors.bgElev)
+              .backgroundColor(this.zc.bgElev)
               .borderRadius(ZRadius.lg)
               .padding({ left: ZSpacing.md, right: ZSpacing.md })
               .height(48)
@@ -97,7 +98,7 @@ export struct OnboardingOverlay {
                   .layoutWeight(1);
                 Text(`${this.strength.entropy} bit`)
                   .fontSize(ZType.footnoteSize)
-                  .fontColor(ZColors.text3);
+                  .fontColor(this.zc.text3);
               }
               .width('100%');
 
@@ -106,7 +107,7 @@ export struct OnboardingOverlay {
                   .width('100%')
                   .height(3)
                   .borderRadius(2)
-                  .backgroundColor(ZColors.lineSoft);
+                  .backgroundColor(this.zc.lineSoft);
                 Row()
                   .width(`${this.strength.score}%`)
                   .height(3)
@@ -119,11 +120,11 @@ export struct OnboardingOverlay {
 
             TextInput({ placeholder: '再次输入主密码', text: this.confirm })
               .type(InputType.Password)
-              .placeholderColor(ZColors.text3)
+              .placeholderColor(this.zc.text3)
               .placeholderFont({ size: ZType.bodySize })
-              .fontColor(ZColors.text)
+              .fontColor(this.zc.text)
               .fontSize(ZType.bodySize)
-              .backgroundColor(ZColors.bgElev)
+              .backgroundColor(this.zc.bgElev)
               .borderRadius(ZRadius.lg)
               .padding({ left: ZSpacing.md, right: ZSpacing.md })
               .height(48)
@@ -136,7 +137,7 @@ export struct OnboardingOverlay {
             if (this.errorText) {
               Text(this.errorText)
                 .fontSize(ZType.footnoteSize)
-                .fontColor(ZColors.danger)
+                .fontColor(this.zc.danger)
                 .width('100%')
                 .textAlign(TextAlign.Start);
             }
@@ -146,8 +147,8 @@ export struct OnboardingOverlay {
           Text(this.store.busy ? '正在初始化…' : '创建保险库')
             .fontSize(ZType.bodySize)
             .fontWeight(FontWeight.Medium)
-            .fontColor(ZColors.accentInk)
-            .backgroundColor(this.store.busy ? ZColors.text3 : ZColors.accent)
+            .fontColor(this.zc.accentInk)
+            .backgroundColor(this.store.busy ? this.zc.text3 : this.zc.accent)
             .borderRadius(ZRadius.lg)
             .height(48)
             .width('100%')
@@ -168,7 +169,10 @@ export struct OnboardingOverlay {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(ZColors.bg)
+    .justifyContent(FlexAlign.Start)
+    .alignItems(HorizontalAlign.Start)
+    .align(Alignment.TopStart)
+    .backgroundColor(this.zc.bg)
     // 键盘弹出时主动让出底部空间 —— 沉浸式窗口下 ArkUI 默认 KeyboardAvoidMode
     // 失效，靠 EntryAbility 订阅的 keyboard avoidArea 高度反馈到 padding 上。
     .padding({ bottom: this.safeArea.keyboard });

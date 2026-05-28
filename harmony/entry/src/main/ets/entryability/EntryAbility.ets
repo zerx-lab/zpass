@@ -1,18 +1,22 @@
 import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { display, window } from '@kit.ArkUI';
+import { display, mediaquery, window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { safeAreaState } from '../state/SafeArea';
+import { themeStore, type ColorMode } from '../state/ThemeStore';
 
 const DOMAIN = 0xFF00;
 const TAG = 'EntryAbility';
 
-// 与 phone/constants/theme.ts 的 dark 主题对齐：bg = #0c0c0d，text = #ececec。
-// 状态栏 / 导航栏背景统一透明（#00000000），由窗口背景"渗"上来；
-// 图标颜色按当前主题（暗底用白图标）由 setWindowSystemBarProperties 控制。
-const STATUS_BAR_CONTENT_DARK = '#ECECEC';
+// 系统栏前景色（图标 / 时间）：暗底用白前景，亮底用黑前景。
+// 与 phone/constants/theme.ts 保持对齐。
+const STATUS_FG_FOR_DARK = '#ECECEC';
+const STATUS_FG_FOR_LIGHT = '#0C0C0D';
 
 export default class EntryAbility extends UIAbility {
+  private darkModeListener?: mediaquery.MediaQueryListener;
+  private mainWin?: window.Window;
+
   onCreate(_want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, TAG, 'onCreate');
     // 把应用沙箱 filesDir 寫入 AppStorage 供 VaultStorage 等模块读取。
@@ -33,6 +37,7 @@ export default class EntryAbility extends UIAbility {
 
   onDestroy(): void {
     hilog.info(DOMAIN, TAG, 'onDestroy');
+    this.darkModeListener?.off('change');
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
@@ -43,6 +48,7 @@ export default class EntryAbility extends UIAbility {
       }
       hilog.info(DOMAIN, TAG, 'loadContent ok');
       this.applyImmersive(windowStage);
+      this.bindSystemColorMode();
     });
   }
 
@@ -58,6 +64,7 @@ export default class EntryAbility extends UIAbility {
     let mainWin: window.Window;
     try {
       mainWin = windowStage.getMainWindowSync();
+      this.mainWin = mainWin;
     } catch (e) {
       hilog.error(DOMAIN, TAG, 'getMainWindowSync failed: %{public}s', JSON.stringify(e));
       return;
@@ -67,14 +74,7 @@ export default class EntryAbility extends UIAbility {
       hilog.error(DOMAIN, TAG, 'setWindowLayoutFullScreen failed: %{public}s', JSON.stringify(err));
     });
 
-    mainWin.setWindowSystemBarProperties({
-      statusBarColor: '#00000000',
-      statusBarContentColor: STATUS_BAR_CONTENT_DARK,
-      navigationBarColor: '#00000000',
-      navigationBarContentColor: STATUS_BAR_CONTENT_DARK,
-    }).catch((err: BusinessError) => {
-      hilog.error(DOMAIN, TAG, 'setWindowSystemBarProperties failed: %{public}s', JSON.stringify(err));
-    });
+    this.applySystemBar(themeStore.effective);
 
     this.publishAvoidArea(mainWin, window.AvoidAreaType.TYPE_SYSTEM);
     this.publishAvoidArea(mainWin, window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR);
@@ -91,6 +91,42 @@ export default class EntryAbility extends UIAbility {
         const density = display.getDefaultDisplaySync().densityPixels || 1;
         safeAreaState.keyboard = data.area.bottomRect.height / density;
       }
+    });
+  }
+
+  /**
+   * 跟随系统的 dark-mode 切换：
+   *   - matchMediaSync 拿初始值并写回 themeStore
+   *   - 注册 change 回调持续同步
+   *   - themeStore 在 effective 变化时回调本端，重新刷新系统栏前景色
+   */
+  private bindSystemColorMode(): void {
+    try {
+      const listener = mediaquery.matchMediaSync('(dark-mode: true)');
+      this.darkModeListener = listener;
+      themeStore.setSystemColorMode(listener.matches ? 'dark' : 'light');
+      listener.on('change', (result: mediaquery.MediaQueryResult) => {
+        themeStore.setSystemColorMode(result.matches ? 'dark' : 'light');
+      });
+    } catch (e) {
+      hilog.error(DOMAIN, TAG, 'mediaquery bind failed: %{public}s', JSON.stringify(e));
+    }
+
+    themeStore.setOnEffectiveChange((m: ColorMode) => {
+      this.applySystemBar(m);
+    });
+  }
+
+  private applySystemBar(effective: ColorMode): void {
+    if (!this.mainWin) return;
+    const fg = effective === 'dark' ? STATUS_FG_FOR_DARK : STATUS_FG_FOR_LIGHT;
+    this.mainWin.setWindowSystemBarProperties({
+      statusBarColor: '#00000000',
+      statusBarContentColor: fg,
+      navigationBarColor: '#00000000',
+      navigationBarContentColor: fg,
+    }).catch((err: BusinessError) => {
+      hilog.error(DOMAIN, TAG, 'setWindowSystemBarProperties failed: %{public}s', JSON.stringify(err));
     });
   }
 
