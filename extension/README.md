@@ -143,29 +143,48 @@ The host name is `com.zerx_lab.zpass`. Build it from the desktop project:
 
 ```sh
 cd ../desktop
-task nativehost:build
+task build:nativehost
 ```
 
-Install a browser host manifest based on:
+### macOS — automatic
 
-- `native-host/chrome.example.json`
-- `native-host/firefox.example.json`
+ZPass Desktop writes the manifest for Chrome / Edge / Firefox the first time it
+starts (and on every later launch, comparing bytes — so version upgrades that
+change the bundled `zpass-native-host` path roll out silently). See
+`desktop/electron/src/main/nmh-install.ts`.
 
-Update `path` to the built `zpass-native-host.exe` location. For Chrome/Edge,
-replace `REPLACE_WITH_EXTENSION_ID` after loading or publishing the extension.
-Firefox uses the fixed extension id declared in `wxt.config.ts`.
+The probe rule is "only write manifests for browsers the user actually has":
 
-On Windows for Chrome:
+| Browser | Probed | Manifest written to |
+|---|---|---|
+| Chrome  | `~/Library/Application Support/Google/Chrome`   | `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.zerx_lab.zpass.json` |
+| Edge    | `~/Library/Application Support/Microsoft Edge`  | `~/Library/Application Support/Microsoft Edge/NativeMessagingHosts/com.zerx_lab.zpass.json` |
+| Firefox | `~/Library/Application Support/Firefox`         | `~/Library/Application Support/Mozilla/NativeMessagingHosts/com.zerx_lab.zpass.json` |
+
+The Chrome extension id is computed from `wxt.config.ts`'s `manifest.key`
+(deterministic), so `allowed_origins` does not need a manual id update across
+unpacked / Chrome Web Store builds.
+
+### Windows — Chrome / Edge
 
 ```powershell
 .\native-host\install-chrome.ps1 -ExtensionId <your-32-letter-extension-id>
-```
-
-For Edge:
-
-```powershell
 .\native-host\install-chrome.ps1 -Browser edge -ExtensionId <your-32-letter-extension-id>
 ```
+
+### Manual fallback
+
+If you need to hand-author a manifest (Linux, custom Chromium fork, system-wide
+install under `/Library`, debugging the auto-installer), use these templates as
+starting points:
+
+- `native-host/chrome.example.json` — Chrome / Edge / other Chromiums
+- `native-host/firefox.example.json` — Firefox / Thunderbird
+
+Update `path` to the built host binary location and replace
+`REPLACE_WITH_EXTENSION_ID` with the extension id from
+`chrome://extensions` (Developer mode). Firefox uses the fixed gecko id from
+`wxt.config.ts` and does not need that substitution.
 
 ## Development
 

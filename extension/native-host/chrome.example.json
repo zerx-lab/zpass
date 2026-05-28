@@ -1,7 +1,7 @@
 {
   "name": "com.zerx_lab.zpass",
   "description": "ZPass native messaging host",
-  "path": "C:\\Program Files\\ZPass\\zpass-native-host.exe",
+  "path": "REPLACE_WITH_HOST_BINARY_ABSOLUTE_PATH",
   "type": "stdio",
   "allowed_origins": [
     "chrome-extension://REPLACE_WITH_EXTENSION_ID/"

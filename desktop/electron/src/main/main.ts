@@ -18,6 +18,7 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { startBackend, type Backend } from "./backend";
+import { installNativeMessagingHosts } from "./nmh-install";
 
 // Boot trace: emit labelled deltas to stderr when RELAY_BOOT_TRACE=1. Used to
 // measure cold-start phase distribution without shipping the noise to users.
@@ -133,6 +134,14 @@ backendPromise.then(
     process.stderr.write(`[boot] backend failed to start: ${String(err)}\n`);
   },
 );
+
+// macOS 浏览器 native messaging host manifest 静默自检 / 更新。
+// 跑在 backend spawn 之后、whenReady 之前 —— 与 Go sidecar 启动并行,纯文件 IO,
+// 不阻塞窗口创建。非 darwin 平台内部 early return。任何失败都不能让 GUI 起不来,
+// 所以 catch 兜底,异常只走 stderr。
+void installNativeMessagingHosts().catch((err) => {
+  process.stderr.write(`[nmh] install task failed: ${String(err)}\n`);
+});
 
 // Re-reads `backendPromise` on every call so post-reload renderers get the
 // fresh port/token. The renderer never sees Node APIs.
