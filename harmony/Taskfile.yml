@@ -33,17 +33,22 @@ vars:
   KEY_ALIAS: zpass_debug
 
   # 直接走 env 默认值的派生路径（env override 时 doctor 会再打一遍）
-  HVIGORW: '{{.HOME}}/HarmonyOS/command-line-tools/bin/hvigorw'
-  HDC: '{{.HOME}}/HarmonyOS/command-line-tools/sdk/default/openharmony/toolchains/hdc'
-  HAP_SIGN_TOOL: '{{.HOME}}/HarmonyOS/command-line-tools/sdk/default/openharmony/toolchains/lib/hap-sign-tool.jar'
+  HVIGORW: "{{.HOME}}/HarmonyOS/command-line-tools/bin/hvigorw"
+  HDC: "{{.HOME}}/HarmonyOS/command-line-tools/sdk/default/openharmony/toolchains/hdc"
+  HAP_SIGN_TOOL: "{{.HOME}}/HarmonyOS/command-line-tools/sdk/default/openharmony/toolchains/lib/hap-sign-tool.jar"
+
+  # cryptocore .so —— 由 cryptocore/scripts/build-harmony.sh 产出后拷到 entry/libs/。
+  CRYPTOCORE_DIR: "{{.REPO_ROOT}}/cryptocore"
+  CRYPTOCORE_OHOS_OUT: "{{.REPO_ROOT}}/cryptocore/build/ohosLibs"
+  ENTRY_LIBS: "entry/libs"
 
   HAP_UNSIGNED: "entry/build/default/outputs/default/entry-default-unsigned.hap"
   HAP_SIGNED: "entry/build/default/outputs/default/entry-default-signed.hap"
 
-  KEYSTORE: '{{.HOME}}/.ohos/config/zpass_debug.p12'
-  CERT: '{{.HOME}}/.ohos/config/zpass_debug.cer'
-  PROFILE: '{{.HOME}}/.ohos/config/zpass_debug.p7b'
-  PASSWORD_FILE: '{{.HOME}}/.ohos/config/zpass_debug.password'
+  KEYSTORE: "{{.HOME}}/.ohos/config/zpass_debug.p12"
+  CERT: "{{.HOME}}/.ohos/config/zpass_debug.cer"
+  PROFILE: "{{.HOME}}/.ohos/config/zpass_debug.p7b"
+  PASSWORD_FILE: "{{.HOME}}/.ohos/config/zpass_debug.password"
 
 env:
   HARMONY_HOME:
@@ -56,6 +61,44 @@ tasks:
     desc: 列出可用 task
     cmds:
       - task --list
+
+  # ---- cryptocore (Rust napi-rs) ----
+
+  crypto:
+    desc: 编译 cryptocore 为 OHOS .so 并拷到 entry/libs（自动从 HARMONY_HOME 推导 NDK）
+    dir: "{{.REPO_ROOT}}"
+    env:
+      # build-harmony.sh 必需 HARMONY_NDK_HOME；没显式 export 时基于 HARMONY_HOME 推导，
+      # 既保持脚本对单独使用的兼容，又避免每次手动 export。
+      HARMONY_NDK_HOME:
+        sh: echo "${HARMONY_NDK_HOME:-$HARMONY_HOME/sdk/default/openharmony/native}"
+    cmds:
+      - bash cryptocore/scripts/build-harmony.sh
+      - mkdir -p {{.HARMONY_DIR}}/{{.ENTRY_LIBS}}/arm64-v8a {{.HARMONY_DIR}}/{{.ENTRY_LIBS}}/x86_64
+      - |
+        if [ -f "{{.CRYPTOCORE_OHOS_OUT}}/arm64-v8a/libcryptocore.so" ]; then
+          cp "{{.CRYPTOCORE_OHOS_OUT}}/arm64-v8a/libcryptocore.so" "{{.HARMONY_DIR}}/{{.ENTRY_LIBS}}/arm64-v8a/libcryptocore.so"
+          echo "[ok] copied arm64-v8a/libcryptocore.so"
+        fi
+      - |
+        if [ -f "{{.CRYPTOCORE_OHOS_OUT}}/x86_64/libcryptocore.so" ]; then
+          cp "{{.CRYPTOCORE_OHOS_OUT}}/x86_64/libcryptocore.so" "{{.HARMONY_DIR}}/{{.ENTRY_LIBS}}/x86_64/libcryptocore.so"
+          echo "[ok] copied x86_64/libcryptocore.so"
+        fi
+    sources:
+      - cryptocore/src/**/*.rs
+      - cryptocore/Cargo.toml
+      - cryptocore/build.rs
+      - cryptocore/scripts/build-harmony.sh
+    generates:
+      - "{{.HARMONY_DIR}}/{{.ENTRY_LIBS}}/arm64-v8a/libcryptocore.so"
+      - "{{.HARMONY_DIR}}/{{.ENTRY_LIBS}}/x86_64/libcryptocore.so"
+
+  crypto:test:
+    desc: 跨端字节级验证 —— 跑 cryptocore 嵌入式 Rust 单测并在 host 上 验证 known vector
+    dir: "{{.CRYPTOCORE_DIR}}"
+    cmds:
+      - cargo test --lib --no-default-features
 
   # ---- 构建 ----
 

@@ -48,6 +48,10 @@ export interface SiteStrings {
 	download_release_notes: string;
 	download_ios_title: string;
 	download_ios_note: string;
+	download_harmony_title: string;
+	download_harmony_subtitle: string;
+	download_harmony_note: string;
+	download_harmony_tag: string;
 	download_verify_hint: string;
 
 	// features
@@ -85,6 +89,7 @@ export interface SiteStrings {
 	mobile_body: string;
 	mobile_status_ios: string;
 	mobile_status_android: string;
+	mobile_status_harmony: string;
 	mobile_status_autofill: string;
 	mobile_phone_kicker: string;
 	mobile_phone_greeting: string;
@@ -279,7 +284,7 @@ const en: SiteStrings = {
 		"ZPass keeps your logins, passkeys and 2FA codes encrypted on your own devices. We never see them in plain text — not in transit, not at rest, not anywhere on our servers. Native apps for every platform you use.",
 	hero_cta_primary: "Download {version}",
 	hero_availability:
-		"Windows · macOS · Linux · Android · Chrome / Firefox · iOS soon",
+		"Windows · macOS · Linux · Android · Chrome / Firefox · iOS & HarmonyOS soon",
 
 	release_eyebrow: "AVAILABLE NOW · {version}",
 	release_title: "Download ZPass",
@@ -295,6 +300,11 @@ const en: SiteStrings = {
 	download_ios_title: "iOS",
 	download_ios_note:
 		"TestFlight beta is in preparation. Reach out through Contact if you'd like early access — or watch this page for the public link.",
+	download_harmony_title: "HarmonyOS",
+	download_harmony_subtitle: "HarmonyOS NEXT · phone",
+	download_harmony_note:
+		"HarmonyOS NEXT client in development. Reach out through Contact for early access.",
+	download_harmony_tag: "in dev",
 	download_verify_hint: "Verify SHA-256 before installing",
 
 	section_features: "Features",
@@ -343,6 +353,7 @@ const en: SiteStrings = {
 		"Sign in to apps and websites with a single tap through the iOS and Android system keyboard. 2FA codes surface on the lock screen when you're about to use them — and stay out of sight the rest of the time.",
 	mobile_status_ios: "iOS · in development",
 	mobile_status_android: "Android · {version} available",
+	mobile_status_harmony: "HarmonyOS NEXT · in development",
 	mobile_status_autofill: "system autofill",
 	mobile_phone_kicker: "VAULT · 412 ITEMS",
 	mobile_phone_greeting: "Good evening, Alex",
@@ -582,7 +593,7 @@ const zh: SiteStrings = {
 		"ZPass 把你的登录信息、通行密钥和两步验证码统一加密存放在本地设备。未经加密的明文不会进入网络、不会落到磁盘、也不会出现在我们的服务器上——我们看不到，任何第三方也看不到。覆盖你日常使用的每一个平台。",
 	hero_cta_primary: "下载 {version}",
 	hero_availability:
-		"Windows · macOS · Linux · Android · Chrome / Firefox · iOS 即将到来",
+		"Windows · macOS · Linux · Android · Chrome / Firefox · iOS 与 HarmonyOS 即将到来",
 
 	release_eyebrow: "现已发布 · {version}",
 	release_title: "下载 ZPass",
@@ -598,6 +609,10 @@ const zh: SiteStrings = {
 	download_ios_title: "iOS",
 	download_ios_note:
 		"TestFlight 测试通道筹备中。如需提前体验，欢迎通过页面右上角「联系我们」与我们联系，或关注本页等待公开链接。",
+	download_harmony_title: "鸿蒙",
+	download_harmony_subtitle: "HarmonyOS NEXT · 手机",
+	download_harmony_note: "HarmonyOS NEXT 客户端开发中，可通过「联系我们」获取内测渠道。",
+	download_harmony_tag: "开发中",
 	download_verify_hint: "安装前可校验 SHA-256",
 
 	section_features: "功能",
@@ -645,6 +660,7 @@ const zh: SiteStrings = {
 		"通过 iOS 与 Android 系统级键盘，在 App 和网页里一键完成登录。两步验证码只在你将要使用时浮现在锁屏上，其余时间安静待在密码库里。",
 	mobile_status_ios: "iOS · 开发中",
 	mobile_status_android: "Android · 已发布 {version}",
+	mobile_status_harmony: "鸿蒙 HarmonyOS NEXT · 开发中",
 	mobile_status_autofill: "系统自动填充",
 	mobile_phone_kicker: "密码库 · 412 项",
 	mobile_phone_greeting: "晚上好，Alex",

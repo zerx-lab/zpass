@@ -6,6 +6,18 @@
         "sources": [],
         "packages": []
       }
+    },
+    "nativeLib": {
+      // 把 entry/libs/<arch>/*.so 打入 hap。
+      // libcryptocore.so 由 cryptocore/scripts/build-harmony.sh 产出，拷进这里。
+      "filter": {
+        "excludes": [],
+        "pickFirsts": []
+      },
+      "debugSymbol": {
+        "strip": true,
+        "exclude": []
+      }
     }
   },
   "buildOptionSet": [

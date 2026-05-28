@@ -18,6 +18,9 @@ use rand_core::{OsRng, RngCore};
 #[cfg(feature = "android")]
 pub mod android;
 
+#[cfg(feature = "harmony")]
+pub mod harmony;
+
 pub mod sync;
 
 /// XChaCha20-Poly1305 密钥长度（与 Go chacha20poly1305.KeySize 对齐）
@@ -135,8 +138,7 @@ pub fn derive_kek(
         return Err(Error::ParallelismOverflow { got: par });
     }
 
-    let params = Params::new(mem_kib, iter, par, Some(key_len as usize))
-        .map_err(Error::Argon2)?;
+    let params = Params::new(mem_kib, iter, par, Some(key_len as usize)).map_err(Error::Argon2)?;
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
     let mut out = vec![0u8; key_len as usize];
     argon2
@@ -217,10 +219,7 @@ mod tests {
 
     #[test]
     fn random_bytes_rejects_zero() {
-        assert!(matches!(
-            random_bytes(0),
-            Err(Error::InvalidRandomCount)
-        ));
+        assert!(matches!(random_bytes(0), Err(Error::InvalidRandomCount)));
     }
 
     #[test]
@@ -237,11 +236,9 @@ mod tests {
     #[test]
     fn derive_kek_known_vector_is_stable() {
         let salt = vec![0xABu8; SALT_SIZE];
-        let got = derive_kek("correct horse battery staple", &salt, 8 * 1024, 2, 2, 32)
+        let got = derive_kek("correct horse battery staple", &salt, 8 * 1024, 2, 2, 32).unwrap();
+        let want = hex::decode("b95794ea37af333fbb49d97b0a9d52b42c77e413459c218083ac260daa41623a")
             .unwrap();
-        let want =
-            hex::decode("b95794ea37af333fbb49d97b0a9d52b42c77e413459c218083ac260daa41623a")
-                .unwrap();
         assert_eq!(got, want, "argon2id 字节级与 Go 版分叉");
     }
 

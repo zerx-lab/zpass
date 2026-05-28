@@ -15,6 +15,8 @@ crate-type = ["rlib", "cdylib", "staticlib"]
 [features]
 default = []
 android = ["dep:jni"]
+# HarmonyOS NAPI 桥（aarch64/x86_64-unknown-linux-ohos）—— 与 android JNI 并列
+harmony = ["dep:napi-ohos", "dep:napi-derive-ohos"]
 
 [dependencies]
 # RFC 9106 Argon2id；与 Go 的 golang.org/x/crypto/argon2 字节级对齐
@@ -26,6 +28,15 @@ rand_core = { version = "0.6", features = ["std"] }
 getrandom = "0.2"
 # 仅在 feature=android 时启用
 jni = { version = "0.21", default-features = false, optional = true }
+# 仅在 feature=harmony 时启用 —— 使用 ohos-rs 提供的 napi-ohos fork。
+# 上游 napi crate 不带 OHOS 模块自动注册（OHOS NAPI 走 napi_module_register
+# constructor，而非 Node.js 的 napi_register_module_v1），所以 .so 加载后所有
+# 导出（如 randomBytes）都会拿不到。napi-ohos 解决了这个差异。
+#
+# napi-derive-ohos 的过程宏展开后会硬引用 `napi_ohos::...`，所以不能 alias
+# 回原名，得在源码里直接 use napi_ohos::...
+napi-ohos = { version = "1.1", default-features = false, features = ["napi5", "async"], optional = true }
+napi-derive-ohos = { version = "1.1", optional = true }
 
 # ---- sync 子模块依赖（同步协议；PAKE 握手 + CBOR proto + 会话 AEAD） ----
 # SPAKE2 PAKE 实现（magic-wormhole 同款，生产级）
@@ -43,6 +54,11 @@ subtle = "2.5"
 hex = "0.4"
 
 [dev-dependencies]
+
+[build-dependencies]
+# napi-build-ohos 的 build 助手；feature=harmony 时由 build.rs 调用。
+# 体积极小，不汇报成 optional（build-dependencies 不支持 optional = true）。
+napi-build-ohos = "1.1"
 
 [profile.release]
 # 体积优先：移动端的 .so 越小越好

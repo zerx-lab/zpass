@@ -1,5 +1,9 @@
 {
   "src": [
-    "pages/Index"
+    "pages/Index",
+    "pages/ItemDetail",
+    "pages/ItemEdit",
+    "pages/TotpScan",
+    "pages/Sync"
   ]
 }

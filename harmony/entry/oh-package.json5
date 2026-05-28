@@ -5,5 +5,10 @@
   "main": "",
   "author": "zerx",
   "license": "Apache-2.0",
-  "dependencies": {}
+  "dependencies": {
+    // cryptocore NAPI 桥—— 二进制 .so 与类型声明分开打包。
+    // 语义：blib name 必须与 cryptocore::harmony 模块调 napi_register_module_v1 时的
+    // 名称一致（libcryptocore.so）；ArkTS 代码以 `import x from 'libcryptocore.so'` 访问。
+    "libcryptocore.so": "file:./src/main/cpp/types/libcryptocore"
+  }
 }
