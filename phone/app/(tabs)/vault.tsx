@@ -365,13 +365,22 @@ export default function VaultScreen() {
   }, [items]);
 
   const renderItem = useCallback(
-    ({ item, index }: { item: VaultItem; index: number }) => (
-      <SwipeableVaultRow
-        item={item}
-        c={c}
-        isLast={index === filtered.length - 1}
-      />
-    ),
+    ({ item, index }: { item: VaultItem; index: number }) => {
+      const isFirst = index === 0;
+      const isLast = index === filtered.length - 1;
+      return (
+        <View
+          style={[
+            styles.rowCard,
+            { backgroundColor: c.bgElev },
+            isFirst && styles.rowCardFirst,
+            isLast && styles.rowCardLast,
+          ]}
+        >
+          <SwipeableVaultRow item={item} c={c} isLast={isLast} />
+        </View>
+      );
+    },
     [c, filtered.length],
   );
 
@@ -446,16 +455,7 @@ export default function VaultScreen() {
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
         style={styles.list}
-        contentContainerStyle={[
-          styles.listContent,
-          filtered.length > 0 && {
-            backgroundColor: c.bgElev,
-            borderRadius: Radius.xl,
-            marginHorizontal: Spacing.lg,
-            marginTop: Spacing.sm,
-            overflow: "hidden",
-          },
-        ]}
+        contentContainerStyle={styles.listContent}
         ListEmptyComponent={
           <View style={styles.empty}>
             <View style={[styles.emptyIcon, { backgroundColor: c.bgElev }]}>
@@ -554,6 +554,19 @@ const styles = StyleSheet.create({
   /* List */
   list: { flex: 1 },
   listContent: { paddingBottom: 120 },
+  rowCard: {
+    marginHorizontal: Spacing.lg,
+    overflow: "hidden",
+  },
+  rowCardFirst: {
+    marginTop: Spacing.sm,
+    borderTopLeftRadius: Radius.xl,
+    borderTopRightRadius: Radius.xl,
+  },
+  rowCardLast: {
+    borderBottomLeftRadius: Radius.xl,
+    borderBottomRightRadius: Radius.xl,
+  },
 
   /* Row */
   row: {

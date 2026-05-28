@@ -554,40 +554,45 @@ function ResultOk({
         <Divider c={c} />
         <MetaRow label="参数" value={paramLine} c={c} mono />
         <Divider c={c} />
-        <View style={styles.secretRow}>
-          <Text style={[styles.metaLabel, { color: c.text3 }]}>密钥</Text>
-          <View style={{ flex: 1, alignItems: "flex-end" }}>
-            {maskedSecret ? (
-              <Text
-                style={[
-                  styles.metaValue,
-                  { color: c.text, fontFamily: MONO },
-                ]}
-                numberOfLines={2}
-              >
-                {maskedSecret}
-              </Text>
-            ) : (
-              <View style={styles.maskRow}>
-                {Array.from({ length: 8 }).map((_, i) => (
-                  <View
-                    key={i}
-                    style={[styles.maskDot, { backgroundColor: c.text3 }]}
-                  />
-                ))}
-              </View>
-            )}
+        <View style={styles.secretBlock}>
+          <View style={styles.secretHeader}>
+            <Text style={[styles.metaLabel, { color: c.text3 }]}>密钥</Text>
             <PressableScale
               onPress={onToggleReveal}
               haptic="selection"
               scale={0.96}
-              style={{ paddingVertical: 4 }}
+              style={styles.secretToggle}
             >
-              <Text style={{ color: c.info, ...Type.footnote, marginTop: 4 }}>
+              <IconSymbol
+                name={revealSecret ? "eye.slash.fill" : "eye.fill"}
+                size={13}
+                color={c.info}
+              />
+              <Text style={[styles.secretToggleText, { color: c.info }]}>
                 {revealSecret ? "隐藏" : "显示"}
               </Text>
             </PressableScale>
           </View>
+          {maskedSecret ? (
+            <Text
+              style={[
+                styles.secretValue,
+                { color: c.text, fontFamily: MONO },
+              ]}
+              selectable
+            >
+              {maskedSecret}
+            </Text>
+          ) : (
+            <View style={styles.maskRow}>
+              {Array.from({ length: 16 }).map((_, i) => (
+                <View
+                  key={i}
+                  style={[styles.maskDot, { backgroundColor: c.text3 }]}
+                />
+              ))}
+            </View>
+          )}
         </View>
       </View>
 
@@ -708,16 +713,19 @@ function MetaRow({
   return (
     <View style={styles.secretRow}>
       <Text style={[styles.metaLabel, { color: c.text3 }]}>{label}</Text>
-      <Text
-        style={[
-          styles.metaValue,
-          { color: c.text },
-          mono ? { fontFamily: MONO, fontSize: 13 } : null,
-        ]}
-        numberOfLines={1}
-      >
-        {value}
-      </Text>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text
+          style={[
+            styles.metaValue,
+            { color: c.text },
+            mono ? { fontFamily: MONO, fontSize: 13 } : null,
+          ]}
+          numberOfLines={1}
+          ellipsizeMode="tail"
+        >
+          {value}
+        </Text>
+      </View>
     </View>
   );
 }
@@ -849,19 +857,45 @@ const styles = StyleSheet.create({
   metaCard: {
     borderRadius: Radius.xl,
     paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.xs,
   },
   secretRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
     justifyContent: "space-between",
     paddingVertical: Spacing.md,
     gap: Spacing.md,
   },
-  metaLabel: { ...Type.subhead, paddingTop: 1 },
+  metaLabel: { ...Type.subhead },
   metaValue: { ...Type.body, fontWeight: "500", flexShrink: 1, textAlign: "right" },
   divider: { height: StyleSheet.hairlineWidth, width: "100%" },
-  maskRow: { flexDirection: "row", gap: 5, paddingVertical: 4 },
-  maskDot: { width: 6, height: 6, borderRadius: 3 },
+
+  /* 密钥块：上行 label+toggle，下行整行展示密钥/dots */
+  secretBlock: {
+    paddingVertical: Spacing.md,
+    gap: Spacing.sm,
+  },
+  secretHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  secretToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: Spacing.xs,
+    paddingVertical: 2,
+  },
+  secretToggleText: { ...Type.footnote, fontWeight: "600" },
+  secretValue: {
+    ...Type.body,
+    fontWeight: "500",
+    letterSpacing: 0.5,
+    lineHeight: 22,
+  },
+  maskRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, paddingVertical: 6 },
+  maskDot: { width: 7, height: 7, borderRadius: 4 },
 
   rawBox: {
     borderRadius: Radius.lg,
