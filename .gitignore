@@ -1,4 +1,5 @@
 nul
+.task
 node_modules/
 .wxt/
 .output/

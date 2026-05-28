@@ -1,0 +1,228 @@
+version: "3"
+
+# ZPass harmony 端开发流程编排
+#
+# 典型用法：
+#   task              查看所有 task
+#   task devices      列出已连接的鸿蒙设备
+#   task run          一键：build → sign → install → start（日常迭代用这个）
+#   task restart      不重装，停掉再起一次（只改了 UI 想看效果，但不是改了代码）
+#   task reinstall    强制 uninstall + 重新装（怀疑装机状态错乱时用）
+#   task log          实时 hilog 跟随（带 EntryAbility 过滤）
+#   task screenshot   抓一张截图到 /tmp/zpass-<ts>.jpeg
+#
+# 第一次使用需要的东西：
+#   - Task：                   go install github.com/go-task/task/v3/cmd/task@latest
+#   - JDK：                    系统 java 即可（鸿蒙 hvigor 不挑 17/21/26）
+#   - HarmonyOS Command Line Tools：~/HarmonyOS/command-line-tools/
+#   - 调试签名材料：               ~/.ohos/config/zpass_debug.{p12,cer,p7b,password}
+#   - udev 规则：                /etc/udev/rules.d/51-harmonyos.rules
+#                              (SUBSYSTEM=="usb", ATTR{idVendor}=="12d1", MODE="0666", GROUP="plugdev")
+
+vars:
+  REPO_ROOT:
+    sh: git rev-parse --show-toplevel
+  HARMONY_DIR: "{{.REPO_ROOT}}/harmony"
+
+  # 允许 env override
+  HARMONY_HOME_DEFAULT: "{{.HOME}}/HarmonyOS/command-line-tools"
+  OHOS_CONFIG_DEFAULT: "{{.HOME}}/.ohos/config"
+
+  BUNDLE_ID: com.zerx.zpass
+  ABILITY: EntryAbility
+  KEY_ALIAS: zpass_debug
+
+  # 直接走 env 默认值的派生路径（env override 时 doctor 会再打一遍）
+  HVIGORW: '{{.HOME}}/HarmonyOS/command-line-tools/bin/hvigorw'
+  HDC: '{{.HOME}}/HarmonyOS/command-line-tools/sdk/default/openharmony/toolchains/hdc'
+  HAP_SIGN_TOOL: '{{.HOME}}/HarmonyOS/command-line-tools/sdk/default/openharmony/toolchains/lib/hap-sign-tool.jar'
+
+  HAP_UNSIGNED: "entry/build/default/outputs/default/entry-default-unsigned.hap"
+  HAP_SIGNED: "entry/build/default/outputs/default/entry-default-signed.hap"
+
+  KEYSTORE: '{{.HOME}}/.ohos/config/zpass_debug.p12'
+  CERT: '{{.HOME}}/.ohos/config/zpass_debug.cer'
+  PROFILE: '{{.HOME}}/.ohos/config/zpass_debug.p7b'
+  PASSWORD_FILE: '{{.HOME}}/.ohos/config/zpass_debug.password'
+
+env:
+  HARMONY_HOME:
+    sh: echo "${HARMONY_HOME:-{{.HARMONY_HOME_DEFAULT}}}"
+  OHOS_CONFIG:
+    sh: echo "${OHOS_CONFIG:-{{.OHOS_CONFIG_DEFAULT}}}"
+
+tasks:
+  default:
+    desc: 列出可用 task
+    cmds:
+      - task --list
+
+  # ---- 构建 ----
+
+  build:
+    desc: hvigorw assembleHap，产出未签名 hap
+    dir: "{{.HARMONY_DIR}}"
+    cmds:
+      - "{{.HVIGORW}} assembleHap --no-daemon"
+    sources:
+      - "entry/src/**/*"
+      - "entry/build-profile.json5"
+      - "entry/oh-package.json5"
+      - "entry/hvigorfile.ts"
+      - "AppScope/**/*"
+      - "build-profile.json5"
+      - "hvigor/hvigor-config.json5"
+      - "oh-package.json5"
+    generates:
+      - "{{.HAP_UNSIGNED}}"
+
+  sign:
+    desc: 用 hap-sign-tool 签 hap（debug profile）
+    dir: "{{.HARMONY_DIR}}"
+    deps: [build]
+    cmds:
+      - |
+        PW=$(cat "{{.PASSWORD_FILE}}")
+        java -jar "{{.HAP_SIGN_TOOL}}" sign-app \
+          -mode localSign \
+          -keyAlias "{{.KEY_ALIAS}}" \
+          -appCertFile "{{.CERT}}" \
+          -profileFile "{{.PROFILE}}" \
+          -inFile "{{.HAP_UNSIGNED}}" \
+          -keystoreFile "{{.KEYSTORE}}" \
+          -outFile "{{.HAP_SIGNED}}" \
+          -keyPwd "$PW" \
+          -keystorePwd "$PW" \
+          -signAlg SHA256withECDSA \
+          | grep -v "^$"
+    sources:
+      - "{{.HAP_UNSIGNED}}"
+      - "{{.KEYSTORE}}"
+      - "{{.CERT}}"
+      - "{{.PROFILE}}"
+    generates:
+      - "{{.HAP_SIGNED}}"
+
+  # ---- 装机 / 运行 ----
+
+  install:
+    desc: 装到当前 hdc 设备（-r 替换，遇到 already exist 会自动 uninstall 重试）
+    dir: "{{.HARMONY_DIR}}"
+    deps: [sign]
+    cmds:
+      - |
+        OUT=$("{{.HDC}}" install -r "{{.HAP_SIGNED}}" 2>&1)
+        echo "$OUT"
+        if echo "$OUT" | grep -q "install already exist"; then
+          echo "[recover] 检测到 already exist，自动 uninstall 后重装"
+          "{{.HDC}}" uninstall "{{.BUNDLE_ID}}" || true
+          "{{.HDC}}" install "{{.HAP_SIGNED}}"
+        elif echo "$OUT" | grep -q "successfully"; then
+          :
+        else
+          echo "[error] install 失败" >&2
+          exit 1
+        fi
+
+  uninstall:
+    desc: 从设备上卸载 ZPass
+    cmds:
+      - '"{{.HDC}}" uninstall "{{.BUNDLE_ID}}"'
+
+  start:
+    desc: 启动 EntryAbility（手机需解锁）
+    cmds:
+      - '"{{.HDC}}" shell aa start -a "{{.ABILITY}}" -b "{{.BUNDLE_ID}}"'
+
+  stop:
+    desc: 强停 ZPass 进程
+    cmds:
+      - '"{{.HDC}}" shell aa force-stop "{{.BUNDLE_ID}}"'
+
+  restart:
+    desc: 停 + 起一次（不重装，仅当未改代码时用）
+    cmds:
+      - task: stop
+      - task: start
+
+  run:
+    desc: 一键：build → sign → install → start
+    cmds:
+      - task: install
+      - task: start
+
+  reinstall:
+    desc: 强制 uninstall + 重新装 + 启动（怀疑装机状态错乱时用）
+    deps: [sign]
+    dir: "{{.HARMONY_DIR}}"
+    cmds:
+      - '"{{.HDC}}" uninstall "{{.BUNDLE_ID}}" || true'
+      - '"{{.HDC}}" install "{{.HAP_SIGNED}}"'
+      - task: start
+
+  clean:
+    desc: 删 hvigor 缓存与构建产物
+    dir: "{{.HARMONY_DIR}}"
+    cmds:
+      - rm -rf entry/build .hvigor
+
+  # ---- 设备 / 调试 ----
+
+  devices:
+    desc: 列出当前 hdc 识别到的设备
+    cmds:
+      - '"{{.HDC}}" list targets'
+    silent: true
+
+  udid:
+    desc: 打印当前设备 UDID（注册新设备到 AGC 时用）
+    cmds:
+      - '"{{.HDC}}" shell bm get --udid'
+    silent: true
+
+  shell:
+    desc: 进入设备 shell
+    cmds:
+      - '"{{.HDC}}" shell'
+    interactive: true
+
+  log:
+    desc: 实时 hilog 跟随（过滤 EntryAbility / com.zerx.zpass）
+    cmds:
+      - '"{{.HDC}}" shell ''hilog -x | grep -iE "EntryAbility|com.zerx.zpass|FF00"'''
+
+  log:all:
+    desc: 不过滤的 hilog 跟随（噪声大）
+    cmds:
+      - '"{{.HDC}}" shell hilog'
+
+  screenshot:
+    desc: 抓一张截图到 /tmp/zpass-<ts>.jpeg
+    cmds:
+      - |
+        TS=$(date +%Y%m%d-%H%M%S)
+        REMOTE=/data/local/tmp/zpass-$TS.jpeg
+        LOCAL=/tmp/zpass-$TS.jpeg
+        "{{.HDC}}" shell snapshot_display -f $REMOTE >/dev/null
+        "{{.HDC}}" file recv $REMOTE $LOCAL >/dev/null
+        "{{.HDC}}" shell rm $REMOTE
+        echo "$LOCAL"
+
+  # ---- 排错 ----
+
+  doctor:
+    desc: 检查环境（Command Line Tools / 签名材料 / 设备）
+    silent: true
+    cmds:
+      - 'echo "HARMONY_HOME    = $HARMONY_HOME"'
+      - 'echo "OHOS_CONFIG     = $OHOS_CONFIG"'
+      - 'echo ""'
+      - 'echo "[hvigorw]";       test -x "{{.HVIGORW}}" && "{{.HVIGORW}}" -v 2>&1 | head -1 || echo "  MISSING: {{.HVIGORW}}"'
+      - 'echo "[hdc]";           test -x "{{.HDC}}" && "{{.HDC}}" -v 2>&1 | head -1 || echo "  MISSING: {{.HDC}}"'
+      - 'echo "[hap-sign-tool]"; test -f "{{.HAP_SIGN_TOOL}}" && echo "  OK ({{.HAP_SIGN_TOOL}})" || echo "  MISSING"'
+      - 'echo "[java]";          java -version 2>&1 | head -1'
+      - 'echo ""'
+      - 'echo "[签名材料]"'
+      - 'for f in "{{.KEYSTORE}}" "{{.CERT}}" "{{.PROFILE}}" "{{.PASSWORD_FILE}}"; do test -f "$f" && echo "  OK    $f" || echo "  MISS  $f"; done'
+      - 'echo ""'
+      - 'echo "[设备]"; "{{.HDC}}" list targets'

@@ -1,0 +1,10 @@
+{
+  "modelVersion": "5.0.0",
+  "description": "ZPass HarmonyOS app",
+  "dependencies": {},
+  "devDependencies": {
+    "@ohos/hypium": "1.0.21",
+    "@ohos/hvigor": "6.24.1",
+    "@ohos/hvigor-ohos-plugin": "6.24.1"
+  }
+}

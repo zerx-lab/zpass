@@ -1,0 +1,14 @@
+/node_modules
+**/oh_modules/
+.preview/
+build/
+.hvigor/
+.cxx/
+.test/
+.clangd/
+.idea/
+local.properties
+*.p12
+*.cer
+*.csr
+*.p7b
