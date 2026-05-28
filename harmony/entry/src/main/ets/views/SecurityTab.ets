@@ -90,11 +90,16 @@ export struct SecurityTab {
 
           Row().height(80).width('100%');
         }
+        .width('100%')
+        .constraintSize({ minHeight: '100%' })
+        .justifyContent(FlexAlign.Start)
+        .alignItems(HorizontalAlign.Start)
         .padding({ left: ZSpacing.lg, right: ZSpacing.lg });
       }
       .scrollBar(BarState.Off)
       .layoutWeight(1)
-      .width('100%');
+      .width('100%')
+      .align(Alignment.TopStart);
     }
     .width('100%')
     .height('100%')

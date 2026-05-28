@@ -105,7 +105,8 @@ export struct GeneratorTab {
 
       Scroll() {
         Column({ space: ZSpacing.md }) {
-          // 结果卡
+          // 结果卡 —— Column 用 constraintSize(minHeight 100%) 强制至少撑满 Scroll，
+          // 配合 justifyContent: Start 保证短内容（如词组 / PIN 模式）也贴顶。
           Column({ space: ZSpacing.sm }) {
             Text(this.genResult.length > 0 ? this.genResult : '— 点击重新生成 —')
               .fontSize(this.genResult.length > 20 ? 18 : 22)
@@ -192,11 +193,15 @@ export struct GeneratorTab {
           Row().height(80).width('100%');
         }
         .width('100%')
+        .constraintSize({ minHeight: '100%' })
+        .justifyContent(FlexAlign.Start)
+        .alignItems(HorizontalAlign.Start)
         .padding({ left: ZSpacing.lg, right: ZSpacing.lg });
       }
       .scrollBar(BarState.Off)
       .layoutWeight(1)
-      .width('100%');
+      .width('100%')
+      .align(Alignment.TopStart);
     }
     .width('100%')
     .height('100%')

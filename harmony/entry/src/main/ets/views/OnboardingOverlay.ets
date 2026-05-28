@@ -159,11 +159,15 @@ export struct OnboardingOverlay {
           Row().height(40).width('100%');
         }
         .width('100%')
+        .constraintSize({ minHeight: '100%' })
+        .justifyContent(FlexAlign.Start)
+        .alignItems(HorizontalAlign.Start)
         .padding({ left: ZSpacing.xl, right: ZSpacing.xl });
       }
       .scrollBar(BarState.Off)
       .layoutWeight(1)
-      .width('100%');
+      .width('100%')
+      .align(Alignment.TopStart);
 
       Row().height(this.safeArea.bottom).width('100%');
     }
