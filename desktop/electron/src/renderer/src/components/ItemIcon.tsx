@@ -49,6 +49,9 @@ function extractHost(input: string | null | undefined): string | null {
 		const host = u.hostname.toLowerCase();
 		// host 至少包含一个点（避免 "localhost" / 单词 这种）
 		if (!host.includes(".")) return null;
+		// IP 地址直接拒绝 —— DuckDuckGo CDN 对 IP 不返回 404,而是返回一张默认
+		// "蓝色圆形箭头"占位 PNG,会被误判为加载成功。强制回退到字形头像。
+		if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return null;
 		return host;
 	} catch {
 		return null;
