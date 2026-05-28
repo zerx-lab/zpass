@@ -2,6 +2,7 @@
   "string": [
     { "name": "module_desc", "value": "ZPass 主模块" },
     { "name": "EntryAbility_desc", "value": "ZPass 主能力" },
-    { "name": "EntryAbility_label", "value": "ZPass" }
+    { "name": "EntryAbility_label", "value": "ZPass" },
+    { "name": "permission_biometric_reason", "value": "用指纹或人脸解锁保险库" }
   ]
 }

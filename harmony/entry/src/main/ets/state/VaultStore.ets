@@ -59,6 +59,11 @@ export class VaultStore {
   @Trace filterType: VaultFilterType = 'all';
   @Trace onlyFavorites: boolean = false;
 
+  /* ----- 信任设备能力 / 启用态（由 refresh 填充，给 MeTab toggle 用） ----- */
+
+  @Trace trustedSupported: boolean = false;
+  @Trace trustedEnabled: boolean = false;
+
   /* ------------------------------------------------------------------------ */
   /* 状态查询                                                                  */
   /* ------------------------------------------------------------------------ */
@@ -108,7 +113,7 @@ export class VaultStore {
   /* 生命周期动作                                                              */
   /* ------------------------------------------------------------------------ */
 
-  /** 启动 / 解锁后调用，刷新 status + items + spaces */
+  /** 启动 / 解锁后调用，刷新 status + items + spaces + 信任设备态 */
   async refresh(): Promise<void> {
     try {
       this.status = await vaultService.status();
@@ -118,9 +123,24 @@ export class VaultStore {
       } else {
         this.items = [];
       }
+      await this.refreshTrustedState();
       this.lastError = '';
     } catch (e) {
       this.lastError = (e as Error).message;
+    }
+  }
+
+  /** 单独刷新信任设备能力 + 启用态（refresh 内部会调；MeTab 也独立调） */
+  async refreshTrustedState(): Promise<void> {
+    try {
+      this.trustedSupported = await vaultService.isTrustedDeviceSupported();
+    } catch (_e) {
+      this.trustedSupported = false;
+    }
+    try {
+      this.trustedEnabled = await vaultService.isTrustedDeviceEnabled();
+    } catch (_e) {
+      this.trustedEnabled = false;
     }
   }
 
@@ -188,6 +208,31 @@ export class VaultStore {
       this.spaces = [];
       this.activeSpaceId = '';
       this.status = { initialized: false, unlocked: false, itemCount: 0 };
+      this.trustedEnabled = false;
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* 信任设备启用 / 禁用                                                       */
+  /* ------------------------------------------------------------------------ */
+
+  async enableTrustedDevice(confirmPassword: string): Promise<void> {
+    this.busy = true;
+    try {
+      await vaultService.enableTrustedDevice(confirmPassword);
+      await this.refreshTrustedState();
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  async disableTrustedDevice(): Promise<void> {
+    this.busy = true;
+    try {
+      await vaultService.disableTrustedDevice();
+      await this.refreshTrustedState();
     } finally {
       this.busy = false;
     }

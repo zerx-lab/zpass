@@ -2,6 +2,7 @@
   "string": [
     { "name": "module_desc", "value": "ZPass entry module" },
     { "name": "EntryAbility_desc", "value": "ZPass main ability" },
-    { "name": "EntryAbility_label", "value": "ZPass" }
+    { "name": "EntryAbility_label", "value": "ZPass" },
+    { "name": "permission_biometric_reason", "value": "Unlock the vault with fingerprint or face" }
   ]
 }

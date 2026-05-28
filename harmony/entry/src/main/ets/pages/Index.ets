@@ -22,14 +22,14 @@ import { OnboardingOverlay } from '../views/OnboardingOverlay';
 interface TabSpec {
   key: string;
   label: string;
-  glyph: string;
+  icon: Resource;
 }
 
 const TABS: TabSpec[] = [
-  { key: 'vault', label: '密码库', glyph: 'V' },
-  { key: 'generator', label: '生成器', glyph: 'G' },
-  { key: 'security', label: '安全', glyph: 'S' },
-  { key: 'me', label: '我的', glyph: 'M' },
+  { key: 'vault', label: '密码库', icon: $r('app.media.ic_tab_vault') },
+  { key: 'generator', label: '生成器', icon: $r('app.media.ic_tab_generator') },
+  { key: 'security', label: '安全', icon: $r('app.media.ic_tab_security') },
+  { key: 'me', label: '我的', icon: $r('app.media.ic_tab_me') },
 ];
 
 @Entry
@@ -112,10 +112,10 @@ struct Index {
   @Builder
   tabBarItem(tab: TabSpec) {
     Column({ space: 2 }) {
-      Text(tab.glyph)
-        .fontSize(16)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(this.activeTab === tab.key ? this.zc.text : this.zc.text3);
+      Image(tab.icon)
+        .width(22)
+        .height(22)
+        .fillColor(this.activeTab === tab.key ? this.zc.text : this.zc.text3);
       Text(tab.label)
         .fontSize(11)
         .fontColor(this.activeTab === tab.key ? this.zc.text : this.zc.text3);

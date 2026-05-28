@@ -21,23 +21,41 @@ export struct LockOverlay {
 
   @Local password: string = '';
   @Local errorText: string = '';
-  @Local trustedSupported: boolean = false;
+  /** 仅 supported && enabled 时才显示「生物解锁」按钮 —— 未启用时显示按钮没意义 */
+  @Local trustedAvailable: boolean = false;
 
   aboutToAppear(): void {
-    // 启动时试一次信任设备自动解锁；同时探测能力供 UI 判断是否显示按钮。
-    this.store
-      .tryAutoUnlock()
-      .then(async (ok) => {
-        if (ok) return;
+    // 启动时先探测能力 + 启用态；仅"已启用"时才尝试自动弹生物识别
+    this.detectTrustedAvailability()
+      .then(async () => {
+        if (!this.trustedAvailable) return;
         try {
-          this.trustedSupported = await vaultService.isTrustedDeviceSupported();
+          await this.store.tryAutoUnlock();
         } catch (_e) {
-          this.trustedSupported = false;
+          // tryAutoUnlock 内部已吞错；此处兜底
         }
       })
       .catch(() => {
-        // tryAutoUnlock 内部已吞了大部分错误；这里再兜一层
+        // 探测失败时按"不支持"显示，主密码流程不受影响
       });
+  }
+
+  private async detectTrustedAvailability(): Promise<void> {
+    let supported = false;
+    let enabled = false;
+    try {
+      supported = await vaultService.isTrustedDeviceSupported();
+    } catch (_e) {
+      supported = false;
+    }
+    if (supported) {
+      try {
+        enabled = await vaultService.isTrustedDeviceEnabled();
+      } catch (_e) {
+        enabled = false;
+      }
+    }
+    this.trustedAvailable = supported && enabled;
   }
 
   private async onUnlock(): Promise<void> {
@@ -60,7 +78,9 @@ export struct LockOverlay {
     try {
       const ok = await this.store.tryAutoUnlock();
       if (!ok) {
-        promptAction.showToast({ message: '信任设备解锁失败', duration: 1500 });
+        promptAction.showToast({ message: '生物解锁失败', duration: 1500 });
+        // 失败可能是 absent（key 被系统失效）→ 重新探测一次，避免按钮悬挂
+        await this.detectTrustedAvailability();
       }
     } catch (e) {
       promptAction.showToast({ message: (e as Error).message, duration: 1800 });
@@ -137,8 +157,8 @@ export struct LockOverlay {
             .enabled(!this.store.busy)
             .onClick(() => this.onUnlock());
 
-          if (this.trustedSupported) {
-            Text('使用设备解锁')
+          if (this.trustedAvailable) {
+            Text('生物解锁')
               .fontSize(ZType.bodySize)
               .fontColor(this.zc.text2)
               .backgroundColor(this.zc.bgElev)
