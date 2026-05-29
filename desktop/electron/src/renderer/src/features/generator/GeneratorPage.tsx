@@ -79,6 +79,7 @@ import {
 	generatePassphrase,
 	generatePassword,
 	generatePin,
+	generateUniqueBatch,
 	type PassphraseOptions,
 	type PasswordOptions,
 } from "@/lib/password";
@@ -98,6 +99,10 @@ interface HistoryEntry {
 }
 
 const HISTORY_LIMIT = 8;
+
+// 批量数量的拖拽软上限 —— 滑块拖拽落在 1..50；更大数量通过输入框直接键入，
+// 不设硬上限（generateUniqueBatch 用连续未命中探测兜底候选空间耗尽）。
+const BATCH_MAX = 50;
 
 // ---------------------------------------------------------------------------
 // 字符着色显示组件
@@ -159,6 +164,8 @@ function Slider({
 	max,
 	step = 1,
 	onChange,
+	editable = false,
+	inputMax,
 }: {
 	label: string;
 	value: number;
@@ -166,16 +173,48 @@ function Slider({
 	max: number;
 	step?: number;
 	onChange: (next: number) => void;
+	/** 数值改为可直接输入的 number input（拖拽仍在 min..max 软范围内） */
+	editable?: boolean;
+	/** 输入框的夹取上限；缺省 = 无上限（仅约束 >= min）。仅在 editable 时生效 */
+	inputMax?: number;
 }) {
-	const pct = ((value - min) / (max - min)) * 100;
+	// 拖拽落在 min..max；输入可超出，pct 超界时夹到 100% 不溢出
+	const pct = Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100));
+
+	// 直接输入用本地草稿态，允许中途清空 / 多位输入而不被受控值打断
+	const [draft, setDraft] = useState<string | null>(null);
+	const clampInput = (n: number) =>
+		Math.max(min, inputMax != null ? Math.min(inputMax, n) : n);
+	const commitDraft = () => {
+		if (draft == null) return;
+		const n = Number.parseInt(draft, 10);
+		if (!Number.isNaN(n)) onChange(clampInput(n));
+		setDraft(null);
+	};
 
 	return (
 		<div className="flex flex-col gap-2">
 			<div className="flex items-baseline justify-between">
 				<span className="text-[12px] text-(--text-2)">{label}</span>
-				<span className="font-mono text-[14px] tabular-nums text-(--text)">
-					{value}
-				</span>
+				{editable ? (
+					<input
+						type="number"
+						min={min}
+						value={draft ?? value}
+						onChange={(e) => {
+							setDraft(e.target.value);
+							const n = Number.parseInt(e.target.value, 10);
+							if (!Number.isNaN(n)) onChange(clampInput(n));
+						}}
+						onBlur={commitDraft}
+						className="w-20 rounded-(--radius) border border-(--line) bg-(--bg-elev-2) px-2 py-0.5 text-right font-mono text-[14px] tabular-nums text-(--text) outline-none focus:border-(--text-3)"
+						aria-label={label}
+					/>
+				) : (
+					<span className="font-mono text-[14px] tabular-nums text-(--text)">
+						{value}
+					</span>
+				)}
 			</div>
 
 			<div className="relative h-6">
@@ -198,14 +237,17 @@ function Slider({
 					}}
 				/>
 
-				{/* 透明 input 覆盖层（保留 a11y / 键盘） */}
+				{/* 透明 input 覆盖层（保留 a11y / 键盘）；value 夹到 max 避免越界告警 */}
 				<input
 					type="range"
 					min={min}
 					max={max}
 					step={step}
-					value={value}
-					onChange={(e) => onChange(Number(e.target.value))}
+					value={Math.min(value, max)}
+					onChange={(e) => {
+						setDraft(null);
+						onChange(Number(e.target.value));
+					}}
 					className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
 					aria-label={label}
 				/>
@@ -346,8 +388,14 @@ export function GeneratorPage() {
 	);
 	const [pinLen, setPinLen] = useState(6);
 
-	// 当前生成结果
+	// 批量生成数量（1 = 单条，沿用原单密码路径；> 1 = 批量多行）
+	const [count, setCount] = useState(1);
+
+	// 当前生成结果（count > 1 时为 batch[0]，仅供 meta / 复用，不直接展示）
 	const [pw, setPw] = useState("");
+
+	// 批量结果列表（count === 1 时即 [pw]）
+	const [batch, setBatch] = useState<string[]>([]);
 
 	// 历史栈（最近 8 条）
 	const [history, setHistory] = useState<HistoryEntry[]>([]);
@@ -363,19 +411,34 @@ export function GeneratorPage() {
 	 *   - 测试时可以 mock state 后直接 call regen()
 	 */
 	const regen = () => {
-		let next = "";
-		try {
-			if (mode === "password") next = generatePassword(pwOpts);
-			else if (mode === "passphrase") next = generatePassphrase(phOpts);
-			else next = generatePin(pinLen);
-		} catch {
-			// generatePassword 在 avoidRepeats 不可满足时会抛错；fallback 关掉重试
-			next = generatePassword({ ...pwOpts, avoidRepeats: false });
+		// 按当前模式 + 选项构造单条生成器；批量与单条共用，保证两条路径的
+		// 复杂度 / 长度约束完全一致。
+		const genOne = (): string => {
+			try {
+				if (mode === "password") return generatePassword(pwOpts);
+				if (mode === "passphrase") return generatePassphrase(phOpts);
+				return generatePin(pinLen);
+			} catch {
+				// generatePassword 在 avoidRepeats 不可满足时会抛错；fallback 关掉重试
+				return generatePassword({ ...pwOpts, avoidRepeats: false });
+			}
+		};
+
+		// count === 1：完全沿用原单密码路径（含历史栈），零行为改动
+		if (count <= 1) {
+			const next = genOne();
+			setPw(next);
+			setBatch([next]);
+			setHistory((h) =>
+				[{ value: next, mode, at: Date.now() }, ...h].slice(0, HISTORY_LIMIT),
+			);
+			return;
 		}
-		setPw(next);
-		setHistory((h) =>
-			[{ value: next, mode, at: Date.now() }, ...h].slice(0, HISTORY_LIMIT),
-		);
+
+		// count > 1：批量去重，不写历史（避免 8 格历史被一次批量刷爆）
+		const list = generateUniqueBatch(count, genOne);
+		setBatch(list);
+		setPw(list[0] ?? "");
 	};
 
 	/**
@@ -391,7 +454,7 @@ export function GeneratorPage() {
 	// biome-ignore lint/correctness/useExhaustiveDependencies: regen 内部读取的状态都已显式列出
 	useEffect(() => {
 		regen();
-	}, [mode, JSON.stringify(pwOpts), JSON.stringify(phOpts), pinLen]);
+	}, [mode, JSON.stringify(pwOpts), JSON.stringify(phOpts), pinLen, count]);
 
 	/**
 	 * 复制当前密码
@@ -402,8 +465,10 @@ export function GeneratorPage() {
 	 *   3. 1.6s 后复位 justCopied
 	 */
 	const onCopy = async () => {
-		if (!pw) return;
-		const ok = await writeClipboardEphemeral(pw);
+		// 批量时复制全部（换行分隔）；单条时复制当前密码
+		const text = count > 1 ? batch.join("\n") : pw;
+		if (!text) return;
+		const ok = await writeClipboardEphemeral(text);
 		if (ok) {
 			setJustCopied(true);
 			pushToast({ text: t("toast_copied_password"), icon: "copy" });
@@ -456,8 +521,9 @@ export function GeneratorPage() {
 		}
 	};
 
-	// meta 行：当前模式的关键参数 + 字符数概要
+	// meta 行：当前模式的关键参数 + 字符数概要；批量时前缀 "N × ..."
 	const metaText = useMemo(() => {
+		let base: string;
 		if (mode === "password") {
 			const parts = [`${pw.length} ${t("gen_chars")}`];
 			const sets: string[] = [];
@@ -466,13 +532,14 @@ export function GeneratorPage() {
 			if (pwOpts.numbers) sets.push("0-9");
 			if (pwOpts.symbols) sets.push("!#$");
 			parts.push(sets.join(" · "));
-			return parts.join(" · ");
+			base = parts.join(" · ");
+		} else if (mode === "passphrase") {
+			base = `${phOpts.words} ${t("gen_words").toLowerCase()} · "${phOpts.separator ?? "-"}"`;
+		} else {
+			base = `${pinLen} ${t("gen_chars")} · 0-9`;
 		}
-		if (mode === "passphrase") {
-			return `${phOpts.words} ${t("gen_words").toLowerCase()} · "${phOpts.separator ?? "-"}"`;
-		}
-		return `${pinLen} ${t("gen_chars")} · 0-9`;
-	}, [mode, pw, pwOpts, phOpts, pinLen, t]);
+		return count > 1 ? `${batch.length} × ${base}` : base;
+	}, [mode, pw, pwOpts, phOpts, pinLen, count, batch.length, t]);
 
 	return (
 		<div className="h-full w-full overflow-y-auto">
@@ -511,9 +578,20 @@ export function GeneratorPage() {
 								<span>{t("gen_regen")}</span>
 							</button>
 						</div>
-						<div className="text-[18px]">
-							<ColorizedPassword value={pw} />
-						</div>
+						{count > 1 ? (
+							// 批量：多行只读文本，每行一条，可选中复制
+							<textarea
+								readOnly
+								value={batch.join("\n")}
+								rows={Math.min(Math.max(batch.length, 3), 14)}
+								spellCheck={false}
+								className="w-full resize-y rounded-(--radius) border border-(--line) bg-(--bg) p-3 font-mono text-[13px] leading-relaxed break-all text-(--text-2) outline-none"
+							/>
+						) : (
+							<div className="text-[18px]">
+								<ColorizedPassword value={pw} />
+							</div>
+						)}
 					</div>
 
 					{/* 操作行 —— Regenerate / Copy / Save */}
@@ -537,25 +615,37 @@ export function GeneratorPage() {
 							) : (
 								<Copy size={13} strokeWidth={1.5} />
 							)}
-							<span>{justCopied ? t("detail_copied") : t("gen_copy")}</span>
+							<span>
+								{justCopied
+									? t("detail_copied")
+									: count > 1
+										? t("gen_copy_all")
+										: t("gen_copy")}
+							</span>
 						</button>
 
 						<div className="flex-1" />
 
-						<button
-							type="button"
-							onClick={onSaveToVault}
-							className="inline-flex items-center gap-1.5 rounded-(--radius) border border-(--line) bg-(--bg-elev) px-3 py-2 text-[12.5px] text-(--text-2) transition-colors hover:border-(--text-3) hover:text-(--text)"
-						>
-							<Save size={13} strokeWidth={1.5} />
-							<span>{t("gen_save")}</span>
-						</button>
+						{/* 保存到保险库仅在单条模式下可用 —— 批量是"生成+复制"流程，
+							一次性把 N 条灌进 vault 不是这里的目的 */}
+						{count <= 1 && (
+							<button
+								type="button"
+								onClick={onSaveToVault}
+								className="inline-flex items-center gap-1.5 rounded-(--radius) border border-(--line) bg-(--bg-elev) px-3 py-2 text-[12.5px] text-(--text-2) transition-colors hover:border-(--text-3) hover:text-(--text)"
+							>
+								<Save size={13} strokeWidth={1.5} />
+								<span>{t("gen_save")}</span>
+							</button>
+						)}
 					</div>
 
-					{/* 强度条（lg 含熵 + 破解时间） */}
-					<div className="rounded-xl border border-(--line) bg-(--bg-elev) p-4">
-						<PasswordStrength password={pw} size="lg" />
-					</div>
+					{/* 强度条（lg 含熵 + 破解时间）—— 单条概念，批量时隐藏 */}
+					{count <= 1 && (
+						<div className="rounded-xl border border-(--line) bg-(--bg-elev) p-4">
+							<PasswordStrength password={pw} size="lg" />
+						</div>
+					)}
 
 					{/* 模式 + 选项 */}
 					<div className="flex flex-col gap-4 rounded-xl border border-(--line) bg-(--bg-elev) p-5">
@@ -565,6 +655,17 @@ export function GeneratorPage() {
 								{t("gen_section_options")}
 							</span>
 						</div>
+
+						{/* 批量数量 —— 对三种模式通用，调到 > 1 即进入多行批量展示。
+							拖拽落在 1..BATCH_MAX 软范围，需要更大数量可直接在输入框键入 */}
+						<Slider
+							label={t("gen_count")}
+							value={count}
+							min={1}
+							max={BATCH_MAX}
+							editable
+							onChange={setCount}
+						/>
 
 						{/* Password 模式选项 */}
 						{mode === "password" && (

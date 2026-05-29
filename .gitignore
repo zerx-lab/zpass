@@ -6,3 +6,4 @@ node_modules/
 dist/
 desktop/bin/
 desktop-old
+cryptocore/.hvigor/outputs/build-logs/

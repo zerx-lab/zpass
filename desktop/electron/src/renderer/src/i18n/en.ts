@@ -225,6 +225,8 @@ export const en = {
 	gen_include_number_sub: "Brave-Ocean-42",
 	gen_regen: "Regenerate",
 	gen_copy: "Copy",
+	gen_copy_all: "Copy all",
+	gen_count: "Count",
 	gen_save: "Save to vault",
 	gen_analysis: "Analysis",
 	gen_recent: "Recent",

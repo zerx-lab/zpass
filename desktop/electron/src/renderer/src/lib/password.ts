@@ -580,6 +580,41 @@ export function generatePin(length: number): string {
 	return out;
 }
 
+/**
+ * 批量生成去重结果
+ *
+ * 反复调用 `genOne` 直到收集到 `count` 条互不相同的结果，用 Set 去重。
+ * `genOne` 由调用方按当前模式（password / passphrase / pin）+ 当前选项
+ * 闭包构造，因此批量结果天然遵循同一套复杂度 / 长度约束。
+ *
+ * count 支持自定义且无上限，因此不能用 count*k 作尝试上限（候选空间小、
+ * count 又极大时会空转上百万次）。改用「连续未命中」探测：连续这么多次都撞到
+ * 重复，就认定候选空间已耗尽，返回已收集到的部分（不抛错）。命中即清零计数，
+ * 因此可填满的大批量不会被误伤。
+ */
+const MAX_CONSECUTIVE_MISSES = 50000;
+
+export function generateUniqueBatch(
+	count: number,
+	genOne: () => string,
+): string[] {
+	if (count < 1) return [];
+	const out: string[] = [];
+	const seen = new Set<string>();
+	let misses = 0;
+	while (out.length < count && misses < MAX_CONSECUTIVE_MISSES) {
+		const candidate = genOne();
+		if (!candidate || seen.has(candidate)) {
+			misses++;
+			continue;
+		}
+		misses = 0;
+		seen.add(candidate);
+		out.push(candidate);
+	}
+	return out;
+}
+
 // ---------------------------------------------------------------------------
 // 强度评估
 // ---------------------------------------------------------------------------

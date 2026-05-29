@@ -1,5 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { StyleSheet, View, Text, ScrollView } from "react-native";
+import {
+  StyleSheet,
+  View,
+  Text,
+  ScrollView,
+  TextInput,
+  PanResponder,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
@@ -81,6 +88,37 @@ function generatePin(len: number): string {
   return Array.from({ length: len }, () => secureRandomInt(10).toString()).join(
     "",
   );
+}
+
+/**
+ * 批量去重生成
+ *
+ * 反复调用 genOne（按当前模式 + 选项闭包构造）直到收集 count 条互不相同的
+ * 结果，用 Set 去重。
+ *
+ * count 现无上限，因此不能用 count*k 作尝试上限（候选空间小、count 又极大时
+ * 会空转上百万次）。改用「连续未命中」探测：连续这么多次都撞到重复，就认定
+ * 候选空间已耗尽，返回已收集到的部分（不抛错）。命中即清零计数，所以可填满
+ * 的大批量不会被误伤。
+ */
+const MAX_CONSECUTIVE_MISSES = 50000;
+
+function generateUniqueBatch(count: number, genOne: () => string): string[] {
+  if (count < 1) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  let misses = 0;
+  while (out.length < count && misses < MAX_CONSECUTIVE_MISSES) {
+    const candidate = genOne();
+    if (!candidate || seen.has(candidate)) {
+      misses++;
+      continue;
+    }
+    misses = 0;
+    seen.add(candidate);
+    out.push(candidate);
+  }
+  return out;
 }
 
 function calcStrength(
@@ -198,6 +236,10 @@ function ToggleRow({
   );
 }
 
+/** 拖拽用软上限：max 缺省（无上限）时，轨道映射到 [min, SOFT_DRAG_MAX]，
+ *  更大的值通过点击数值直接输入。 */
+const SOFT_DRAG_MAX = 100;
+
 function Stepper({
   value,
   min,
@@ -207,13 +249,58 @@ function Stepper({
 }: {
   value: number;
   min: number;
-  max: number;
-  onChange: (delta: number) => void;
+  /** 缺省即无上限（仅约束 >= min）；拖拽落在软范围内，输入可超出 */
+  max?: number;
+  /** 绝对值回调：内部已按 [min, max] 夹取 */
+  onChange: (next: number) => void;
   hint?: string;
 }) {
   const { colors: c } = useTheme();
   const monoFamily = Fonts?.mono ?? "monospace";
-  const progress = ((value - min) / (max - min)) * 100;
+
+  const dragMax = max ?? Math.max(SOFT_DRAG_MAX, value);
+  const span = Math.max(1, dragMax - min);
+  const progress = Math.min(100, Math.max(0, ((value - min) / span) * 100));
+
+  const clamp = (n: number) =>
+    Math.max(min, max != null ? Math.min(max, n) : n);
+
+  // 点击数值 → 直接输入
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const startEdit = () => {
+    setDraft(String(value));
+    setEditing(true);
+  };
+  const commitEdit = () => {
+    const n = Number.parseInt(draft, 10);
+    if (!Number.isNaN(n)) onChange(clamp(n));
+    setEditing(false);
+  };
+
+  // 拖拽 —— 触摸点 x / 轨道宽度映射到 [min, dragMax]
+  const trackWidth = useRef(0);
+  const setFromRatio = (ratio: number) => {
+    const r = Math.max(0, Math.min(1, ratio));
+    onChange(clamp(Math.round(min + r * span)));
+  };
+  // 用 ref 转发，PanResponder 只创建一次但始终调用最新闭包，避免捕获过期的 onChange/span
+  const ratioRef = useRef(setFromRatio);
+  ratioRef.current = setFromRatio;
+  const pan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (e) => {
+        Haptics.selectionAsync();
+        ratioRef.current(e.nativeEvent.locationX / (trackWidth.current || 1));
+      },
+      onPanResponderMove: (e) => {
+        ratioRef.current(e.nativeEvent.locationX / (trackWidth.current || 1));
+      },
+    }),
+  ).current;
+
   return (
     <View>
       <View style={styles.stepper}>
@@ -222,13 +309,31 @@ function Stepper({
           size={Hit.buttonMd}
           variant="tinted"
           haptic="light"
-          onPress={() => onChange(-1)}
+          onPress={() => onChange(clamp(value - 1))}
         />
-        <View style={[styles.stepperTrack, { backgroundColor: c.bgElev }]}>
+        <View
+          style={styles.trackTouch}
+          onLayout={(e) => {
+            trackWidth.current = e.nativeEvent.layout.width;
+          }}
+          {...pan.panHandlers}
+        >
           <View
+            pointerEvents="none"
+            style={[styles.stepperTrack, { backgroundColor: c.bgElev }]}
+          >
+            <View
+              style={[
+                styles.stepperTrackFill,
+                { backgroundColor: c.accent, width: `${progress}%` as any },
+              ]}
+            />
+          </View>
+          <View
+            pointerEvents="none"
             style={[
-              styles.stepperTrackFill,
-              { backgroundColor: c.accent, width: `${progress}%` as any },
+              styles.stepperThumb,
+              { backgroundColor: c.accent, left: `${progress}%` as any },
             ]}
           />
         </View>
@@ -237,14 +342,33 @@ function Stepper({
           size={Hit.buttonMd}
           variant="tinted"
           haptic="light"
-          onPress={() => onChange(1)}
+          onPress={() => onChange(clamp(value + 1))}
         />
       </View>
-      <Text
-        style={[styles.stepperValue, { color: c.text, fontFamily: monoFamily }]}
-      >
-        {value}
-      </Text>
+      {editing ? (
+        <TextInput
+          autoFocus
+          keyboardType="number-pad"
+          value={draft}
+          onChangeText={setDraft}
+          onBlur={commitEdit}
+          onSubmitEditing={commitEdit}
+          selectTextOnFocus
+          style={[
+            styles.stepperValue,
+            styles.stepperInput,
+            { color: c.text, fontFamily: monoFamily, borderColor: c.accent },
+          ]}
+        />
+      ) : (
+        <Text
+          onPress={startEdit}
+          suppressHighlighting
+          style={[styles.stepperValue, { color: c.text, fontFamily: monoFamily }]}
+        >
+          {value}
+        </Text>
+      )}
       {hint ? (
         <Text
           style={[styles.stepperHint, { color: c.text3, fontFamily: monoFamily }]}
@@ -265,7 +389,9 @@ export default function GeneratorScreen() {
   const [len, setLen] = useState(20);
   const [wordCount, setWordCount] = useState(5);
   const [pinLen, setPinLen] = useState(6);
+  const [count, setCount] = useState(1);
   const [password, setPassword] = useState("");
+  const [batch, setBatch] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -279,12 +405,22 @@ export default function GeneratorScreen() {
   });
 
   const regen = useCallback(() => {
-    let pw = "";
-    if (mode === "password") pw = generatePassword(len, opts);
-    else if (mode === "passphrase") pw = generatePassphrase(wordCount);
-    else pw = generatePin(pinLen);
-    setPassword(pw);
-  }, [mode, len, wordCount, pinLen, opts]);
+    // 单条生成器，批量与单条共用：保证复杂度 / 长度约束完全一致
+    const genOne = (): string => {
+      if (mode === "password") return generatePassword(len, opts);
+      if (mode === "passphrase") return generatePassphrase(wordCount);
+      return generatePin(pinLen);
+    };
+    if (count <= 1) {
+      const pw = genOne();
+      setPassword(pw);
+      setBatch([pw]);
+      return;
+    }
+    const list = generateUniqueBatch(count, genOne);
+    setBatch(list);
+    setPassword(list[0] ?? "");
+  }, [mode, len, wordCount, pinLen, opts, count]);
 
   useEffect(() => {
     regen();
@@ -297,7 +433,7 @@ export default function GeneratorScreen() {
 
   const handleCopy = async () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    await copyText(password);
+    await copyText(count > 1 ? batch.join("\n") : password);
     setCopied(true);
     if (copyTimer.current) clearTimeout(copyTimer.current);
     copyTimer.current = setTimeout(() => setCopied(false), 1500);
@@ -360,34 +496,63 @@ export default function GeneratorScreen() {
                 { color: c.text3, fontFamily: monoFamily },
               ]}
             >
-              {password.length} 字符
+              {count > 1 ? `${batch.length} 条` : `${password.length} 字符`}
             </Text>
           </View>
-          <Text style={[styles.passwordText, { fontFamily: monoFamily }]}>
-            {tokens.map((tok, i) => (
-              <Text key={i} style={{ color: charColor(tok.type) }}>
-                {tok.char}
-              </Text>
-            ))}
-          </Text>
-          <View style={[styles.strengthRow, { borderTopColor: c.lineSoft }]}>
-            <View style={[styles.barBg, { backgroundColor: c.bgActive }]}>
-              <View
-                style={[
-                  styles.barFill,
-                  { backgroundColor: barColor, width: `${strength.score}%` as any },
-                ]}
-              />
-            </View>
-            <Text style={[styles.strengthLabel, { color: barColor }]}>
-              {strength.label}
-            </Text>
-            <Text
-              style={[styles.entropy, { color: c.text3, fontFamily: monoFamily }]}
+          {count > 1 ? (
+            // 批量：多行纯文本，每行一条，可长按选中。限制最大高度并内部滚动，
+            // 数量很大时不会把整页撑开。
+            <ScrollView
+              style={styles.batchScroll}
+              contentContainerStyle={styles.batchScrollContent}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator
             >
-              {strength.entropy}b
-            </Text>
-          </View>
+              <Text
+                selectable
+                style={[
+                  styles.batchText,
+                  { color: c.text2, fontFamily: monoFamily },
+                ]}
+              >
+                {batch.join("\n")}
+              </Text>
+            </ScrollView>
+          ) : (
+            <>
+              <Text style={[styles.passwordText, { fontFamily: monoFamily }]}>
+                {tokens.map((tok, i) => (
+                  <Text key={i} style={{ color: charColor(tok.type) }}>
+                    {tok.char}
+                  </Text>
+                ))}
+              </Text>
+              <View style={[styles.strengthRow, { borderTopColor: c.lineSoft }]}>
+                <View style={[styles.barBg, { backgroundColor: c.bgActive }]}>
+                  <View
+                    style={[
+                      styles.barFill,
+                      {
+                        backgroundColor: barColor,
+                        width: `${strength.score}%` as any,
+                      },
+                    ]}
+                  />
+                </View>
+                <Text style={[styles.strengthLabel, { color: barColor }]}>
+                  {strength.label}
+                </Text>
+                <Text
+                  style={[
+                    styles.entropy,
+                    { color: c.text3, fontFamily: monoFamily },
+                  ]}
+                >
+                  {strength.entropy}b
+                </Text>
+              </View>
+            </>
+          )}
         </View>
 
         {/* Action Buttons */}
@@ -402,7 +567,7 @@ export default function GeneratorScreen() {
             fullWidth
           />
           <Button
-            label={copied ? "已复制" : "复制"}
+            label={copied ? "已复制" : count > 1 ? "复制全部" : "复制"}
             icon={copied ? "checkmark" : "doc.on.doc.fill"}
             variant="primary"
             size="lg"
@@ -455,6 +620,19 @@ export default function GeneratorScreen() {
           })}
         </View>
 
+        {/* 生成数量 —— 对三种模式通用，> 1 时批量多行展示且互不重复 */}
+        <View style={[styles.section, { backgroundColor: c.bgElev }]}>
+          <Text style={[styles.sectionTitle, { color: c.text3 }]}>
+            生成数量
+          </Text>
+          <Stepper
+            value={count}
+            min={1}
+            onChange={setCount}
+            hint="大于 1 时批量生成，结果互不重复（拖拽或点击数字输入，无上限）"
+          />
+        </View>
+
         {/* Mode-specific controls */}
         {mode === "password" && (
           <>
@@ -462,14 +640,7 @@ export default function GeneratorScreen() {
               <Text style={[styles.sectionTitle, { color: c.text3 }]}>
                 密码长度
               </Text>
-              <Stepper
-                value={len}
-                min={8}
-                max={64}
-                onChange={(d) =>
-                  setLen((v) => Math.min(64, Math.max(8, v + d)))
-                }
-              />
+              <Stepper value={len} min={8} max={64} onChange={setLen} />
             </View>
 
             <View style={styles.toggleGrid}>
@@ -522,9 +693,7 @@ export default function GeneratorScreen() {
               value={wordCount}
               min={2}
               max={12}
-              onChange={(d) =>
-                setWordCount((v) => Math.min(12, Math.max(2, v + d)))
-              }
+              onChange={setWordCount}
               hint="单词以 - 分隔，例如：apple-brave-cloud"
             />
           </View>
@@ -539,23 +708,24 @@ export default function GeneratorScreen() {
               value={pinLen}
               min={4}
               max={12}
-              onChange={(d) =>
-                setPinLen((v) => Math.min(12, Math.max(4, v + d)))
-              }
+              onChange={setPinLen}
               hint="范围 4 ~ 12 位，仅含数字 0-9"
             />
           </View>
         )}
 
-        <Button
-          label="保存到密码库"
-          icon="square.and.arrow.down.fill"
-          variant="secondary"
-          size="lg"
-          onPress={handleSave}
-          fullWidth
-          style={{ marginTop: Spacing.sm }}
-        />
+        {/* 保存仅单条模式可用 —— 批量是"生成+复制全部"流程 */}
+        {count <= 1 && (
+          <Button
+            label="保存到密码库"
+            icon="square.and.arrow.down.fill"
+            variant="secondary"
+            size="lg"
+            onPress={handleSave}
+            fullWidth
+            style={{ marginTop: Spacing.sm }}
+          />
+        )}
 
         <View style={styles.bottomPad} />
       </ScrollView>
@@ -602,6 +772,17 @@ const styles = StyleSheet.create({
     lineHeight: 32,
     flexWrap: "wrap",
     marginTop: Spacing.sm,
+  },
+  batchScroll: {
+    maxHeight: 260,
+    marginTop: Spacing.lg,
+  },
+  batchScrollContent: {
+    paddingRight: Spacing.sm,
+  },
+  batchText: {
+    fontSize: 14,
+    lineHeight: 22,
   },
   strengthRow: {
     flexDirection: "row",
@@ -671,8 +852,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: Spacing.md,
   },
-  stepperTrack: {
+  trackTouch: {
     flex: 1,
+    height: 28,
+    justifyContent: "center",
+  },
+  stepperTrack: {
+    width: "100%",
     height: 6,
     borderRadius: 3,
     overflow: "hidden",
@@ -681,10 +867,26 @@ const styles = StyleSheet.create({
     height: "100%",
     borderRadius: 3,
   },
+  stepperThumb: {
+    position: "absolute",
+    top: "50%",
+    marginTop: -9,
+    marginLeft: -9,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+  },
   stepperValue: {
     ...Type.headline,
     marginTop: Spacing.sm,
     textAlign: "center",
+  },
+  stepperInput: {
+    alignSelf: "center",
+    minWidth: 96,
+    paddingVertical: 2,
+    paddingHorizontal: Spacing.sm,
+    borderBottomWidth: 1.5,
   },
   stepperHint: {
     ...Type.footnote,

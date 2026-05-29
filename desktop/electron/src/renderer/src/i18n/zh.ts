@@ -234,6 +234,8 @@ export const zh: Strings = {
 	gen_include_number_sub: "Brave-Ocean-42",
 	gen_regen: "重新生成",
 	gen_copy: "复制",
+	gen_copy_all: "复制全部",
+	gen_count: "数量",
 	gen_save: "保存到保险库",
 	gen_analysis: "强度分析",
 	gen_recent: "最近生成",
