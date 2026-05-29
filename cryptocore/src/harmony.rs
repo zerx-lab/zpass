@@ -16,7 +16,10 @@
 //! 线程：Argon2id 派生主路径耗时数百毫秒，必须用 napi-rs 的 `#[napi]`
 //! 异步形态（async fn）—— 框架会把执行移到 libuv worker，UI 主线程不阻塞。
 
-use crate::{derive_kek, open_aead, random_bytes, seal_aead};
+use crate::{
+    argon2id_raw, derive_kek, open_aead, open_aead_with_nonce, random_bytes, seal_aead,
+    seal_aead_with_nonce,
+};
 use napi_ohos::bindgen_prelude::{AsyncTask, Buffer, Env, Error, Result as NapiResult, Status, Task};
 use napi_derive_ohos::napi;
 
@@ -112,4 +115,88 @@ pub fn random_bytes_napi(n: u32) -> NapiResult<Buffer> {
         return Err(Error::new(Status::InvalidArg, "invalid random byte count"));
     }
     random_bytes(n as usize).map(Buffer::from).map_err(to_napi)
+}
+
+/* ----------------------------------------------------------------------------
+ * Sync 专用导出 —— PSK 派生 + 外部 nonce AEAD
+ *
+ * 与 phone/lib/sync-protocol.ts 一一对应：
+ *   - argon2idRaw：sync session key 派生（salt 可任意长度，非 vault 32-byte 限制）
+ *   - sealAeadWithNonce / openAeadWithNonce：协议 nonce = [dir(1)][rand(16)][counter(7B)]
+ * -------------------------------------------------------------------------- */
+
+pub struct Argon2idRawTask {
+    password: Vec<u8>,
+    salt: Vec<u8>,
+    mem_kib: u32,
+    iter: u32,
+    par: u32,
+    key_len: u32,
+}
+
+impl Task for Argon2idRawTask {
+    type Output = Vec<u8>;
+    type JsValue = Buffer;
+
+    fn compute(&mut self) -> NapiResult<Self::Output> {
+        argon2id_raw(
+            &self.password,
+            &self.salt,
+            self.mem_kib,
+            self.iter,
+            self.par,
+            self.key_len,
+        )
+        .map_err(to_napi)
+    }
+
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> NapiResult<Self::JsValue> {
+        Ok(Buffer::from(output))
+    }
+}
+
+/// Argon2id 通用派生 —— salt / keyLen 不限，password 走 bytes（与 sync PIN 行为一致）
+#[napi(js_name = "argon2idRaw")]
+pub fn argon2id_raw_napi(
+    password: Buffer,
+    salt: Buffer,
+    mem_kib: u32,
+    iter: u32,
+    par: u32,
+    key_len: u32,
+) -> AsyncTask<Argon2idRawTask> {
+    AsyncTask::new(Argon2idRawTask {
+        password: password.to_vec(),
+        salt: salt.to_vec(),
+        mem_kib,
+        iter,
+        par,
+        key_len,
+    })
+}
+
+/// XChaCha20-Poly1305 加密（外部 nonce）；输出 = ciphertext ‖ 16-byte tag（不含 nonce）
+#[napi(js_name = "sealAeadWithNonce")]
+pub fn seal_aead_with_nonce_napi(
+    key: Buffer,
+    plaintext: Buffer,
+    aad: Buffer,
+    nonce: Buffer,
+) -> NapiResult<Buffer> {
+    seal_aead_with_nonce(&key, &plaintext, &aad, &nonce)
+        .map(Buffer::from)
+        .map_err(to_napi)
+}
+
+/// 解密 [`seal_aead_with_nonce_napi`] 输出；认证失败统一返回 GenericFailure
+#[napi(js_name = "openAeadWithNonce")]
+pub fn open_aead_with_nonce_napi(
+    key: Buffer,
+    ciphertext: Buffer,
+    aad: Buffer,
+    nonce: Buffer,
+) -> NapiResult<Buffer> {
+    open_aead_with_nonce(&key, &ciphertext, &aad, &nonce)
+        .map(Buffer::from)
+        .map_err(to_napi)
 }

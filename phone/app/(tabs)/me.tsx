@@ -25,6 +25,7 @@ import { useVault } from "@/contexts/vault-context";
 import type { VaultItem, VaultItemType } from "@/data/vault";
 import { exportVault, pickAndParseImport } from "@/lib/transfer";
 import type { ItemPayload } from "@/lib/vault-service";
+import { isNativeSyncServerAvailable } from "@/modules/zpass-crypto";
 import { sortSpaces, type Space } from "@/lib/spaces";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { SpaceAvatar } from "@/components/space-avatar";
@@ -93,6 +94,8 @@ function UserCard({
 export default function MeScreen() {
   const { colors: c, mode: themeMode, setMode: setThemeMode, scheme } = useTheme();
   const router = useRouter();
+  // 原生是否支持作为同步服务端（仅 Android 编入 tiny_http 监听）
+  const syncServerAvailable = isNativeSyncServerAvailable();
 
   const {
     lock,
@@ -308,6 +311,14 @@ export default function MeScreen() {
             icon="antenna.radiowaves.left.and.right"
             onPress={() => router.push("/sync" as never)}
           />
+          {syncServerAvailable ? (
+            <ListRow
+              title="作为同步服务端"
+              value="让别人连我"
+              icon="person.2.fill"
+              onPress={() => router.push("/sync-host" as never)}
+            />
+          ) : null}
           <ListRow
             title="立即锁定"
             icon="lock.shield.fill"

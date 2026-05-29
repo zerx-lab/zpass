@@ -12,6 +12,7 @@
 import {
   useMemo,
   useRef,
+  useState,
   type ComponentProps,
   type ReactNode,
 } from "react";
@@ -32,6 +33,7 @@ import * as Haptics from "expo-haptics";
 import {
   Colors,
   Elevation,
+  Fonts,
   Hit,
   Motion,
   Radius,
@@ -803,6 +805,97 @@ export function Badge({
         >
           {label}
         </Text>
+      ) : null}
+    </View>
+  );
+}
+
+/* ---------------------------------------------------------------------------
+ * MaskDots / MaskedValue —— 敏感值遮罩 + 眼睛切换
+ *
+ * 统一密码 / CVV / TOTP 等敏感字段的展示：遮罩时渲染 6 个圆点（不暴露长度），
+ * 点眼睛揭示明文。item 详情与同步冲突 diff 共用。
+ * ------------------------------------------------------------------------ */
+
+const MASK_MONO = Fonts?.mono ?? "monospace";
+
+export function MaskDots({ color }: { color?: string }) {
+  const c = useThemeColors();
+  return (
+    <View style={{ flexDirection: "row", gap: 4, paddingVertical: 3 }}>
+      {Array.from({ length: 6 }).map((_, i) => (
+        <View
+          key={i}
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: 3,
+            backgroundColor: color ?? c.text3,
+          }}
+        />
+      ))}
+    </View>
+  );
+}
+
+export interface MaskedValueProps {
+  value: string;
+  /** 敏感值：默认遮罩，提供眼睛切换 */
+  masked?: boolean;
+  /** 等宽字体（密码 / 序列号 / TOTP） */
+  mono?: boolean;
+  color?: string;
+  /** 占位（值为空时显示） */
+  placeholder?: string;
+  numberOfLines?: number;
+  style?: StyleProp<ViewStyle>;
+}
+
+export function MaskedValue({
+  value,
+  masked,
+  mono,
+  color,
+  placeholder = "—",
+  numberOfLines = 3,
+  style,
+}: MaskedValueProps) {
+  const c = useThemeColors();
+  const [revealed, setRevealed] = useState(false);
+  const showMask = !!masked && !revealed;
+  return (
+    <View
+      style={[
+        { flexDirection: "row", alignItems: "center", gap: Spacing.sm },
+        style,
+      ]}
+    >
+      <View style={{ flex: 1, minWidth: 0 }}>
+        {showMask ? (
+          <MaskDots />
+        ) : (
+          <Text
+            style={{
+              ...Type.body,
+              color: color ?? c.text,
+              fontFamily: mono || masked ? MASK_MONO : undefined,
+            }}
+            numberOfLines={numberOfLines}
+          >
+            {value || placeholder}
+          </Text>
+        )}
+      </View>
+      {masked ? (
+        <IconButton
+          icon={revealed ? "eye.slash.fill" : "eye.fill"}
+          size={28}
+          iconSize={15}
+          variant="ghost"
+          color={c.text3}
+          haptic="selection"
+          onPress={() => setRevealed((v) => !v)}
+        />
       ) : null}
     </View>
   );

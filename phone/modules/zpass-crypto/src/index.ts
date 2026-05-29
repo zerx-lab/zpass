@@ -10,7 +10,21 @@
 //
 // 调用方：phone/lib/crypto.ts 在原生可用时 delegate 到这里，否则走 JS 兜底。
 
-import { requireOptionalNativeModule } from "expo-modules-core";
+import {
+  requireOptionalNativeModule,
+  type EventSubscription,
+} from "expo-modules-core";
+
+/**
+ * 局域网同步服务端的入站请求事件。Rust worker → Kotlin onSyncRequest → 此事件。
+ * body 是 base64 编码的请求体；JS 侧 handleSyncRequest 算完调 respondSyncRequest 回传。
+ */
+export interface SyncRequestEvent {
+  reqId: number;
+  method: string;
+  path: string;
+  body: string; // base64
+}
 
 interface ZpassCryptoNative {
   /** Argon2id 派生 KEK；返回 base64 编码的 32 字节 KEK */
@@ -28,6 +42,19 @@ interface ZpassCryptoNative {
   openAEAD(keyB64: string, sealedB64: string, aadB64: string): Promise<string>;
   /** CSPRNG；返回 base64 编码的 n 字节 */
   randomBytes(n: number): Promise<string>;
+
+  // ---- 局域网同步服务端（仅 Android 编入；其他平台为 undefined）----
+  /** 启动监听，返回 JSON 字符串 {"port":number,"hosts":string[]} */
+  startSyncServer(): Promise<string>;
+  /** 停止监听；幂等 */
+  stopSyncServer(): Promise<void>;
+  /** 回传 JS 计算好的响应（status = HTTP 状态码，bodyB64 = 响应体 base64） */
+  respondSyncRequest(reqId: number, status: number, bodyB64: string): Promise<void>;
+  /** 订阅入站请求事件 */
+  addListener(
+    eventName: "onSyncRequest",
+    listener: (event: SyncRequestEvent) => void,
+  ): EventSubscription;
 }
 
 /**
@@ -74,4 +101,47 @@ export async function nativeOpenAEAD(
 export async function nativeRandomBytes(n: number): Promise<string> {
   if (!native) throw new Error("ZpassCrypto native module not available");
   return native.randomBytes(n);
+}
+
+/* ----------------------------------------------------------------------------
+ * 局域网同步服务端（手机作为 server）—— 仅 Android 原生可用
+ * -------------------------------------------------------------------------- */
+
+/** 原生是否支持作为同步服务端监听（Android 已编入；iOS / web 为 false） */
+export function isNativeSyncServerAvailable(): boolean {
+  return native != null && typeof native.startSyncServer === "function";
+}
+
+/** 启动监听，返回绑定端口与本机 LAN IPv4 列表 */
+export async function nativeStartSyncServer(): Promise<{
+  port: number;
+  hosts: string[];
+}> {
+  if (!native) throw new Error("ZpassCrypto sync server not available");
+  const json = await native.startSyncServer();
+  return JSON.parse(json) as { port: number; hosts: string[] };
+}
+
+/** 停止监听；未启动 / 不支持时为 no-op */
+export async function nativeStopSyncServer(): Promise<void> {
+  if (!native?.stopSyncServer) return;
+  await native.stopSyncServer();
+}
+
+/** 回传 JS 计算好的响应给 Rust worker */
+export async function nativeRespondSyncRequest(
+  reqId: number,
+  status: number,
+  bodyB64: string,
+): Promise<void> {
+  if (!native) throw new Error("ZpassCrypto sync server not available");
+  await native.respondSyncRequest(reqId, status, bodyB64);
+}
+
+/** 订阅入站请求事件；返回的订阅需在停服时 remove() */
+export function addSyncRequestListener(
+  listener: (event: SyncRequestEvent) => void,
+): EventSubscription {
+  if (!native) throw new Error("ZpassCrypto sync server not available");
+  return native.addListener("onSyncRequest", listener);
 }

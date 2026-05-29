@@ -692,6 +692,42 @@ export class VaultService {
     return next;
   }
 
+  /**
+   * 切换收藏 —— 与 phone toggleFavorite 行为一致
+   *
+   * 实现：取条目，合并 fields，favorite = !existing.fields.favorite。
+   * 不接受外部 patch.fields，自己控制以避免调用方覆盖其它字段。
+   */
+  async toggleFavorite(id: string): Promise<void> {
+    this.requireUnlocked();
+    const file = await readVaultFile();
+    const idx = file.items.findIndex((r) => r.id === id);
+    if (idx === -1) throw new VaultError('not-found', '条目不存在');
+    const row = file.items[idx];
+    if (typeof row.deletedAt === 'number' && row.deletedAt > 0) {
+      throw new VaultError('not-found', '条目不存在');
+    }
+    const existing = this.decryptRow(row);
+    const current = (existing.fields.favorite as boolean | undefined) ?? false;
+    const merged: Record<string, Object> = {};
+    Object.keys(existing.fields).forEach((k) => {
+      merged[k] = existing.fields[k];
+    });
+    merged.favorite = !current;
+    const next: ItemPayload = {
+      id: existing.id,
+      type: existing.type,
+      name: existing.name,
+      fields: merged,
+      createdAt: existing.createdAt,
+      updatedAt: this.nowMs(),
+      revision: (existing.revision ?? 0) + 1,
+      deletedAt: null,
+    };
+    file.items[idx] = this.encryptPayload(next);
+    await writeVaultFile(file);
+  }
+
   async deleteItem(id: string): Promise<void> {
     this.requireUnlocked();
     const file = await readVaultFile();
@@ -721,6 +757,51 @@ export class VaultService {
     };
     file.items[idx] = this.encryptPayload(tombstone);
     await writeVaultFile(file);
+  }
+
+  /**
+   * 摄取来自对端 sync 的 plaintext payload —— LWW（last-write-wins）策略
+   *
+   * 与 phone/lib/vault-service.ts ingestForeignPayload 行为一致：
+   *   - 强制对齐 id / createdAt / updatedAt 到对端值（保证跨端 id 一致）
+   *   - 本端不存在则插入；存在但本端较新则跳过；否则覆盖
+   *   - tombstone 走 deleteItem 路径，本函数 payload 视作非删除
+   *
+   * 返回 'inserted' / 'updated' / 'skipped' 用于调用方进度统计。
+   */
+  async ingestForeignPayload(
+    id: string,
+    payload: ItemPayload,
+    createdAt: number,
+    updatedAt: number,
+  ): Promise<'inserted' | 'updated' | 'skipped'> {
+    this.requireUnlocked();
+    if (!id) throw new VaultError('not-found', 'ingest: empty id');
+    const normalized: ItemPayload = {
+      id,
+      type: payload.type,
+      name: payload.name,
+      fields: payload.fields ?? ({} as Record<string, Object>),
+      createdAt,
+      updatedAt,
+      revision: payload.revision ?? 1,
+      deletedAt: null,
+    };
+    const file = await readVaultFile();
+    const idx = file.items.findIndex((r) => r.id === id);
+    if (idx === -1) {
+      const encrypted = this.encryptPayload(normalized);
+      file.items = [encrypted, ...file.items];
+      await writeVaultFile(file);
+      return 'inserted';
+    }
+    if (file.items[idx].updatedAt >= updatedAt) {
+      return 'skipped';
+    }
+    const encrypted = this.encryptPayload(normalized);
+    file.items[idx] = encrypted;
+    await writeVaultFile(file);
+    return 'updated';
   }
 
   async clearAllItems(): Promise<void> {

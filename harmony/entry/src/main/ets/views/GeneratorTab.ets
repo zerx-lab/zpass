@@ -14,7 +14,7 @@ import {
   type GenOptions,
   type StrengthResult,
 } from '../lib/PassGen';
-import { copyText } from '../lib/Password';
+import { copyText } from '../lib/Clipboard';
 import { promptAction } from '@kit.ArkUI';
 
 @ComponentV2

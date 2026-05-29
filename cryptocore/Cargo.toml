@@ -14,7 +14,10 @@ crate-type = ["rlib", "cdylib", "staticlib"]
 
 [features]
 default = []
-android = ["dep:jni"]
+# android JNI 桥 + 手机作为局域网同步服务端的最小 HTTP 监听（tiny_http）
+# 与本机 LAN IPv4 枚举（if-addrs）。tiny_http / if-addrs 只在 android 启用，
+# 桌面 rlib / iOS staticlib 不引入。
+android = ["dep:jni", "dep:tiny_http", "dep:if-addrs"]
 # HarmonyOS NAPI 桥（aarch64/x86_64-unknown-linux-ohos）—— 与 android JNI 并列
 harmony = ["dep:napi-ohos", "dep:napi-derive-ohos"]
 
@@ -52,6 +55,14 @@ sha2 = { version = "0.10", default-features = false }
 subtle = "2.5"
 # 协议十六进制编码（PIN 派生输入 / 会话 ID 展示）
 hex = "0.4"
+# ---- android 同步服务端依赖（仅 feature=android）----
+# 纯 Rust 阻塞式 HTTP/1.1 服务端；手机作为 LAN 同步 server 时监听入站连接，
+# 把 (method, path, body) 经 JNI 反向回调交给 TS 侧处理。明文 HTTP（局域网内
+# 由 PSK + 会话 AEAD 保证机密性，与 desktop server 同构），不需要 TLS。
+tiny_http = { version = "0.12.0", optional = true }
+# 枚举本机网卡的 LAN IPv4，用于构建 zpass-sync://host:port?pin= 连接串 / QR，
+# 替代在 JS 侧引入 expo-network。
+if-addrs = { version = "0.15.0", optional = true }
 
 [dev-dependencies]
 

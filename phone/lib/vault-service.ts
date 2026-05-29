@@ -192,6 +192,17 @@ class VaultService {
     return this.dek !== null;
   }
 
+  /**
+   * 暴露进程内单调时间戳源。
+   *
+   * sync-server 解决冲突时需要把 resolved 记录的 updatedAt "bump" 到比两端
+   * manifest 都新，且必须与本端写入用同一时钟，否则对端 LWW（ingestForeignPayload
+   * 的 updatedAt 比较）可能跳过本应生效的覆盖。复用本单调源即可避免漂移。
+   */
+  nextTimestamp(): number {
+    return this.nowMs();
+  }
+
   /* ------------------------------------------------------------------------ */
   /* Initialize / Unlock / Lock                                               */
   /* ------------------------------------------------------------------------ */

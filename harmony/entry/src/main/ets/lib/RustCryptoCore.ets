@@ -29,6 +29,26 @@ interface CryptocoreNative {
   sealAead: (key: ArrayBuffer, plaintext: ArrayBuffer, aad: ArrayBuffer) => ArrayBuffer;
   openAead: (key: ArrayBuffer, sealed: ArrayBuffer, aad: ArrayBuffer) => ArrayBuffer;
   randomBytes: (n: number) => ArrayBuffer;
+  argon2idRaw: (
+    password: ArrayBuffer,
+    salt: ArrayBuffer,
+    memKib: number,
+    iter: number,
+    par: number,
+    keyLen: number,
+  ) => Promise<ArrayBuffer>;
+  sealAeadWithNonce: (
+    key: ArrayBuffer,
+    plaintext: ArrayBuffer,
+    aad: ArrayBuffer,
+    nonce: ArrayBuffer,
+  ) => ArrayBuffer;
+  openAeadWithNonce: (
+    key: ArrayBuffer,
+    ciphertext: ArrayBuffer,
+    aad: ArrayBuffer,
+    nonce: ArrayBuffer,
+  ) => ArrayBuffer;
 }
 
 const native: CryptocoreNative = cryptocore as CryptocoreNative;
@@ -36,6 +56,9 @@ const nativeDeriveKek = native.deriveKek;
 const nativeSealAead = native.sealAead;
 const nativeOpenAead = native.openAead;
 const nativeRandomBytesRaw = native.randomBytes;
+const nativeArgon2idRaw = native.argon2idRaw;
+const nativeSealAeadWithNonce = native.sealAeadWithNonce;
+const nativeOpenAeadWithNonce = native.openAeadWithNonce;
 
 /* ----------------------------------------------------------------------------
  * 模块可用性探测
@@ -107,5 +130,52 @@ export function openAead(
 
 export function randomBytes(n: number): Uint8Array {
   const out: ArrayBuffer = nativeRandomBytesRaw(n);
+  return fromAB(out);
+}
+
+/* ----------------------------------------------------------------------------
+ * Sync 专用 —— PSK 派生 + 外部 nonce AEAD
+ *
+ * 与 phone/lib/sync-protocol.ts 一一对应。
+ * -------------------------------------------------------------------------- */
+
+/** Argon2id 通用派生（salt 任意长度；password 走 bytes） */
+export async function argon2idRaw(
+  password: Uint8Array,
+  salt: Uint8Array,
+  memKib: number,
+  iter: number,
+  par: number,
+  keyLen: number,
+): Promise<Uint8Array> {
+  const out: ArrayBuffer = await nativeArgon2idRaw(
+    toAB(password), toAB(salt), memKib, iter, par, keyLen,
+  );
+  return fromAB(out);
+}
+
+/** XChaCha20-Poly1305 加密；调用方提供 24 字节 nonce；输出 ct ‖ 16-byte tag（不含 nonce） */
+export function sealAeadWithNonce(
+  key: Uint8Array,
+  plaintext: Uint8Array,
+  aad: Uint8Array,
+  nonce: Uint8Array,
+): Uint8Array {
+  const out: ArrayBuffer = nativeSealAeadWithNonce(
+    toAB(key), toAB(plaintext), toAB(aad), toAB(nonce),
+  );
+  return fromAB(out);
+}
+
+/** 解密 sealAeadWithNonce 输出 */
+export function openAeadWithNonce(
+  key: Uint8Array,
+  ciphertext: Uint8Array,
+  aad: Uint8Array,
+  nonce: Uint8Array,
+): Uint8Array {
+  const out: ArrayBuffer = nativeOpenAeadWithNonce(
+    toAB(key), toAB(ciphertext), toAB(aad), toAB(nonce),
+  );
   return fromAB(out);
 }

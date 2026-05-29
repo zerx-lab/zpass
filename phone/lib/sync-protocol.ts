@@ -6,10 +6,14 @@
 //   - 24-byte nonce = [dir(1)][rand(16)][counter(7-byte BE)]
 //   - JSON body（双方用同一字段顺序的 Go struct / TS interface）
 //
-// phone 端只实现 client 角色（主动连 desktop 当 server）；future PR 可以加
-// phone server。原因：
-//   - phone 端在 RN 中起 HTTP server 需要额外 native 模块
-//   - 用户已确认「冲突 UI 在 PC 端」—— phone 不需要展示冲突列表
+// 本文件实现 client 角色（主动连对端当 server）。phone 作为 server 的逻辑在
+// lib/sync-server.ts，复用本文件导出的 SyncSession / 配对派生 / manifest & record
+// 构建 / AEAD 等原语，保证 client / server 字节级一致。phone server 的监听 socket
+// 由原生 modules/zpass-crypto（Rust tiny_http）提供，仅 Android。
+//
+// 冲突归属（新方案）：report-conflicts + poll-resolutions，server 端拥有冲突 UI。
+// phone 当 client 时仍上报+轮询（决策交给对端 server）；phone 当 server 时由本机
+// 在 sync-server.ts + app/sync-conflicts.tsx 呈现冲突 UI 并回灌 resolutions。
 //
 // 流程：
 //   1. POST /v1/pair { clientNonce } → { sessionId, salt, serverNonce }
@@ -27,45 +31,38 @@ import { sha256 as nobleSha256 } from "@noble/hashes/sha2.js";
 
 import {
   fromB64,
-  openAEAD,
   randomBytes,
-  sealAEAD,
   toB64,
   utf8,
   utf8Decode,
 } from "./crypto";
-import {
-  vaultService,
-  type ItemPayload,
-  type VaultItemType,
-} from "./vault-service";
-import {
-  readVaultFile,
-  type EncryptedItemRow,
-} from "./vault-storage";
+import { vaultService, type ItemPayload } from "./vault-service";
+import { readVaultFile } from "./vault-storage";
 
 /* ----------------------------------------------------------------------------
  * 常量 —— 与 desktop syncservice.go 对齐
  * -------------------------------------------------------------------------- */
 
-const SYNC_PROTO_VERSION = 1;
+export const SYNC_PROTO_VERSION = 1;
 const SYNC_PSK_MEMORY_KIB = 8 * 1024;
 const SYNC_PSK_ITERATIONS = 2;
 const SYNC_PSK_PARALLELISM = 1;
 const SYNC_PSK_KEY_LEN = 32;
-const SYNC_SESSION_ID_LEN = 16;
-const SYNC_PAIR_NONCE_LEN = 16;
+export const SYNC_SESSION_ID_LEN = 16;
+export const SYNC_PAIR_NONCE_LEN = 16;
+/** 配对盐长度（server 生成）—— 与 desktop GenerateRandomBytes(16) 对齐 */
+export const SYNC_PAIR_SALT_LEN = 16;
 
 const SYNC_DIR_SERVER = 0x01;
 const SYNC_DIR_CLIENT = 0x02;
 
-const SYNC_AAD_PAIR = utf8("zpass-sync:pair-confirm");
-const SYNC_AAD_MANIFEST = utf8("zpass-sync:manifest");
-const SYNC_AAD_FETCH = utf8("zpass-sync:fetch");
-const SYNC_AAD_PUSH = utf8("zpass-sync:push");
-const SYNC_AAD_COMMIT = utf8("zpass-sync:commit");
-const SYNC_AAD_REPORT_CONFLICTS = utf8("zpass-sync:report-conflicts");
-const SYNC_AAD_POLL_RESOLUTIONS = utf8("zpass-sync:poll-resolutions");
+export const SYNC_AAD_PAIR = utf8("zpass-sync:pair-confirm");
+export const SYNC_AAD_MANIFEST = utf8("zpass-sync:manifest");
+export const SYNC_AAD_FETCH = utf8("zpass-sync:fetch");
+export const SYNC_AAD_PUSH = utf8("zpass-sync:push");
+export const SYNC_AAD_COMMIT = utf8("zpass-sync:commit");
+export const SYNC_AAD_REPORT_CONFLICTS = utf8("zpass-sync:report-conflicts");
+export const SYNC_AAD_POLL_RESOLUTIONS = utf8("zpass-sync:poll-resolutions");
 
 /** 轮询桌面端冲突解决的间隔（毫秒） */
 const SYNC_POLL_INTERVAL_MS = 2000;
@@ -78,26 +75,26 @@ const SYNC_DEFAULT_BATCH_SIZE = 50;
  * Wire types —— 与 Go SyncPairResponse / SyncManifestEntry / SyncItemRecord 对齐
  * -------------------------------------------------------------------------- */
 
-interface SyncPairRequest {
+export interface SyncPairRequest {
   clientNonce: string; // hex 16B
 }
 
-interface SyncPairResponse {
+export interface SyncPairResponse {
   protoVersion: number;
   sessionId: string; // hex 16B
   salt: string; // hex 16B
   serverNonce: string; // hex 16B
 }
 
-interface SyncPairConfirmRequest {
+export interface SyncPairConfirmRequest {
   confirm: string;
 }
 
-interface SyncPairConfirmResponse {
+export interface SyncPairConfirmResponse {
   confirm: string;
 }
 
-interface SyncManifestEntry {
+export interface SyncManifestEntry {
   id: string;
   updatedAt: number;
   deletedAt?: number;
@@ -105,19 +102,19 @@ interface SyncManifestEntry {
   revision?: number;
 }
 
-interface SyncManifestRequest {
+export interface SyncManifestRequest {
   sessionId: string;
   role?: string;
 }
 
-interface SyncManifestResponse {
+export interface SyncManifestResponse {
   protoVersion: number;
   sessionId: string;
   entries: SyncManifestEntry[];
   generatedAt: number;
 }
 
-interface SyncItemRecord {
+export interface SyncItemRecord {
   id: string;
   createdAt: number;
   updatedAt: number;
@@ -125,31 +122,31 @@ interface SyncItemRecord {
   ciphertext: string; // base64
 }
 
-interface SyncFetchRequest {
+export interface SyncFetchRequest {
   sessionId: string;
   ids: string[];
   offset?: number;
   limit?: number;
 }
 
-interface SyncBatchResponse {
+export interface SyncBatchResponse {
   sessionId: string;
   items: SyncItemRecord[];
   total: number;
   nextOffset?: number;
 }
 
-interface SyncPushRequest {
+export interface SyncPushRequest {
   sessionId: string;
   items: SyncItemRecord[];
 }
 
-interface SyncPushResponse {
+export interface SyncPushResponse {
   sessionId: string;
   accepted: number;
 }
 
-interface SyncReportedConflict {
+export interface SyncReportedConflict {
   id: string;
   kind: string;
   suggestedRemote: boolean;
@@ -159,17 +156,17 @@ interface SyncReportedConflict {
   localPayload?: string;
 }
 
-interface SyncReportConflictsRequest {
+export interface SyncReportConflictsRequest {
   sessionId: string;
   conflicts: SyncReportedConflict[];
 }
 
-interface SyncReportConflictsResponse {
+export interface SyncReportConflictsResponse {
   sessionId: string;
   accepted: number;
 }
 
-interface SyncResolutionAction {
+export interface SyncResolutionAction {
   id: string;
   op: "noop" | "overwrite" | "delete" | "duplicate";
   payload?: string; // base64 JSON plaintext
@@ -178,11 +175,11 @@ interface SyncResolutionAction {
   newId?: string;
 }
 
-interface SyncPollResolutionsRequest {
+export interface SyncPollResolutionsRequest {
   sessionId: string;
 }
 
-interface SyncPollResolutionsResponse {
+export interface SyncPollResolutionsResponse {
   sessionId: string;
   ready: boolean;
   actions?: SyncResolutionAction[];
@@ -192,7 +189,7 @@ interface SyncPollResolutionsResponse {
  * Session
  * -------------------------------------------------------------------------- */
 
-class SyncSession {
+export class SyncSession {
   readonly id: string;
   readonly sessionKey: Uint8Array;
   readonly role: "server" | "client";
@@ -725,7 +722,7 @@ function sleep(ms: number): Promise<void> {
  * Manifest / record helpers
  * -------------------------------------------------------------------------- */
 
-async function buildLocalManifest(): Promise<SyncManifestEntry[]> {
+export async function buildLocalManifest(): Promise<SyncManifestEntry[]> {
   const file = await readVaultFile();
   const out: SyncManifestEntry[] = [];
   for (const row of file.items) {
@@ -763,23 +760,41 @@ async function safeGetLocalPayload(id: string): Promise<ItemPayload | null> {
   }
 }
 
-async function buildRecordFromLocal(id: string): Promise<SyncItemRecord | null> {
+/**
+ * 构建对端可消费的同步记录。
+ *
+ * wire 约定（对齐 desktop fetchRecords）：两端 vault 各有独立 DEK，所以 ciphertext
+ * 字段实际承载的是 **明文 payload 的 base64(JSON)**（外层 session AEAD 已保护机密性），
+ * 由对端用自己的 DEK 重新加密落盘。active 行发明文 JSON；tombstone 发空 ciphertext +
+ * deletedAt。client push 与 server fetch 共用此构建器。
+ *
+ * 历史注意：旧实现误发 `toB64(row.payload)`（本端 DEK 密文），对端无法解析 —— 那是
+ * 一个潜伏的 push bug，已在此修正。
+ */
+export async function buildRecordFromLocal(
+  id: string,
+): Promise<SyncItemRecord | null> {
   const file = await readVaultFile();
   const row = file.items.find((r) => r.id === id);
   if (!row) return null;
+  const tombstone = typeof row.deletedAt === "number" && row.deletedAt > 0;
   const rec: SyncItemRecord = {
     id: row.id,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
-    ciphertext: toB64(row.payload),
+    ciphertext: "",
   };
-  if (typeof row.deletedAt === "number" && row.deletedAt > 0) {
-    rec.deletedAt = row.deletedAt;
+  if (tombstone) {
+    rec.deletedAt = row.deletedAt as number;
+    return rec;
   }
+  const payload = await vaultService.getItem(id);
+  if (!payload) return null;
+  rec.ciphertext = toB64(utf8(JSON.stringify(payload)));
   return rec;
 }
 
-async function applyRemoteRecord(rec: SyncItemRecord): Promise<boolean> {
+export async function applyRemoteRecord(rec: SyncItemRecord): Promise<boolean> {
   // 两端 vault 独立 DEK：wire 上 rec.ciphertext 字段实际是 base64(JSON(plaintext payload))。
   // 解析后用本端 vault 路径重新加密落盘。
   if (rec.deletedAt && rec.deletedAt > 0) {
@@ -1024,7 +1039,7 @@ function decideBoth(
  * Crypto helpers
  * -------------------------------------------------------------------------- */
 
-async function deriveSyncSessionKey(
+export async function deriveSyncSessionKey(
   pin: string,
   salt: Uint8Array,
   sessionId: string,
@@ -1054,7 +1069,10 @@ async function deriveSyncSessionKey(
   });
 }
 
-async function hmacSha256(key: Uint8Array, message: string): Promise<Uint8Array> {
+export async function hmacSha256(
+  key: Uint8Array,
+  message: string,
+): Promise<Uint8Array> {
   return hmac(nobleSha256, key, utf8(message));
 }
 
@@ -1062,20 +1080,20 @@ async function sha256(data: Uint8Array): Promise<Uint8Array> {
   return nobleSha256(data);
 }
 
-function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
+export function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
   let v = 0;
   for (let i = 0; i < a.length; i++) v |= a[i] ^ b[i];
   return v === 0;
 }
 
-function hexEncode(b: Uint8Array): string {
+export function hexEncode(b: Uint8Array): string {
   let s = "";
   for (let i = 0; i < b.length; i++) s += b[i].toString(16).padStart(2, "0");
   return s;
 }
 
-function hexDecode(s: string): Uint8Array {
+export function hexDecode(s: string): Uint8Array {
   if (s.length % 2 !== 0) throw new SyncError("BAD_RESPONSE", "bad hex");
   const out = new Uint8Array(s.length / 2);
   for (let i = 0; i < out.length; i++) {

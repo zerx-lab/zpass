@@ -1,15 +1,7 @@
-// 密码强度评估与剪贴板复制
+// 密码强度评估 —— 与 phone/lib/password.ts 一一对齐。
 //
-// 与 phone/lib/password.ts + lib/clipboard.ts 合并：体积都很小，本端合到一个文件。
-
-import { pasteboard } from '@kit.BasicServicesKit';
-import { vibrator } from '@kit.SensorServiceKit';
-
-/* ----------------------------------------------------------------------------
- * 密码强度评估（详情页用，无需知道生成选项）
- *
- * 与 phone/lib/password.ts estimateStrength 完全一致。
- * -------------------------------------------------------------------------- */
+// 仅做评分用途，不依赖生成器配置。SecurityTab / Onboarding 等位置直接调用。
+// 剪贴板能力拆分在 lib/Clipboard.ets。
 
 export interface Strength {
   /** 0..100 */
@@ -49,55 +41,4 @@ export function crackTime(score: number): string {
   if (score >= 45) return '数天';
   if (score >= 30) return '数小时';
   return '即时';
-}
-
-/* ----------------------------------------------------------------------------
- * 剪贴板 —— @ohos.pasteboard
- *
- * 与 phone/lib/clipboard.ts 行为对齐：
- *  - copyText: 写入后给一次轻触感反馈
- *  - copyEphemeral: timeout 后若剪贴板内容未变则清空（防长期残留）
- * -------------------------------------------------------------------------- */
-
-const pb = pasteboard.getSystemPasteboard();
-
-async function lightHaptic(): Promise<void> {
-  try {
-    await vibrator.startVibration(
-      { type: 'time', duration: 12 },
-      { id: 0, usage: 'touch' },
-    );
-  } catch (_e) {
-    // 模拟器 / 无马达设备：静默忽略
-  }
-}
-
-export async function copyText(value: string): Promise<void> {
-  const data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, value);
-  await pb.setData(data);
-  await lightHaptic();
-}
-
-/**
- * 复制敏感值；timeoutMs 后若剪贴板内容未变则清空
- *
- * 与 desktop writeClipboardEphemeral / phone copyEphemeral 行为对齐。
- */
-export async function copyEphemeral(
-  value: string,
-  timeoutMs: number = 30_000,
-): Promise<void> {
-  await copyText(value);
-  setTimeout(async () => {
-    try {
-      const data = await pb.getData();
-      const current = data.getPrimaryText();
-      if (current === value) {
-        const empty = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, '');
-        await pb.setData(empty);
-      }
-    } catch (_e) {
-      // 系统剪贴板读取失败时静默忽略
-    }
-  }, timeoutMs);
 }

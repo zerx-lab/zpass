@@ -9,7 +9,7 @@ import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType } from '../theme/Tokens
 import { vaultStore } from '../state/VaultStore';
 import type { ItemPayload } from '../lib/VaultService';
 import { typeLabel, relativeTime, faviconColor, faviconInitials } from '../lib/Format';
-import { copyEphemeral, copyText } from '../lib/Password';
+import { copyEphemeral, copyText } from '../lib/Clipboard';
 import { promptAction, router } from '@kit.ArkUI';
 import { safeAreaState, SafeAreaState } from '../state/SafeArea';
 

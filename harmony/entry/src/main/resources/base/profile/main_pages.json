@@ -4,6 +4,7 @@
     "pages/ItemDetail",
     "pages/ItemEdit",
     "pages/TotpScan",
+    "pages/TotpDetail",
     "pages/Sync"
   ]
 }

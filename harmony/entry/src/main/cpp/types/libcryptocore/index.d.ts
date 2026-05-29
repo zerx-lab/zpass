@@ -61,6 +61,43 @@ interface Cryptocore {
    * @param n  字节数；必须 > 0
    */
   randomBytes: (n: number) => ArrayBuffer;
+
+  /**
+   * Argon2id 通用派生 —— sync session key 路径
+   *
+   * 与 deriveKek 的区别：salt 与 keyLen 不限定长度；password 走 bytes。
+   * 与 phone/lib/sync-protocol.ts deriveSyncSessionKey 一一对应。
+   */
+  argon2idRaw: (
+    password: ArrayBuffer,
+    salt: ArrayBuffer,
+    memKib: number,
+    iter: number,
+    par: number,
+    keyLen: number,
+  ) => Promise<ArrayBuffer>;
+
+  /**
+   * XChaCha20-Poly1305 加密（外部 nonce）
+   * 输出 = ciphertext ‖ 16-byte tag（**不含 nonce**）
+   *
+   * sync-protocol 用此 API 把协议规定的 24-byte nonce
+   * [dir(1)][rand(16)][counter(7-byte BE)] 喂进来。
+   */
+  sealAeadWithNonce: (
+    key: ArrayBuffer,
+    plaintext: ArrayBuffer,
+    aad: ArrayBuffer,
+    nonce: ArrayBuffer,
+  ) => ArrayBuffer;
+
+  /** 解密 sealAeadWithNonce 输出 */
+  openAeadWithNonce: (
+    key: ArrayBuffer,
+    ciphertext: ArrayBuffer,
+    aad: ArrayBuffer,
+    nonce: ArrayBuffer,
+  ) => ArrayBuffer;
 }
 
 declare const cryptocore: Cryptocore;

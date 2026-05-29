@@ -9,9 +9,9 @@ import { safeAreaState, SafeAreaState } from '../state/SafeArea';
 import { vaultStore, type VaultStore, type VaultFilterType } from '../state/VaultStore';
 import type { ItemPayload } from '../lib/VaultService';
 import { faviconColor, faviconInitials, relativeTime, typeLabel } from '../lib/Format';
-import { router } from '@kit.ArkUI';
-import { deriveGlyph } from '../lib/Spaces';
+import { promptAction, router } from '@kit.ArkUI';
 import type { Space } from '../lib/Spaces';
+import { SpaceAvatar } from '../components/SpaceAvatar';
 
 interface FilterChip {
   key: VaultFilterType;
@@ -74,6 +74,48 @@ export struct VaultTab {
     }
   }
 
+  /* ---- swipe action：与 phone (tabs)/vault.tsx Swipeable 行为对齐 ---- */
+
+  private async onToggleFavorite(item: ItemPayload): Promise<void> {
+    try {
+      await this.store.toggleFavorite(item.id);
+    } catch (e) {
+      promptAction.showToast({ message: (e as Error).message, duration: 1500 });
+    }
+  }
+
+  private async onEditItem(item: ItemPayload): Promise<void> {
+    try {
+      await router.pushUrl({
+        url: 'pages/ItemEdit',
+        params: { mode: 'edit', id: item.id },
+      });
+    } catch (_e) {
+      // 静默忽略
+    }
+  }
+
+  private async onDeleteItem(item: ItemPayload): Promise<void> {
+    const r = await promptAction.showDialog({
+      title: '删除条目',
+      message: `确认删除「${item.name}」？该操作不可撤销。`,
+      buttons: [
+        { text: '取消', color: this.zc.text2 },
+        { text: '删除', color: this.zc.danger },
+      ],
+    });
+    if (r.index !== 1) return;
+    try {
+      await this.store.deleteItem(item.id);
+    } catch (e) {
+      promptAction.showToast({ message: (e as Error).message, duration: 1500 });
+    }
+  }
+
+  private isFavorite(it: ItemPayload): boolean {
+    return (it.fields.favorite as boolean | undefined) === true;
+  }
+
   build() {
     Column() {
       Row().height(this.safeArea.top).width('100%');
@@ -82,18 +124,14 @@ export struct VaultTab {
       Row({ space: ZSpacing.sm }) {
         // 空间头像 + 名字（点击展开切换）
         Row({ space: ZSpacing.sm }) {
-          Column() {
-            Text(deriveGlyph(this.activeSpaceName()))
-              .fontSize(14)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.zc.text);
-          }
-          .width(28)
-          .height(28)
-          .borderRadius(14)
-          .backgroundColor(this.zc.bgElev)
-          .justifyContent(FlexAlign.Center)
-          .alignItems(HorizontalAlign.Center);
+          SpaceAvatar({
+            avatarName: this.activeSpaceName(),
+            avatarSize: 30,
+            avatarBg: this.zc.bgElev,
+            avatarFg: this.zc.text,
+            avatarFontSize: 14,
+            avatarRadius: ZRadius.md,
+          });
 
           Column({ space: 2 }) {
             Text(this.activeSpaceName())
@@ -197,7 +235,8 @@ export struct VaultTab {
             ListItem() {
               this.itemRow(it);
             }
-            .onClick(() => this.onTapItem(it));
+            .onClick(() => this.onTapItem(it))
+            .swipeAction({ end: this.swipeActions(it) });
           }, (it: ItemPayload) => it.id);
         }
         .layoutWeight(1)
@@ -264,7 +303,7 @@ export struct VaultTab {
       .alignItems(HorizontalAlign.Center);
 
       Column({ space: 2 }) {
-        Row() {
+        Row({ space: ZSpacing.xs }) {
           Text(item.name)
             .fontSize(ZType.bodySize)
             .fontWeight(FontWeight.Medium)
@@ -272,6 +311,11 @@ export struct VaultTab {
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .layoutWeight(1);
+          if (this.isFavorite(item)) {
+            Text('★')
+              .fontSize(ZType.subheadSize)
+              .fontColor(this.zc.warn);
+          }
           Text(relativeTime(item.updatedAt))
             .fontSize(ZType.captionSize)
             .fontColor(this.zc.text3);
@@ -323,6 +367,34 @@ export struct VaultTab {
       default:
         return typeLabel(item.type);
     }
+  }
+
+  /** swipe 右滑动作：收藏 / 编辑 / 删除（与 phone Swipeable 一致） */
+  @Builder
+  swipeActions(item: ItemPayload) {
+    Row({ space: 0 }) {
+      this.swipeButton(
+        this.isFavorite(item) ? '取消收藏' : '收藏',
+        this.zc.warn,
+        () => this.onToggleFavorite(item),
+      );
+      this.swipeButton('编辑', this.zc.info, () => this.onEditItem(item));
+      this.swipeButton('删除', this.zc.danger, () => this.onDeleteItem(item));
+    }
+    .height('100%');
+  }
+
+  @Builder
+  swipeButton(label: string, bg: string, onTap: () => void) {
+    Text(label)
+      .fontSize(ZType.footnoteSize)
+      .fontWeight(FontWeight.Medium)
+      .fontColor('#ffffff')
+      .width(72)
+      .height('100%')
+      .textAlign(TextAlign.Center)
+      .backgroundColor(bg)
+      .onClick(() => onTap());
   }
 
   @Builder

@@ -12,6 +12,7 @@ import { vaultStore, type VaultStore } from '../state/VaultStore';
 import { vaultService } from '../lib/VaultService';
 import { promptAction } from '@kit.ArkUI';
 import { safeAreaState, SafeAreaState } from '../state/SafeArea';
+import { SpaceAvatar } from '../components/SpaceAvatar';
 
 @ComponentV2
 export struct LockOverlay {
@@ -23,6 +24,14 @@ export struct LockOverlay {
   @Local errorText: string = '';
   /** 仅 supported && enabled 时才显示「生物解锁」按钮 —— 未启用时显示按钮没意义 */
   @Local trustedAvailable: boolean = false;
+
+  /** 当前活跃空间名 —— 锁定态尚未读到 plaintext spaces 时返回 undefined，
+   *  SpaceAvatar 将退化到 fallback "Z"。解锁后短暂残留 → 走真名。 */
+  private activeSpaceName(): string | undefined {
+    const id = this.store.activeSpaceId;
+    if (!id) return undefined;
+    return this.store.spaces.find((s) => s.id === id)?.name;
+  }
 
   aboutToAppear(): void {
     // 启动时先探测能力 + 启用态；仅"已启用"时才尝试自动弹生物识别
@@ -94,19 +103,15 @@ export struct LockOverlay {
       Column({ space: ZSpacing.xl }) {
         // logo / 标题
         Column({ space: ZSpacing.xs }) {
-          Column() {
-            Text('Z')
-              .fontSize(28)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.zc.text);
-          }
-          .width(72)
-          .height(72)
-          .borderRadius(ZRadius.xl)
-          .backgroundColor(this.zc.bgElev)
-          .justifyContent(FlexAlign.Center)
-          .alignItems(HorizontalAlign.Center)
-          .margin({ bottom: ZSpacing.md });
+          SpaceAvatar({
+            avatarName: this.activeSpaceName(),
+            avatarSize: 72,
+            avatarBg: this.zc.accent,
+            avatarFg: this.zc.accentInk,
+            avatarFontSize: 32,
+            avatarRadius: ZRadius.xl + 4,
+          })
+            .margin({ bottom: ZSpacing.md });
 
           Text('ZPass')
             .fontSize(ZType.largeTitleSize)

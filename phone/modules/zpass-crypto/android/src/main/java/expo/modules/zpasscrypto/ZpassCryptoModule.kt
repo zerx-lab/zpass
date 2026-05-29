@@ -21,6 +21,43 @@ class ZpassCryptoModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("ZpassCrypto")
 
+    // 局域网同步服务端：Rust worker → onSyncRequest → 此事件 → JS handleSyncRequest
+    Events("onSyncRequest")
+
+    OnCreate {
+      // 注册反向回调 sink：Rust worker 线程会调用，这里仅投递 Expo 事件（轻量）。
+      // body 走 base64，与本模块既有约定一致（RN bridge 对 ByteArray 语义不稳）。
+      RustCryptoCore.syncRequestSink = { reqId, method, path, body ->
+        sendEvent(
+          "onSyncRequest",
+          mapOf(
+            "reqId" to reqId.toDouble(), // JS 无 Long，用 Double（reqId 为小计数器，精度安全）
+            "method" to method,
+            "path" to path,
+            "body" to Base64.encodeToString(body, Base64.NO_WRAP),
+          ),
+        )
+      }
+    }
+
+    OnDestroy {
+      RustCryptoCore.syncRequestSink = null
+    }
+
+    AsyncFunction("startSyncServer") {
+      // 返回 Rust 给的 JSON 字符串 {"port":...,"hosts":[...]}；JS 侧解析
+      RustCryptoCore.startSyncServer()
+    }
+
+    AsyncFunction("stopSyncServer") {
+      RustCryptoCore.stopSyncServer()
+    }
+
+    AsyncFunction("respondSyncRequest") { reqId: Double, status: Int, bodyB64: String ->
+      val body = Base64.decode(bodyB64, Base64.NO_WRAP)
+      RustCryptoCore.respondSyncRequest(reqId.toLong(), status, body)
+    }
+
     AsyncFunction("deriveKEK") {
         password: String,
         saltB64: String,

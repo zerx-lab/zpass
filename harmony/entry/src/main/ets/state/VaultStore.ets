@@ -18,6 +18,7 @@ import {
   type VaultStatus,
 } from '../lib/VaultService';
 import type { Space } from '../lib/Spaces';
+import { clearBreachCache } from '../lib/Breach';
 
 /* ----------------------------------------------------------------------------
  * 过滤选项 —— 与 phone/(tabs)/vault.tsx 顶部筛选条对齐
@@ -189,6 +190,8 @@ export class VaultStore {
     vaultService.lock();
     this.items = [];
     this.status = { initialized: this.status.initialized, unlocked: false, itemCount: 0 };
+    // 清空 HIBP 扫描缓存 —— 与 phone 锁定时清空 breach cache 行为一致
+    clearBreachCache();
   }
 
   async changeMasterPassword(oldPw: string, newPw: string): Promise<void> {
@@ -289,6 +292,11 @@ export class VaultStore {
 
   async deleteItem(id: string): Promise<void> {
     await vaultService.deleteItem(id);
+    await this.refreshItems();
+  }
+
+  async toggleFavorite(id: string): Promise<void> {
+    await vaultService.toggleFavorite(id);
     await this.refreshItems();
   }
 

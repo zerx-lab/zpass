@@ -192,6 +192,124 @@ pub fn open_aead(key: &[u8], sealed: &[u8], aad: &[u8]) -> Result<Vec<u8>> {
         .map_err(|_| Error::AeadAuthentication)
 }
 
+/* ----------------------------------------------------------------------------
+ * Sync 专用原语
+ *
+ * phone/desktop LAN 同步协议（PSK 派生 + 自定义 nonce）需要：
+ *   1. Argon2id 支持任意长度 salt（sync 用 64-byte salt = baseSalt||sid||cn||sn）
+ *   2. XChaCha20-Poly1305 接受外部提供的 24-byte nonce（协议 nonce 含方向 + 计数器）
+ *
+ * 这些 API 与现有 `derive_kek` / `seal_aead` / `open_aead` 并存；vault 路径继续
+ * 走严格校验版本，sync 路径走宽松版本。
+ * -------------------------------------------------------------------------- */
+
+/// Argon2id 通用派生（与 sync-protocol 的 deriveSyncSessionKey 对齐）
+///
+/// 与 [`derive_kek`] 的区别：
+///   - salt 长度不限（≥ 1 字节即可）
+///   - keyLen 不限制为 32
+///   - 仍保留下界校验（mem ≥ 8 MiB / iter ≥ 1 / par ≥ 1）
+///
+/// 不替代 [`derive_kek`]：vault 主密钥派生仍走严格 32-byte salt 版本，
+/// 保证已知向量不分叉。
+pub fn argon2id_raw(
+    password: &[u8],
+    salt: &[u8],
+    mem_kib: u32,
+    iter: u32,
+    par: u32,
+    key_len: u32,
+) -> Result<Vec<u8>> {
+    if salt.is_empty() {
+        return Err(Error::SaltLength { got: 0 });
+    }
+    if mem_kib < MIN_MEMORY_KIB {
+        return Err(Error::MemoryTooLow {
+            got: mem_kib,
+            min: MIN_MEMORY_KIB,
+        });
+    }
+    if iter < MIN_ITERATIONS {
+        return Err(Error::IterationsTooLow { got: iter });
+    }
+    if par < MIN_PARALLELISM {
+        return Err(Error::ParallelismTooLow { got: par });
+    }
+    if key_len == 0 {
+        return Err(Error::WrongKeyLen { got: 0, want: 32 });
+    }
+    if par > 0xff {
+        return Err(Error::ParallelismOverflow { got: par });
+    }
+    let params = Params::new(mem_kib, iter, par, Some(key_len as usize)).map_err(Error::Argon2)?;
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let mut out = vec![0u8; key_len as usize];
+    argon2
+        .hash_password_into(password, salt, &mut out)
+        .map_err(Error::Argon2)?;
+    Ok(out)
+}
+
+/// XChaCha20-Poly1305 加密 —— 调用方提供 nonce
+///
+/// 与 [`seal_aead`] 的区别：nonce 由调用方传入（不嵌入返回值），输出仅为 ct ‖ tag。
+/// sync-protocol 用这个把 [dir][rand][counter] 编排好的 24-byte nonce 喂进来。
+pub fn seal_aead_with_nonce(
+    key: &[u8],
+    plaintext: &[u8],
+    aad: &[u8],
+    nonce: &[u8],
+) -> Result<Vec<u8>> {
+    if key.len() != KEY_SIZE {
+        return Err(Error::KeyLength { got: key.len() });
+    }
+    if nonce.len() != NONCE_SIZE {
+        return Err(Error::SealedTooShort { got: nonce.len() });
+    }
+    let cipher = XChaCha20Poly1305::new(key.into());
+    let xn = XNonce::from_slice(nonce);
+    cipher
+        .encrypt(
+            xn,
+            Payload {
+                msg: plaintext,
+                aad,
+            },
+        )
+        .map_err(|_| Error::AeadAuthentication)
+}
+
+/// 解密 [`seal_aead_with_nonce`] 输出 —— 调用方提供 nonce
+pub fn open_aead_with_nonce(
+    key: &[u8],
+    ciphertext: &[u8],
+    aad: &[u8],
+    nonce: &[u8],
+) -> Result<Vec<u8>> {
+    if key.len() != KEY_SIZE {
+        return Err(Error::KeyLength { got: key.len() });
+    }
+    if nonce.len() != NONCE_SIZE {
+        return Err(Error::SealedTooShort { got: nonce.len() });
+    }
+    if ciphertext.len() < TAG_SIZE {
+        return Err(Error::SealedTooShort {
+            got: ciphertext.len(),
+        });
+    }
+    let cipher = XChaCha20Poly1305::new(key.into());
+    let xn = XNonce::from_slice(nonce);
+    cipher
+        .decrypt(
+            xn,
+            Payload {
+                msg: ciphertext,
+                aad,
+            },
+        )
+        .map_err(|_| Error::AeadAuthentication)
+}
+
 /// 操作系统 CSPRNG；失败直接返错，绝不回退弱随机
 pub fn random_bytes(n: usize) -> Result<Vec<u8>> {
     if n == 0 {
