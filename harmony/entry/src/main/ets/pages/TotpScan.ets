@@ -42,8 +42,8 @@ struct TotpScan {
       this.applyRaw(result.originalValue);
     } catch (e) {
       const err = e as BusinessError;
-      if (err.code === 1000500000) {
-        // 用户取消扫描，不算错误
+      if (err.code === 1000500002) {
+        // 用户取消扫描，不算错误（1000500002 = user canceled，见 @hms.core.scan.scanBarcode.d.ts）
         return;
       }
       this.errorText = `扫描失败：${err.code} ${err.message}`;

@@ -15,3 +15,8 @@ local.properties
 
 # cryptocore .so —— 本地构建产出，不入库
 entry/libs/**/*.so
+
+# OpenHarmony SDK 声明 / 官方源码本地参考镜像 —— 体量大，仅供本地检索与跳转，绝不入库。
+# 内含：本地 SDK API24 声明副本 + gitee docs / arkui_ace_engine / applications_app_samples 浅克隆。
+# 重新拉取见 .sdk-ref/README.md。注意：.claude/skills 下的技能文档需入库，不在此忽略范围内。
+.sdk-ref/
