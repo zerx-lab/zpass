@@ -576,6 +576,10 @@ export const en = {
 	settings_section_window: "Window",
 	settings_section_window_desc:
 		"Control how the app window behaves and integrates with the system tray.",
+	settings_startup: "Startup",
+	settings_launch_at_login: "Launch ZPass at login",
+	settings_launch_at_login_desc:
+		"Automatically start ZPass in the background after you log in, so your passwords are always ready.",
 	settings_close_behavior: "When closing the window",
 	settings_close_behavior_desc:
 		"Tray mode keeps ZPass running so passwords stay one click away. The tray icon is always shown.",

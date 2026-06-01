@@ -16,6 +16,9 @@ import { Section } from "../shared";
  *
  * macOS 提示：Cmd+Q 是系统级语义，不管该偏好是什么都能真退出；该 section 仅
  * 控制窗口 X / Alt+F4 / 标题栏关闭按钮的语义。
+ *
+ * 开机启动（launchAtLogin）：同一流向推送给主进程，由其在 macOS/Windows 注册
+ * 登录项、在 Linux 写/删 XDG autostart 文件。dev（未打包）构建下主进程会 no-op。
  * ─────────────────────────────────────────────────────────── */
 
 const CLOSE_BEHAVIOR_OPTIONS: { value: CloseBehavior; labelKey: string }[] = [
@@ -23,10 +26,52 @@ const CLOSE_BEHAVIOR_OPTIONS: { value: CloseBehavior; labelKey: string }[] = [
 	{ value: "tray", labelKey: "settings_close_behavior_tray" },
 ];
 
+/** 文本 + switch 行（与 SecuritySection 的 TriggerRow 风格一致）。 */
+function ToggleRow({
+	label,
+	checked,
+	onChange,
+}: {
+	label: string;
+	checked: boolean;
+	onChange: (v: boolean) => void;
+}) {
+	return (
+		<div className="flex items-center justify-between border-b border-(--line-soft) px-5 py-3">
+			<span className="text-[13px] text-(--text-2)">{label}</span>
+			<div
+				className={
+					"relative h-5 w-8.5 shrink-0 cursor-pointer rounded-full transition-colors " +
+					(checked ? "bg-(--text)" : "bg-(--line)")
+				}
+				role="switch"
+				aria-checked={checked}
+				tabIndex={0}
+				onClick={() => onChange(!checked)}
+				onKeyDown={(e) => {
+					if (e.key === "Enter" || e.key === " ") {
+						e.preventDefault();
+						onChange(!checked);
+					}
+				}}
+			>
+				<span
+					className={
+						"absolute top-0.5 left-0.5 h-4 w-4 rounded-full transition-transform " +
+						(checked ? "translate-x-3.5 bg-(--bg)" : "bg-(--text)")
+					}
+				/>
+			</div>
+		</div>
+	);
+}
+
 export function WindowSection() {
 	const { t } = useTranslation();
 	const closeBehavior = usePrefsStore((s) => s.closeBehavior);
 	const setCloseBehavior = usePrefsStore((s) => s.setCloseBehavior);
+	const launchAtLogin = usePrefsStore((s) => s.launchAtLogin);
+	const setLaunchAtLogin = usePrefsStore((s) => s.setLaunchAtLogin);
 
 	return (
 		<Section
@@ -34,6 +79,19 @@ export function WindowSection() {
 			title={t("settings_section_window")}
 			description={t("settings_section_window_desc")}
 		>
+			<div className="flex flex-col">
+				<div className="border-b border-(--line-soft) px-5 py-2.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-(--text-3)">
+					{t("settings_startup")}
+				</div>
+				<ToggleRow
+					label={t("settings_launch_at_login")}
+					checked={launchAtLogin}
+					onChange={setLaunchAtLogin}
+				/>
+			</div>
+			<div className="px-5 pt-3 pb-1 text-[11.5px] leading-relaxed text-(--text-4)">
+				{t("settings_launch_at_login_desc")}
+			</div>
 			<div className="flex flex-col">
 				<div className="border-b border-(--line-soft) px-5 py-2.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-(--text-3)">
 					{t("settings_close_behavior")}

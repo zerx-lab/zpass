@@ -73,6 +73,14 @@ export interface DesktopBridgeShape {
 	shell: {
 		showInFolder(path: string): Promise<void>;
 	};
+	app: {
+		/**
+		 * Register / unregister ZPass as a system login item ("开机启动").
+		 * Pushed by ThemeSync on hydrate and whenever `prefs.launchAtLogin`
+		 * changes. No-op in dev (unpackaged) builds.
+		 */
+		setLaunchAtLogin(enabled: boolean): Promise<void>;
+	};
 }
 
 declare global {

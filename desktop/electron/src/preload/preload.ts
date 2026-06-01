@@ -173,6 +173,21 @@ const api = {
         path,
       ) as Promise<void>,
   },
+
+  app: {
+    /**
+     * Register / unregister ZPass as a login item ("开机启动"). Called from
+     * ThemeSync whenever the user-facing preference (`prefs.launchAtLogin`)
+     * changes, and once on hydrate. The main process maps this to
+     * `app.setLoginItemSettings` (macOS/Windows) or an XDG autostart
+     * `.desktop` file (Linux). No-op in dev (unpackaged) builds.
+     */
+    setLaunchAtLogin: (enabled: boolean) =>
+      ipcRenderer.invoke(
+        "desktop:app:set-launch-at-login",
+        enabled,
+      ) as Promise<void>,
+  },
 };
 
 contextBridge.exposeInMainWorld("desktop", api);

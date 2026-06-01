@@ -571,6 +571,10 @@ export const zh: Strings = {
 	// 设置 — 关闭按钮行为（退出 / 收到托盘）
 	settings_section_window: "窗口",
 	settings_section_window_desc: "控制应用窗口的行为以及与系统托盘的集成。",
+	settings_startup: "启动",
+	settings_launch_at_login: "开机启动 ZPass",
+	settings_launch_at_login_desc:
+		"系统登录后自动在后台启动 ZPass，密码随时可用。",
 	settings_close_behavior: "关闭窗口时",
 	settings_close_behavior_desc:
 		"选择“收进托盘”后应用仍在后台运行，密码随时可用。托盘图标一直显示。",

@@ -13,9 +13,11 @@ import { type FSWatcher, watch as fsWatch } from "node:fs";
 import {
   mkdir as fsMkdir,
   readFile as fsReadFile,
+  rm as fsRm,
   stat as fsStat,
   writeFile as fsWriteFile,
 } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { startBackend, type Backend } from "./backend";
 import { installNativeMessagingHosts } from "./nmh-install";
@@ -248,6 +250,93 @@ ipcMain.handle(
     closeBehavior = mode;
   },
 );
+
+// -------- Launch-at-login (开机启动) ---------------------------------------
+//
+// 跨三端落地"系统登录时自动启动 ZPass"。该偏好的真源是渲染层 prefs
+// (`launchAtLogin`)，ThemeSync 在 hydrate 与每次变更时通过下面的 IPC 推送，
+// 主进程把它翻译成各平台的原生登录项。push 是幂等的：重复写同一状态无副作用。
+//
+// 平台差异：
+//   - macOS / Windows：Electron 原生 `app.setLoginItemSettings({openAtLogin})`。
+//   - Linux：Electron 无原生支持，按 XDG autostart 规范手写 / 删除
+//     `$XDG_CONFIG_HOME/autostart/zpass.desktop`（默认 `~/.config/autostart`）。
+//
+// 关键陷阱：
+//   - **dev 守护**：非打包构建下注册登录项会把开发用的 electron 二进制写进
+//     系统登录项，污染开发者机器。`app.isPackaged` 为假时一律 no-op。
+//   - **AppImage 路径**：AppImage 运行时 `process.execPath` 指向临时挂载点
+//     （/tmp/.mount_xxx），退出即失效。autostart 必须写 `$APPIMAGE`
+//     （AppImage 运行时注入的、指向 .AppImage 文件本身的稳定路径），
+//     回退到 `process.execPath`（deb/rpm/pacman 安装的固定路径）。
+
+/** Linux autostart .desktop 文件的绝对路径（尊重 XDG_CONFIG_HOME）。 */
+function linuxAutostartFile(): string {
+  const configHome =
+    process.env.XDG_CONFIG_HOME && process.env.XDG_CONFIG_HOME.trim() !== ""
+      ? process.env.XDG_CONFIG_HOME
+      : join(homedir(), ".config");
+  return join(configHome, "autostart", "zpass.desktop");
+}
+
+/**
+ * 应用"开机启动"偏好到操作系统。enabled=true 注册登录项，false 移除。
+ * 任何失败都吞掉并记录到 stderr —— 登录项写入不该阻断应用主流程。
+ */
+async function applyLaunchAtLogin(enabled: boolean): Promise<void> {
+  // dev 下不碰系统登录项，避免把开发用 electron 二进制注册进去。
+  if (!app.isPackaged) {
+    process.stderr.write(
+      `[autostart] skipped in dev (isPackaged=false), would set openAtLogin=${enabled}\n`,
+    );
+    return;
+  }
+
+  if (process.platform === "linux") {
+    const file = linuxAutostartFile();
+    try {
+      if (enabled) {
+        // AppImage 下 execPath 是临时挂载点；$APPIMAGE 才是稳定的可执行路径。
+        const exec = process.env.APPIMAGE ?? process.execPath;
+        const content = [
+          "[Desktop Entry]",
+          "Type=Application",
+          "Version=1.0",
+          "Name=ZPass",
+          "Comment=ZPass password manager",
+          `Exec="${exec}"`,
+          "Icon=zpass",
+          "Terminal=false",
+          "X-GNOME-Autostart-enabled=true",
+          "",
+        ].join("\n");
+        await fsMkdir(join(file, ".."), { recursive: true });
+        await fsWriteFile(file, content, "utf8");
+      } else {
+        await fsRm(file, { force: true });
+      }
+    } catch (err) {
+      process.stderr.write(
+        `[autostart] linux autostart write failed: ${String(err)}\n`,
+      );
+    }
+    return;
+  }
+
+  // macOS / Windows：Electron 原生 API。
+  try {
+    app.setLoginItemSettings({ openAtLogin: enabled });
+  } catch (err) {
+    process.stderr.write(
+      `[autostart] setLoginItemSettings failed: ${String(err)}\n`,
+    );
+  }
+}
+
+ipcMain.handle("desktop:app:set-launch-at-login", async (_ev, enabled) => {
+  if (typeof enabled !== "boolean") return;
+  await applyLaunchAtLogin(enabled);
+});
 
 // Save-file dialog — replaces the Wails 3 ExportService dialog. The Go side
 // now takes a path argument (or empty for cancel); we pick the path here.

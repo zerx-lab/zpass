@@ -97,6 +97,17 @@ export interface PrefsState {
 	 * `event.preventDefault() + win.hide()` 还是放行让窗口关闭。
 	 */
 	closeBehavior: CloseBehavior;
+	/**
+	 * 开机启动：系统登录时自动拉起 ZPass
+	 *
+	 * 该值由 ThemeSync 在 hydrate 与变化时通过
+	 * `window.desktop.app.setLaunchAtLogin(v)` 推送给 Electron 主进程；主进程
+	 * 据此在 macOS/Windows 注册登录项、在 Linux 写/删 XDG autostart 文件。
+	 *
+	 * 新装默认 `true`（开机启动）。dev（未打包）构建下主进程会 no-op，不会污染
+	 * 开发者的系统登录项。
+	 */
+	launchAtLogin: boolean;
 	/** 自定义正文字体（空串 = 使用内置 Geist） */
 	fontSans: string;
 	/** 自定义等宽字体（空串 = 使用内置 Geist Mono） */
@@ -128,6 +139,7 @@ export interface PrefsState {
 	setLockOnSwitch: (v: boolean) => void;
 	setLockOnClose: (v: boolean) => void;
 	setCloseBehavior: (v: CloseBehavior) => void;
+	setLaunchAtLogin: (v: boolean) => void;
 	setFontSans: (font: string) => void;
 	setFontMono: (font: string) => void;
 }
@@ -199,6 +211,9 @@ export function getPrefsDefaults() {
 		// 想后台常驻的用户可在 Settings 里改为 "tray"。
 		// macOS 的 Cmd+Q 由系统语义保证总能真退出，与此偏好无关。
 		closeBehavior: "quit" as CloseBehavior,
+		// 新装默认开机启动。老用户的迁移走保守策略（见 migrate v7→v8），
+		// 不会因升级被静默写入系统登录项。
+		launchAtLogin: true,
 		fontSans: "",
 		fontMono: "",
 	};
@@ -233,6 +248,7 @@ export const usePrefsStore = create<PrefsState>()(
 			setLockOnSwitch: (lockOnSwitch) => set({ lockOnSwitch }),
 			setLockOnClose: (lockOnClose) => set({ lockOnClose }),
 			setCloseBehavior: (closeBehavior) => set({ closeBehavior }),
+			setLaunchAtLogin: (launchAtLogin) => set({ launchAtLogin }),
 			setFontSans: (fontSans) => set({ fontSans }),
 			setFontMono: (fontMono) => set({ fontMono }),
 		}),
@@ -245,7 +261,7 @@ export const usePrefsStore = create<PrefsState>()(
 			// 等浏览器沙盒存储（产品硬性约束，详见 src/lib/config-storage.ts
 			// 头部注释）
 			storage: createTauriConfigStorage<Partial<PrefsState>>(),
-			version: 7,
+			version: 8,
 			// 仅持久化纯数据字段，action 方法不入库
 			partialize: (state) => ({
 				theme: state.theme,
@@ -259,6 +275,7 @@ export const usePrefsStore = create<PrefsState>()(
 				lockOnSwitch: state.lockOnSwitch,
 				lockOnClose: state.lockOnClose,
 				closeBehavior: state.closeBehavior,
+				launchAtLogin: state.launchAtLogin,
 				fontSans: state.fontSans,
 				fontMono: state.fontMono,
 			}),
@@ -288,6 +305,12 @@ export const usePrefsStore = create<PrefsState>()(
 			 *
 			 * v6 → v7：新增 `closeBehavior`（quit / tray）。老用户保留传统
 			 *   语义：关闭窗口=退出应用，避免升级后行为静默变化让人困惑。
+			 *
+			 * v7 → v8：新增 `launchAtLogin`（开机启动）。新装默认 `true`，但
+			 *   迁移**刻意保守**——老用户置 `false`。理由：注册系统登录项是有
+			 *   外部副作用的行为（写 OS 登录项 / autostart 文件），若升级后默认
+			 *   置 true，老用户下次启动会被静默写入登录项，属于未经同意的行为
+			 *   变更。想开机启动的老用户在 Settings 里打开开关即可。
 			 */
 			migrate: (persisted, version) => {
 				const state = (persisted ?? {}) as Partial<PrefsState> & {
@@ -327,6 +350,11 @@ export const usePrefsStore = create<PrefsState>()(
 				if (version < 7) {
 					// 新增关闭按钮行为偏好。老用户保留"传统"语义：关闭=退出。
 					next = { ...next, closeBehavior: "quit" as CloseBehavior };
+				}
+				if (version < 8) {
+					// 新增开机启动偏好。老用户保守置 false：不因升级被静默写入
+					// 系统登录项（新装才默认 true）。
+					next = { ...next, launchAtLogin: false };
 				}
 
 				return next as PrefsState;

@@ -111,6 +111,7 @@ export function ThemeSync() {
 	const fontSans = usePrefsStore((s) => s.fontSans);
 	const fontMono = usePrefsStore((s) => s.fontMono);
 	const closeBehavior = usePrefsStore((s) => s.closeBehavior);
+	const launchAtLogin = usePrefsStore((s) => s.launchAtLogin);
 
 	// 主题 —— dark / light
 	useEffect(() => {
@@ -215,6 +216,18 @@ export function ThemeSync() {
 			console.warn("[ThemeSync] failed to push closeBehavior", err);
 		});
 	}, [closeBehavior]);
+
+	// 开机启动 —— 推送给 Electron 主进程，由其翻译成各平台登录项
+	//
+	// 与 closeBehavior 同理：hydrate 与每次变动都推一次，保证主进程拿到最新意图。
+	// push 幂等（主进程重复写同一状态无副作用），dev 构建下主进程会 no-op。
+	useEffect(() => {
+		const bridge = window.desktop;
+		if (!bridge?.app?.setLaunchAtLogin) return;
+		bridge.app.setLaunchAtLogin(launchAtLogin).catch((err) => {
+			console.warn("[ThemeSync] failed to push launchAtLogin", err);
+		});
+	}, [launchAtLogin]);
 
 	return null;
 }
