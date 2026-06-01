@@ -32,6 +32,7 @@ struct SyncPage {
   @Local host: string = '';
   @Local port: string = '';
   @Local pin: string = '';
+  @Local pinFocused: boolean = false;
   @Local busy: boolean = false;
   @Local progress: SyncProgress | null = null;
   @Local result: SyncResult | null = null;
@@ -97,17 +98,24 @@ struct SyncPage {
 
       // 顶栏
       Row({ space: ZSpacing.sm }) {
-        Text('返回')
-          .fontSize(ZType.bodySize)
-          .fontColor(this.zc.text2)
-          .onClick(() => router.back());
+        Row() {
+          Image($r('app.media.ic_chevron_left'))
+            .width(20)
+            .height(20)
+            .fillColor(this.zc.text2);
+        }
+        .width(36)
+        .height(36)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .onClick(() => router.back());
         Text('局域网同步')
           .fontSize(ZType.title2Size)
           .fontWeight(FontWeight.Bold)
           .fontColor(this.zc.text)
           .layoutWeight(1)
           .textAlign(TextAlign.Center);
-        Text('').width(40);
+        Row().width(36);
       }
       .width('100%')
       .padding({
@@ -122,10 +130,10 @@ struct SyncPage {
           // Hero
           Column({ space: ZSpacing.sm }) {
             Column() {
-              Text('LAN')
-                .fontSize(13)
-                .fontWeight(FontWeight.Bold)
-                .fontColor(this.zc.info);
+              Image($r('app.media.ic_antenna'))
+                .width(26)
+                .height(26)
+                .fillColor(this.zc.info);
             }
             .width(56)
             .height(56)
@@ -249,18 +257,27 @@ struct SyncPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start);
 
-      Text(this.busy ? '连接中…' : '连接并同步')
-        .fontSize(ZType.bodySize)
-        .fontWeight(FontWeight.Medium)
-        .fontColor(this.zc.accentInk)
-        .backgroundColor(this.busy ? this.zc.text3 : this.zc.accent)
-        .borderRadius(ZRadius.lg)
-        .height(48)
-        .width('100%')
-        .textAlign(TextAlign.Center)
-        .margin({ top: ZSpacing.xs })
-        .enabled(!this.busy)
-        .onClick(() => this.onConnect());
+      Row({ space: ZSpacing.sm }) {
+        if (!this.busy) {
+          Image($r('app.media.ic_antenna'))
+            .width(18)
+            .height(18)
+            .fillColor(this.zc.accentInk);
+        }
+        Text(this.busy ? '连接中…' : '连接并同步')
+          .fontSize(ZType.bodySize)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.zc.accentInk);
+      }
+      .width('100%')
+      .height(48)
+      .justifyContent(FlexAlign.Center)
+      .alignItems(VerticalAlign.Center)
+      .backgroundColor(this.busy ? this.zc.text3 : this.zc.accent)
+      .borderRadius(ZRadius.lg)
+      .margin({ top: ZSpacing.xs })
+      .enabled(!this.busy)
+      .onClick(() => this.onConnect());
     }
     .width('100%')
     .padding(ZSpacing.lg)
@@ -297,6 +314,8 @@ struct SyncPage {
         .height(48)
         .width('100%')
         .enabled(!this.busy)
+        .onFocus(() => { this.pinFocused = true; })
+        .onBlur(() => { this.pinFocused = false; })
         .onChange((v: string) => this.onPinChange(v));
     }
     .width('100%')
@@ -310,7 +329,8 @@ struct SyncPage {
         Text(this.pin.charAt(i))
           .fontSize(22)
           .fontWeight(FontWeight.Bold)
-          .fontColor(this.zc.accentInk);
+          .fontColor(this.zc.accentInk)
+          .fontFamily('HarmonyOS Sans Condensed');
       } else {
         Column()
           .width(6)
@@ -324,16 +344,21 @@ struct SyncPage {
     .borderRadius(ZRadius.lg)
     .backgroundColor(i < this.pin.length ? this.zc.accent : this.zc.bg)
     .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Center);
+    .alignItems(HorizontalAlign.Center)
+    .border({
+      width: (this.pinFocused && i === this.pin.length) ? 2 : 0,
+      color: this.zc.info,
+    });
   }
 
   @Builder
   progressCard() {
     Column({ space: ZSpacing.sm }) {
       Row({ space: ZSpacing.sm }) {
-        Text('•')
-          .fontSize(20)
-          .fontColor(this.zc.info);
+        LoadingProgress()
+          .width(20)
+          .height(20)
+          .color(this.zc.info);
         Text(this.progressLabel(this.progress!.stage))
           .fontSize(ZType.headlineSize)
           .fontWeight(FontWeight.Medium)
@@ -400,10 +425,10 @@ struct SyncPage {
     Column({ space: ZSpacing.sm }) {
       Row({ space: ZSpacing.sm }) {
         Column() {
-          Text('✓')
-            .fontSize(14)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.zc.ok);
+          Image($r('app.media.ic_shield_check'))
+            .width(16)
+            .height(16)
+            .fillColor(this.zc.ok);
         }
         .width(28)
         .height(28)
@@ -435,12 +460,10 @@ struct SyncPage {
 
       if (this.result!.conflicts.length > 0) {
         Row({ space: ZSpacing.xs }) {
-          Text('!')
-            .fontSize(14)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.zc.warn)
-            .width(20)
-            .textAlign(TextAlign.Center);
+          Image($r('app.media.ic_warning'))
+            .width(14)
+            .height(14)
+            .fillColor(this.zc.warn);
           Text(`${this.result!.conflicts.length} 项冲突待在桌面端解决`)
             .fontSize(ZType.footnoteSize)
             .fontWeight(FontWeight.Medium)
@@ -484,10 +507,10 @@ struct SyncPage {
     Column({ space: ZSpacing.sm }) {
       Row({ space: ZSpacing.sm }) {
         Column() {
-          Text('×')
-            .fontSize(14)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.zc.danger);
+          Image($r('app.media.ic_x_circle'))
+            .width(16)
+            .height(16)
+            .fillColor(this.zc.danger);
         }
         .width(28)
         .height(28)

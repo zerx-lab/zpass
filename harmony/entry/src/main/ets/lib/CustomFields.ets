@@ -39,13 +39,21 @@ export function newCustomFieldId(): string {
 /** 反序列化 _customFields */
 export function parseCustomFields(fields: ItemFields | undefined): CustomField[] {
   if (!fields) return [];
-  const raw = fields[CUSTOM_FIELDS_KEY];
-  if (typeof raw !== 'string' || !raw) return [];
+  // 跨端兼容：本端 _customFields 是 JSON 字符串（ItemFields=Record<string,string>），
+  // 而 phone/desktop（fields=map[string]any）写的是原生数组。两种都要能解析，
+  // 否则其它端创建的自定义字段在鸿蒙端不可见。
+  const rawVal: Object | undefined = fields[CUSTOM_FIELDS_KEY] as Object | undefined;
   let parsed: object[] = [];
-  try {
-    const tmp = JSON.parse(raw) as object;
-    if (Array.isArray(tmp)) parsed = tmp as object[];
-  } catch (_e) {
+  if (Array.isArray(rawVal)) {
+    parsed = rawVal as object[];
+  } else if (typeof rawVal === 'string' && rawVal) {
+    try {
+      const tmp = JSON.parse(rawVal) as object;
+      if (Array.isArray(tmp)) parsed = tmp as object[];
+    } catch (_e) {
+      return [];
+    }
+  } else {
     return [];
   }
   const out: CustomField[] = [];

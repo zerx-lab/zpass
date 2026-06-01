@@ -50,23 +50,25 @@ import {
  * 常量 —— 与 desktop syncservice.go / phone sync-protocol.ts 对齐
  * -------------------------------------------------------------------------- */
 
-const SYNC_PROTO_VERSION: number = 1;
+export const SYNC_PROTO_VERSION: number = 1;
 const SYNC_PSK_MEMORY_KIB: number = 8 * 1024;
 const SYNC_PSK_ITERATIONS: number = 2;
 const SYNC_PSK_PARALLELISM: number = 1;
 const SYNC_PSK_KEY_LEN: number = 32;
-const SYNC_SESSION_ID_LEN: number = 16;
-const SYNC_PAIR_NONCE_LEN: number = 16;
+export const SYNC_SESSION_ID_LEN: number = 16;
+export const SYNC_PAIR_NONCE_LEN: number = 16;
+export const SYNC_PAIR_SALT_LEN: number = 16;
 
 const SYNC_DIR_SERVER: number = 0x01;
 const SYNC_DIR_CLIENT: number = 0x02;
 
-const SYNC_AAD_PAIR: Uint8Array = utf8('zpass-sync:pair-confirm');
-const SYNC_AAD_MANIFEST: Uint8Array = utf8('zpass-sync:manifest');
-const SYNC_AAD_FETCH: Uint8Array = utf8('zpass-sync:fetch');
-const SYNC_AAD_PUSH: Uint8Array = utf8('zpass-sync:push');
-const SYNC_AAD_REPORT_CONFLICTS: Uint8Array = utf8('zpass-sync:report-conflicts');
-const SYNC_AAD_POLL_RESOLUTIONS: Uint8Array = utf8('zpass-sync:poll-resolutions');
+export const SYNC_AAD_PAIR: Uint8Array = utf8('zpass-sync:pair-confirm');
+export const SYNC_AAD_MANIFEST: Uint8Array = utf8('zpass-sync:manifest');
+export const SYNC_AAD_FETCH: Uint8Array = utf8('zpass-sync:fetch');
+export const SYNC_AAD_PUSH: Uint8Array = utf8('zpass-sync:push');
+export const SYNC_AAD_REPORT_CONFLICTS: Uint8Array = utf8('zpass-sync:report-conflicts');
+export const SYNC_AAD_POLL_RESOLUTIONS: Uint8Array = utf8('zpass-sync:poll-resolutions');
+export const SYNC_AAD_COMMIT: Uint8Array = utf8('zpass-sync:commit');
 
 /** 轮询桌面端冲突解决的间隔（毫秒） */
 const SYNC_POLL_INTERVAL_MS: number = 2_000;
@@ -118,7 +120,7 @@ interface SyncManifestResponse {
   generatedAt: number;
 }
 
-interface SyncItemRecord {
+export interface SyncItemRecord {
   id: string;
   createdAt: number;
   updatedAt: number;
@@ -215,7 +217,7 @@ export class SyncError extends Error {
  * Session —— 与 phone SyncSession 一致
  * -------------------------------------------------------------------------- */
 
-class SyncSession {
+export class SyncSession {
   readonly id: string;
   readonly sessionKey: Uint8Array;
   /** 'server' 或 'client'；鸿蒙端固定 'client' */
@@ -672,7 +674,7 @@ function sleep(ms: number): Promise<void> {
  * Manifest / record helpers
  * -------------------------------------------------------------------------- */
 
-async function buildLocalManifest(): Promise<SyncManifestEntry[]> {
+export async function buildLocalManifest(): Promise<SyncManifestEntry[]> {
   const file = await readVaultFile();
   const out: SyncManifestEntry[] = [];
   for (const row of file.items) {
@@ -706,7 +708,7 @@ async function safeGetLocalPayload(id: string): Promise<ItemPayload | null> {
   }
 }
 
-async function buildRecordFromLocal(id: string): Promise<SyncItemRecord | null> {
+export async function buildRecordFromLocal(id: string): Promise<SyncItemRecord | null> {
   const file = await readVaultFile();
   const row: EncryptedItemRow | undefined = file.items.find((r) => r.id === id);
   if (!row) return null;
@@ -722,7 +724,7 @@ async function buildRecordFromLocal(id: string): Promise<SyncItemRecord | null> 
   return rec;
 }
 
-async function applyRemoteRecord(rec: SyncItemRecord): Promise<boolean> {
+export async function applyRemoteRecord(rec: SyncItemRecord): Promise<boolean> {
   if (rec.deletedAt && rec.deletedAt > 0) {
     try {
       await vaultService.deleteItem(rec.id);
@@ -945,7 +947,7 @@ function decideBoth(
  * Crypto helpers —— Argon2id 走 cryptocore；SHA-256/HMAC 走系统 cryptoFramework
  * -------------------------------------------------------------------------- */
 
-async function deriveSyncSessionKey(
+export async function deriveSyncSessionKey(
   pin: string,
   salt: Uint8Array,
   sessionId: string,
@@ -978,7 +980,7 @@ async function deriveSyncSessionKey(
  * 然后调 convertKey；总共调用栈太长，反而比手写 HMAC 复杂。
  * HMAC = H(K' ⊕ opad ‖ H(K' ⊕ ipad ‖ msg))；SHA-256 block size = 64。
  */
-async function hmacSha256(key: Uint8Array, message: Uint8Array): Promise<Uint8Array> {
+export async function hmacSha256(key: Uint8Array, message: Uint8Array): Promise<Uint8Array> {
   const blockSize = 64;
   // 1. 规整 key 到 blockSize：超长则先 SHA-256，过短则右填 0
   let k0: Uint8Array;
@@ -1015,20 +1017,20 @@ async function sha256(data: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(out.data);
 }
 
-function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
+export function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
   return diff === 0;
 }
 
-function hexEncode(b: Uint8Array): string {
+export function hexEncode(b: Uint8Array): string {
   let s = '';
   for (let i = 0; i < b.length; i++) s += b[i].toString(16).padStart(2, '0');
   return s;
 }
 
-function hexDecode(s: string): Uint8Array {
+export function hexDecode(s: string): Uint8Array {
   if (s.length % 2 !== 0) throw new SyncError('BAD_RESPONSE', 'bad hex');
   const out = new Uint8Array(s.length / 2);
   for (let i = 0; i < out.length; i++) {

@@ -32,6 +32,11 @@ export interface ReleaseAsset {
 	sizeBytes: number;
 	/** 直接下载 URL */
 	url: string;
+	/**
+	 * 应用商店链接（如 Chrome 应用商店）。设置后该资产渲染为"前往商店安装"按钮，
+	 * 在新标签页打开而非直接下载，且 url 取此值、不参与 GitHub 文件名匹配。
+	 */
+	storeUrl?: string;
 	/** 是否为该平台的"推荐下载"——卡片顶部主按钮使用 */
 	recommended?: boolean;
 	/** 简短一句说明（zh） */
@@ -205,15 +210,26 @@ const PLATFORM_METAS: PlatformMeta[] = [
 		id: "extension",
 		titleZh: "浏览器扩展",
 		titleEn: "Browser extension",
-		subtitleZh: "本地解压安装 · 商店上架前的早期版本",
-		subtitleEn: "Side-load locally · pre-store-listing build",
+		subtitleZh: "Chrome 应用商店一键安装 · 或本地解压加载",
+		subtitleEn: "One-click from the Chrome Web Store · or side-load locally",
 		assets: [
 			{
-				label: "Chrome / Edge / Brave",
+				label: "Chrome 应用商店",
+				arch: "chromium",
+				format: "store",
+				filename: "chrome-web-store",
+				storeUrl:
+					"https://chromewebstore.google.com/detail/zpass/dafhkofilckgmnlclnkciddccogpfcdm",
+				recommended: true,
+				noteZh: "从 Chrome 应用商店安装，随浏览器自动更新（支持 Chrome / Edge / Brave）",
+				noteEn:
+					"Install from the Chrome Web Store, auto-updates with your browser (Chrome / Edge / Brave)",
+			},
+			{
+				label: "Chrome 手动加载 (.zip)",
 				arch: "chromium",
 				format: "zip",
 				filename: "ZPass-extension-chrome.zip",
-				recommended: true,
 				noteZh: "解压后从开发者模式加载",
 				noteEn: "Unpack and load via developer mode",
 			},
@@ -318,6 +334,10 @@ export function buildPlatforms(release: ReleaseData): PlatformGroup[] {
 		subtitleZh: p.subtitleZh,
 		subtitleEn: p.subtitleEn,
 		assets: p.assets.map((meta) => {
+			// 商店链接型资产：url 取 storeUrl，不参与文件名匹配，也没有文件体积。
+			if (meta.storeUrl) {
+				return { ...meta, url: meta.storeUrl, sizeBytes: 0 };
+			}
 			const fromApi = release.assets.get(meta.filename);
 			const fromFallback = fallbackByName.get(meta.filename);
 			const url =

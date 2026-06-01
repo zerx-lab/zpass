@@ -2,9 +2,10 @@
 //
 // 与 phone/(tabs)/me.tsx 行为对齐：
 //   - UserCard：SpaceAvatar + 当前空间名 + 条目数
+//   - 空间：当前空间展示行
 //   - 安全与隐私：改主密码 / 生物解锁 / 同步 / 立即锁定
 //   - 外观：主题（跟随系统 / 深色 / 浅色）
-//   - 数据：导入 / 导出 / 重置
+//   - 数据：导入 / 导出 / 清空 / 重置
 //   - 条目统计：按 type 数量分类
 //
 // 主密码修改：弹出全屏 sheet，三段输入（当前 / 新 / 确认），提交走
@@ -27,19 +28,20 @@ import { sortSpaces, type Space } from '../lib/Spaces';
 interface TypeRow {
   label: string;
   type: VaultItemType;
+  icon: Resource;
 }
 
 /** 与 AppScope/app.json5 的 versionName 保持一致 —— 跨 release 时手动同步 */
 const APP_VERSION: string = '1.0.0';
 
 const TYPE_ROWS: TypeRow[] = [
-  { label: '登录凭据', type: 'login' },
-  { label: '验证码', type: 'totp' },
-  { label: '支付卡', type: 'card' },
-  { label: '安全笔记', type: 'note' },
-  { label: '身份信息', type: 'identity' },
-  { label: 'SSH 密钥', type: 'ssh' },
-  { label: '通行密钥', type: 'passkey' },
+  { label: '登录凭据', type: 'login', icon: $r('app.media.ic_key') },
+  { label: '验证码', type: 'totp', icon: $r('app.media.ic_clock') },
+  { label: '支付卡', type: 'card', icon: $r('app.media.ic_credit_card') },
+  { label: '安全笔记', type: 'note', icon: $r('app.media.ic_note_text') },
+  { label: '身份信息', type: 'identity', icon: $r('app.media.ic_person') },
+  { label: 'SSH 密钥', type: 'ssh', icon: $r('app.media.ic_terminal') },
+  { label: '通行密钥', type: 'passkey', icon: $r('app.media.ic_lock') },
 ];
 
 @ComponentV2
@@ -80,8 +82,8 @@ export struct MeTab {
   @Computed
   get activeSpaceName(): string {
     const id = this.store.activeSpaceId;
-    if (!id) return '本地保险库';
-    return this.store.spaces.find((s) => s.id === id)?.name ?? '本地保险库';
+    if (!id) return '—';
+    return this.store.spaces.find((s) => s.id === id)?.name ?? '—';
   }
 
   @Computed
@@ -293,6 +295,15 @@ export struct MeTab {
       this.showConfirmPw = true;
       return;
     }
+    const r = await promptAction.showDialog({
+      title: '关闭设备解锁',
+      message: '下次启动 ZPass 需要重新输入主密码。',
+      buttons: [
+        { text: '取消', color: this.zc.text2 },
+        { text: '关闭', color: this.zc.danger },
+      ],
+    });
+    if (r.index !== 1) return;
     try {
       await this.store.disableTrustedDevice();
       promptAction.showToast({ message: '已关闭生物解锁', duration: 1200 });
@@ -326,17 +337,43 @@ export struct MeTab {
 
   private async onReset(): Promise<void> {
     const r = await promptAction.showDialog({
-      title: '重置保险库？',
+      title: '重置 ZPass',
       message:
-        '将永久删除所有条目与主密码。该操作不可撤销。如果你启用了同步，请先在其它设备完成同步备份。',
+        '将永久删除主密码与所有条目，应用回到初始状态。此操作不可撤销。',
       buttons: [
         { text: '取消', color: this.zc.text2 },
-        { text: '永久重置', color: this.zc.danger },
+        { text: '重置', color: this.zc.danger },
       ],
     });
     if (r.index === 1) {
       await this.store.reset();
-      promptAction.showToast({ message: 'vault 已重置', duration: 1500 });
+      promptAction.showToast({ message: 'ZPass 已重置', duration: 1500 });
+    }
+  }
+
+  private async onClearAll(): Promise<void> {
+    if (this.store.items.length === 0) {
+      promptAction.showToast({ message: '保险库已为空', duration: 1500 });
+      return;
+    }
+    const r = await promptAction.showDialog({
+      title: '清空保险库',
+      message: `将永久删除全部 ${this.store.items.length} 个条目，主密码与加密元数据保留，此操作不可撤销。建议先导出备份。`,
+      buttons: [
+        { text: '取消', color: this.zc.text2 },
+        { text: '清空', color: this.zc.danger },
+      ],
+    });
+    if (r.index !== 1) return;
+    try {
+      // clearAll 是 sharedNeeds — 当前通过逐条 deleteItem 实现
+      const ids = (this.store.items as ItemPayload[]).map((it) => it.id);
+      for (const id of ids) {
+        await this.store.deleteItem(id);
+      }
+      promptAction.showToast({ message: '已清空所有条目', duration: 1500 });
+    } catch (e) {
+      promptAction.showToast({ message: (e as Error).message, duration: 1800 });
     }
   }
 
@@ -348,7 +385,28 @@ export struct MeTab {
     }
   }
 
+  private async onSyncHost(): Promise<void> {
+    try {
+      await router.pushUrl({ url: 'pages/SyncHost' });
+    } catch (_e) {
+      promptAction.showToast({ message: '同步服务端未启用', duration: 1500 });
+    }
+  }
+
   private async onExport(): Promise<void> {
+    if (this.store.items.length === 0) {
+      promptAction.showToast({ message: '保险库为空，暂无可导出的条目', duration: 1800 });
+      return;
+    }
+    const r = await promptAction.showDialog({
+      title: '导出明文备份',
+      message: `备份文件将包含全部 ${this.store.items.length} 个条目的明文内容（含密码、密钥、TOTP 等）。请妥善保管，切勿上传到不可信的位置。`,
+      buttons: [
+        { text: '取消', color: this.zc.text2 },
+        { text: '继续导出', color: this.zc.danger },
+      ],
+    });
+    if (r.index !== 1) return;
     try {
       const ctx = getContext(this) as common.Context;
       const uri = await exportVaultToFile(ctx);
@@ -359,22 +417,33 @@ export struct MeTab {
   }
 
   private async onImport(): Promise<void> {
-    const r = await promptAction.showDialog({
-      title: '从明文 JSON 导入？',
-      message: '导入文件不走解密，会为每条 item 生成新 id 追加。仅信任自己刚刚导出的文件。',
+    const confirm = await promptAction.showDialog({
+      title: '导入数据',
+      message: '导入将把文件中的条目合并到当前保险库，重复条目可能被覆盖。确认继续？',
       buttons: [
         { text: '取消', color: this.zc.text2 },
-        { text: '选文件', color: this.zc.info },
+        { text: '导入', color: this.zc.danger },
       ],
     });
-    if (r.index !== 1) return;
+    if (confirm.index !== 1) return;
     try {
       const ctx = getContext(this) as common.Context;
       const n = await importVaultFromFile(ctx);
       await this.store.refreshItems();
-      promptAction.showToast({ message: `导入 ${n} 条`, duration: 2000 });
+      const r = await promptAction.showDialog({
+        title: '导入完成',
+        message: `已成功导入 ${n} 个条目到当前保险库。`,
+        buttons: [
+          { text: '确定', color: this.zc.text },
+        ],
+      });
+      if (r.index === 0) {
+        // 确定关闭
+      }
     } catch (e) {
-      promptAction.showToast({ message: (e as Error).message, duration: 1800 });
+      const msg = (e as Error).message;
+      if (msg === '未选择文件') return;
+      promptAction.showToast({ message: msg, duration: 1800 });
     }
   }
 
@@ -385,9 +454,10 @@ export struct MeTab {
 
         Row() {
           Text('我的')
-            .fontSize(ZType.titleSize)
+            .fontSize(ZType.largeTitleSize)
             .fontWeight(FontWeight.Bold)
             .fontColor(this.zc.text)
+            .letterSpacing(-0.6)
             .layoutWeight(1);
         }
         .width('100%')
@@ -403,18 +473,59 @@ export struct MeTab {
             // 用户卡
             this.userCard();
 
+            // 空间
+            this.sectionHeader('空间');
+            Column() {
+              this.rowValue(
+                '当前空间',
+                this.activeSpaceName,
+                $r('app.media.ic_grid'),
+                this.zc.bgElev,
+                this.zc.text,
+                () => this.openSpaces(),
+              );
+            }
+            .width('100%')
+            .backgroundColor(this.zc.bgElev)
+            .borderRadius(ZRadius.xl)
+            .clip(true);
+
             // 安全与隐私
             this.sectionHeader('安全与隐私');
             Column() {
-              this.rowAction('修改主密码', undefined, () => this.onChangePwOpen());
+              this.rowAction(
+                '修改主密码',
+                $r('app.media.ic_lock'),
+                this.zc.bgElev,
+                this.zc.text,
+                () => this.onChangePwOpen(),
+              );
               this.divider();
-              if (this.store.trustedSupported) {
-                this.rowTrustedSwitch();
-                this.divider();
-              }
-              this.rowAction('设备间同步', 'PAKE 握手 + 端到端加密', () => this.onSync());
+              this.rowTrustedSwitch();
               this.divider();
-              this.rowDanger('立即锁定', '清空内存中的 DEK', () => this.onLock());
+              this.rowValue(
+                '局域网同步',
+                '连接桌面端',
+                $r('app.media.ic_antenna'),
+                this.zc.bgElev,
+                this.zc.text,
+                () => this.onSync(),
+              );
+              this.divider();
+              this.rowAction(
+                '让别人连我',
+                $r('app.media.ic_users'),
+                this.zc.bgElev,
+                this.zc.text,
+                () => this.onSyncHost(),
+              );
+              this.divider();
+              this.rowDanger(
+                '立即锁定',
+                $r('app.media.ic_lock_shield'),
+                this.zc.danger,
+                () => this.onLock(),
+              );
             }
             .width('100%')
             .backgroundColor(this.zc.bgElev)
@@ -424,13 +535,25 @@ export struct MeTab {
             // 外观
             this.sectionHeader('外观');
             Column() {
-              this.rowValue('主题', this.themeLabel, () => {
-                this.showThemePicker = true;
-              });
+              this.rowValue(
+                '主题',
+                this.themeLabel,
+                $r('app.media.ic_settings'),
+                this.zc.bgElev,
+                this.zc.text,
+                () => { this.showThemePicker = true; },
+              );
               this.divider();
-              this.rowValue('语言', '中文', () => {
-                // 当前仅 zh，与 phone 一致；占位入口不可点
-              });
+              this.rowValue(
+                '语言',
+                '中文',
+                $r('app.media.ic_globe'),
+                this.zc.bgElev,
+                this.zc.text,
+                () => {
+                  // 当前仅 zh，与 phone 一致；占位入口不可点
+                },
+              );
             }
             .width('100%')
             .backgroundColor(this.zc.bgElev)
@@ -440,11 +563,37 @@ export struct MeTab {
             // 数据
             this.sectionHeader('数据');
             Column() {
-              this.rowAction('导出 Vault（明文 JSON）', '仅迁移 / 备份用', () => this.onExport());
+              this.rowValue(
+                '导入数据',
+                'ZPass JSON',
+                $r('app.media.ic_download'),
+                this.zc.bgElev,
+                this.zc.text,
+                () => this.onImport(),
+              );
               this.divider();
-              this.rowAction('从 JSON 导入', '追加到当前 vault', () => this.onImport());
+              this.rowValue(
+                '导出明文备份',
+                `${this.store.items.length} 项`,
+                $r('app.media.ic_upload'),
+                this.zc.bgElev,
+                this.zc.text,
+                () => this.onExport(),
+              );
               this.divider();
-              this.rowDanger('重置保险库', '永久删除所有条目', () => this.onReset());
+              this.rowDangerWarn(
+                '清空所有条目',
+                $r('app.media.ic_trash'),
+                this.zc.warn,
+                () => this.onClearAll(),
+              );
+              this.divider();
+              this.rowDanger(
+                '重置 ZPass',
+                $r('app.media.ic_trash'),
+                this.zc.danger,
+                () => this.onReset(),
+              );
             }
             .width('100%')
             .backgroundColor(this.zc.bgElev)
@@ -455,7 +604,7 @@ export struct MeTab {
             this.sectionHeader('条目统计');
             Column() {
               ForEach(TYPE_ROWS, (row: TypeRow, idx: number) => {
-                this.rowCount(row.label, this.typeCounts.get(row.type) ?? 0);
+                this.rowCount(row.label, row.icon, this.typeCounts.get(row.type) ?? 0);
                 if (idx < TYPE_ROWS.length - 1) this.divider();
               }, (row: TypeRow) => row.type);
             }
@@ -467,9 +616,16 @@ export struct MeTab {
             // 关于（版本与许可）
             this.sectionHeader('关于');
             Column() {
-              this.rowValue('版本', APP_VERSION, () => {
-                // 占位入口，phone 端也不可点
-              });
+              this.rowValue(
+                '版本',
+                APP_VERSION,
+                $r('app.media.ic_info'),
+                this.zc.bgElev,
+                this.zc.text,
+                () => {
+                  // 占位入口，phone 端也不可点
+                },
+              );
             }
             .width('100%')
             .backgroundColor(this.zc.bgElev)
@@ -548,9 +704,10 @@ export struct MeTab {
       }
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1);
-      Text('›')
-        .fontSize(20)
-        .fontColor(this.zc.text3);
+      Image($r('app.media.ic_chevron_right'))
+        .width(16)
+        .height(16)
+        .fillColor(this.zc.text4);
     }
     .width('100%')
     .padding(ZSpacing.lg)
@@ -568,18 +725,41 @@ export struct MeTab {
       .padding({ left: ZSpacing.sm, top: ZSpacing.sm, bottom: 6 });
   }
 
+  /**
+   * rowAction: 左图标（可选 tint 背景）+ 标签 + 右箭头
+   * iconBg: icon 容器背景色（用于普通行传 zc.bgElev，危险行传 danger+'1f' 等）
+   * iconColor: icon 填色
+   */
   @Builder
-  rowAction(label: string, sub: string | undefined, onTap: () => void) {
-    Row() {
-      Column({ space: 2 }) {
-        Text(label).fontSize(ZType.bodySize).fontColor(this.zc.text);
-        if (sub) {
-          Text(sub).fontSize(ZType.footnoteSize).fontColor(this.zc.text3);
-        }
+  rowAction(
+    label: string,
+    icon: Resource,
+    iconBg: string,
+    iconColor: string,
+    onTap: () => void,
+  ) {
+    Row({ space: ZSpacing.md }) {
+      Row() {
+        Image(icon)
+          .width(18)
+          .height(18)
+          .fillColor(iconColor);
       }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1);
-      Text('›').fontSize(20).fontColor(this.zc.text3);
+      .width(32)
+      .height(32)
+      .borderRadius(ZRadius.md)
+      .backgroundColor(iconBg)
+      .justifyContent(FlexAlign.Center)
+      .alignItems(VerticalAlign.Center);
+
+      Text(label)
+        .fontSize(ZType.bodySize)
+        .fontColor(this.zc.text)
+        .layoutWeight(1);
+      Image($r('app.media.ic_chevron_right'))
+        .width(16)
+        .height(16)
+        .fillColor(this.zc.text4);
     }
     .width('100%')
     .padding({
@@ -591,9 +771,32 @@ export struct MeTab {
     .onClick(() => onTap());
   }
 
+  /**
+   * rowValue: 左图标 + 标签 + 右值文字 + 右箭头
+   */
   @Builder
-  rowValue(label: string, value: string, onTap: () => void) {
-    Row() {
+  rowValue(
+    label: string,
+    value: string,
+    icon: Resource,
+    iconBg: string,
+    iconColor: string,
+    onTap: () => void,
+  ) {
+    Row({ space: ZSpacing.md }) {
+      Row() {
+        Image(icon)
+          .width(18)
+          .height(18)
+          .fillColor(iconColor);
+      }
+      .width(32)
+      .height(32)
+      .borderRadius(ZRadius.md)
+      .backgroundColor(iconBg)
+      .justifyContent(FlexAlign.Center)
+      .alignItems(VerticalAlign.Center);
+
       Text(label)
         .fontSize(ZType.bodySize)
         .fontColor(this.zc.text)
@@ -602,7 +805,10 @@ export struct MeTab {
         .fontSize(ZType.subheadSize)
         .fontColor(this.zc.text3)
         .margin({ right: ZSpacing.xs });
-      Text('›').fontSize(20).fontColor(this.zc.text3);
+      Image($r('app.media.ic_chevron_right'))
+        .width(16)
+        .height(16)
+        .fillColor(this.zc.text4);
     }
     .width('100%')
     .padding({
@@ -615,10 +821,28 @@ export struct MeTab {
   }
 
   @Builder
-  rowCount(label: string, count: number) {
-    Row() {
-      Text(label).fontSize(ZType.bodySize).fontColor(this.zc.text).layoutWeight(1);
-      Text(`${count} 项`).fontSize(ZType.subheadSize).fontColor(this.zc.text3);
+  rowCount(label: string, icon: Resource, count: number) {
+    Row({ space: ZSpacing.md }) {
+      Row() {
+        Image(icon)
+          .width(18)
+          .height(18)
+          .fillColor(this.zc.text2);
+      }
+      .width(32)
+      .height(32)
+      .borderRadius(ZRadius.md)
+      .backgroundColor(this.zc.bgElev)
+      .justifyContent(FlexAlign.Center)
+      .alignItems(VerticalAlign.Center);
+
+      Text(label)
+        .fontSize(ZType.bodySize)
+        .fontColor(this.zc.text)
+        .layoutWeight(1);
+      Text(`${count} 项`)
+        .fontSize(ZType.subheadSize)
+        .fontColor(this.zc.text3);
     }
     .width('100%')
     .padding({
@@ -629,15 +853,73 @@ export struct MeTab {
     });
   }
 
+  /**
+   * rowDanger: 标签用 danger 色，图标有 danger 色 tint 背景
+   */
   @Builder
-  rowDanger(label: string, sub: string, onTap: () => void) {
-    Row() {
-      Column({ space: 2 }) {
-        Text(label).fontSize(ZType.bodySize).fontColor(this.zc.danger);
-        Text(sub).fontSize(ZType.footnoteSize).fontColor(this.zc.text3);
+  rowDanger(
+    label: string,
+    icon: Resource,
+    iconColor: string,
+    onTap: () => void,
+  ) {
+    Row({ space: ZSpacing.md }) {
+      Row() {
+        Image(icon)
+          .width(18)
+          .height(18)
+          .fillColor(iconColor);
       }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1);
+      .width(32)
+      .height(32)
+      .borderRadius(ZRadius.md)
+      .backgroundColor(`${iconColor}1f`)
+      .justifyContent(FlexAlign.Center)
+      .alignItems(VerticalAlign.Center);
+
+      Text(label)
+        .fontSize(ZType.bodySize)
+        .fontColor(this.zc.danger)
+        .layoutWeight(1);
+    }
+    .width('100%')
+    .padding({
+      left: ZSpacing.lg,
+      right: ZSpacing.lg,
+      top: ZSpacing.md,
+      bottom: ZSpacing.md,
+    })
+    .onClick(() => onTap());
+  }
+
+  /**
+   * rowDangerWarn: warn 色图标背景，danger 色标签（清空条目专用）
+   */
+  @Builder
+  rowDangerWarn(
+    label: string,
+    icon: Resource,
+    iconColor: string,
+    onTap: () => void,
+  ) {
+    Row({ space: ZSpacing.md }) {
+      Row() {
+        Image(icon)
+          .width(18)
+          .height(18)
+          .fillColor(iconColor);
+      }
+      .width(32)
+      .height(32)
+      .borderRadius(ZRadius.md)
+      .backgroundColor(`${iconColor}1f`)
+      .justifyContent(FlexAlign.Center)
+      .alignItems(VerticalAlign.Center);
+
+      Text(label)
+        .fontSize(ZType.bodySize)
+        .fontColor(this.zc.danger)
+        .layoutWeight(1);
     }
     .width('100%')
     .padding({
@@ -651,13 +933,29 @@ export struct MeTab {
 
   @Builder
   rowTrustedSwitch() {
-    Row() {
-      Column({ space: 2 }) {
-        Text('生物解锁').fontSize(ZType.bodySize).fontColor(this.zc.text);
-        Text(this.trustedValueLabel).fontSize(ZType.footnoteSize).fontColor(this.zc.text3);
+    Row({ space: ZSpacing.md }) {
+      Row() {
+        Image($r('app.media.ic_face'))
+          .width(18)
+          .height(18)
+          .fillColor(this.zc.text);
       }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1);
+      .width(32)
+      .height(32)
+      .borderRadius(ZRadius.md)
+      .backgroundColor(this.zc.bgElev)
+      .justifyContent(FlexAlign.Center)
+      .alignItems(VerticalAlign.Center);
+
+      Text('此设备自动解锁')
+        .fontSize(ZType.bodySize)
+        .fontColor(this.store.trustedSupported ? this.zc.text : this.zc.text3)
+        .layoutWeight(1);
+
+      Text(this.trustedValueLabel)
+        .fontSize(ZType.subheadSize)
+        .fontColor(this.zc.text3)
+        .margin({ right: ZSpacing.xs });
 
       Stack({ alignContent: Alignment.Start }) {
         Row()
@@ -674,11 +972,7 @@ export struct MeTab {
       }
       .width(50)
       .height(30)
-      .opacity(this.store.busy ? 0.5 : 1)
-      .onClick(() => {
-        if (this.store.busy) return;
-        this.onToggleTrustedDevice(!this.store.trustedEnabled);
-      });
+      .opacity((!this.store.trustedSupported || this.store.busy) ? 0.4 : 1);
     }
     .width('100%')
     .padding({
@@ -686,6 +980,15 @@ export struct MeTab {
       right: ZSpacing.lg,
       top: ZSpacing.md,
       bottom: ZSpacing.md,
+    })
+    .opacity(this.store.trustedSupported ? 1.0 : 0.4)
+    .onClick(() => {
+      if (!this.store.trustedSupported) {
+        promptAction.showToast({ message: '当前设备不支持生物解锁', duration: 1800 });
+        return;
+      }
+      if (this.store.busy) return;
+      this.onToggleTrustedDevice(!this.store.trustedEnabled);
     });
   }
 
@@ -694,16 +997,35 @@ export struct MeTab {
     Divider().strokeWidth(0.5).color(this.zc.line).margin({ left: ZSpacing.lg, right: ZSpacing.lg });
   }
 
+  /** 错误框：danger+1f 背景 + error icon + 文本 */
+  @Builder
+  errorBox(errorText: string) {
+    Row({ space: ZSpacing.xs }) {
+      Image($r('app.media.ic_error'))
+        .width(14)
+        .height(14)
+        .fillColor(this.zc.danger);
+      Text(errorText)
+        .fontSize(ZType.footnoteSize)
+        .fontColor(this.zc.danger)
+        .layoutWeight(1);
+    }
+    .width('100%')
+    .padding({ left: ZSpacing.md, right: ZSpacing.md, top: ZSpacing.sm, bottom: ZSpacing.sm })
+    .backgroundColor(`${this.zc.danger}1f`)
+    .borderRadius(ZRadius.md);
+  }
+
   /** 启用信任设备时的主密码确认浮层 */
   @Builder
   confirmPwOverlay() {
     Column() {
       Column({ space: ZSpacing.md }) {
-        Text('确认主密码')
+        Text('启用设备解锁')
           .fontSize(ZType.title2Size)
           .fontWeight(FontWeight.Bold)
           .fontColor(this.zc.text);
-        Text('启用生物解锁需要再次校验主密码')
+        Text('启用后此设备可用生物识别 / 设备凭据解锁。请输入主密码以确认。')
           .fontSize(ZType.footnoteSize)
           .fontColor(this.zc.text3);
 
@@ -726,11 +1048,7 @@ export struct MeTab {
           .onSubmit(() => this.onConfirmEnable());
 
         if (this.confirmPwError) {
-          Text(this.confirmPwError)
-            .fontSize(ZType.footnoteSize)
-            .fontColor(this.zc.danger)
-            .width('100%')
-            .textAlign(TextAlign.Start);
+          this.errorBox(this.confirmPwError);
         }
 
         Row({ space: ZSpacing.md }) {
@@ -744,7 +1062,7 @@ export struct MeTab {
             .textAlign(TextAlign.Center)
             .enabled(!this.store.busy)
             .onClick(() => this.onCancelEnable());
-          Text(this.store.busy ? '校验中…' : '启用')
+          Text(this.store.busy ? '启用中…' : '启用')
             .fontSize(ZType.bodySize)
             .fontWeight(FontWeight.Medium)
             .fontColor(this.zc.accentInk)
@@ -768,9 +1086,10 @@ export struct MeTab {
     .padding({ left: ZSpacing.xl, right: ZSpacing.xl, bottom: this.safeArea.keyboard })
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
-    .backgroundColor('rgba(0,0,0,0.5)')
+    .backgroundColor(this.zc.overlay)
     .onClick(() => {
-      // 点击遮罩区不关闭 —— 显式按取消才退出
+      // 点遮罩也可关闭（与 phone SheetModal backdrop 行为对齐）
+      if (!this.store.busy) this.onCancelEnable();
     });
   }
 
@@ -787,63 +1106,88 @@ export struct MeTab {
           .fontSize(ZType.footnoteSize)
           .fontColor(this.zc.text3);
 
-        TextInput({ placeholder: '当前主密码', text: this.cpOld })
-          .type(InputType.Password)
-          .placeholderColor(this.zc.text3)
-          .placeholderFont({ size: ZType.bodySize })
-          .fontColor(this.zc.text)
-          .fontSize(ZType.bodySize)
-          .backgroundColor(this.zc.bg)
-          .borderRadius(ZRadius.lg)
-          .padding({ left: ZSpacing.md, right: ZSpacing.md })
-          .height(44)
-          .width('100%')
-          .enabled(!this.store.busy)
-          .onChange((v: string) => {
-            this.cpOld = v;
-            this.cpError = '';
-          });
+        Column({ space: 4 }) {
+          Text('当前主密码')
+            .fontSize(ZType.footnoteSize)
+            .fontColor(this.zc.text3)
+            .width('100%');
+          TextInput({ placeholder: '当前主密码', text: this.cpOld })
+            .type(InputType.Password)
+            .placeholderColor(this.zc.text3)
+            .placeholderFont({ size: ZType.bodySize })
+            .fontColor(this.zc.text)
+            .fontSize(ZType.bodySize)
+            .backgroundColor(this.zc.bg)
+            .borderRadius(ZRadius.lg)
+            .padding({ left: ZSpacing.md, right: ZSpacing.md })
+            .height(44)
+            .width('100%')
+            .enabled(!this.store.busy)
+            .onChange((v: string) => {
+              this.cpOld = v;
+              this.cpError = '';
+            });
+        }
+        .alignItems(HorizontalAlign.Start)
+        .width('100%');
 
-        TextInput({ placeholder: '新主密码（≥ 8 位）', text: this.cpNew })
-          .type(InputType.Password)
-          .placeholderColor(this.zc.text3)
-          .placeholderFont({ size: ZType.bodySize })
-          .fontColor(this.zc.text)
-          .fontSize(ZType.bodySize)
-          .backgroundColor(this.zc.bg)
-          .borderRadius(ZRadius.lg)
-          .padding({ left: ZSpacing.md, right: ZSpacing.md })
-          .height(44)
-          .width('100%')
-          .enabled(!this.store.busy)
-          .onChange((v: string) => {
-            this.cpNew = v;
-            this.cpError = '';
-          });
+        Column({ space: 4 }) {
+          Text('新主密码')
+            .fontSize(ZType.footnoteSize)
+            .fontColor(this.zc.text3)
+            .width('100%');
+          TextInput({ placeholder: '新主密码（≥ 8 位）', text: this.cpNew })
+            .type(InputType.Password)
+            .placeholderColor(this.zc.text3)
+            .placeholderFont({ size: ZType.bodySize })
+            .fontColor(this.zc.text)
+            .fontSize(ZType.bodySize)
+            .backgroundColor(this.zc.bg)
+            .borderRadius(ZRadius.lg)
+            .padding({ left: ZSpacing.md, right: ZSpacing.md })
+            .height(44)
+            .width('100%')
+            .enabled(!this.store.busy)
+            .onChange((v: string) => {
+              this.cpNew = v;
+              this.cpError = '';
+            });
+          Text('至少 8 位，建议混合大小写 + 数字 + 符号')
+            .fontSize(ZType.footnoteSize)
+            .fontColor(this.zc.text3)
+            .width('100%');
+        }
+        .alignItems(HorizontalAlign.Start)
+        .width('100%');
 
-        TextInput({ placeholder: '再次输入新主密码', text: this.cpConfirm })
-          .type(InputType.Password)
-          .placeholderColor(this.zc.text3)
-          .placeholderFont({ size: ZType.bodySize })
-          .fontColor(this.zc.text)
-          .fontSize(ZType.bodySize)
-          .backgroundColor(this.zc.bg)
-          .borderRadius(ZRadius.lg)
-          .padding({ left: ZSpacing.md, right: ZSpacing.md })
-          .height(44)
-          .width('100%')
-          .enabled(!this.store.busy)
-          .onChange((v: string) => {
-            this.cpConfirm = v;
-            this.cpError = '';
-          })
-          .onSubmit(() => this.onChangePwSubmit());
+        Column({ space: 4 }) {
+          Text('确认新主密码')
+            .fontSize(ZType.footnoteSize)
+            .fontColor(this.zc.text3)
+            .width('100%');
+          TextInput({ placeholder: '再次输入新主密码', text: this.cpConfirm })
+            .type(InputType.Password)
+            .placeholderColor(this.zc.text3)
+            .placeholderFont({ size: ZType.bodySize })
+            .fontColor(this.zc.text)
+            .fontSize(ZType.bodySize)
+            .backgroundColor(this.zc.bg)
+            .borderRadius(ZRadius.lg)
+            .padding({ left: ZSpacing.md, right: ZSpacing.md })
+            .height(44)
+            .width('100%')
+            .enabled(!this.store.busy)
+            .onChange((v: string) => {
+              this.cpConfirm = v;
+              this.cpError = '';
+            })
+            .onSubmit(() => this.onChangePwSubmit());
+        }
+        .alignItems(HorizontalAlign.Start)
+        .width('100%');
 
         if (this.cpError) {
-          Text(this.cpError)
-            .fontSize(ZType.footnoteSize)
-            .fontColor(this.zc.danger)
-            .width('100%');
+          this.errorBox(this.cpError);
         }
 
         Row({ space: ZSpacing.md }) {
@@ -857,7 +1201,7 @@ export struct MeTab {
             .textAlign(TextAlign.Center)
             .enabled(!this.store.busy)
             .onClick(() => this.onChangePwCancel());
-          Text(this.store.busy ? '更新中…' : '更新')
+          Text(this.store.busy ? '更新中…' : '确认修改')
             .fontSize(ZType.bodySize)
             .fontWeight(FontWeight.Medium)
             .fontColor(this.zc.accentInk)
@@ -881,9 +1225,9 @@ export struct MeTab {
     .padding({ left: ZSpacing.xl, right: ZSpacing.xl, bottom: this.safeArea.keyboard })
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
-    .backgroundColor('rgba(0,0,0,0.5)')
+    .backgroundColor(this.zc.overlay)
     .onClick(() => {
-      // 遮罩点击不关闭
+      // 遮罩点击不关闭 —— 表单较重，要求显式按取消
     });
   }
 
@@ -925,7 +1269,7 @@ export struct MeTab {
     .padding({ left: ZSpacing.xl, right: ZSpacing.xl })
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
-    .backgroundColor('rgba(0,0,0,0.5)')
+    .backgroundColor(this.zc.overlay)
     .onClick(() => {
       this.showThemePicker = false;
     });
@@ -942,31 +1286,44 @@ export struct MeTab {
             .fontWeight(FontWeight.Bold)
             .fontColor(this.zc.text)
             .layoutWeight(1);
-          Text('+')
-            .fontSize(22)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.zc.text)
-            .width(36)
-            .height(36)
-            .textAlign(TextAlign.Center)
-            .borderRadius(ZRadius.md)
-            .backgroundColor(this.zc.bgElev)
-            .onClick(() => this.openCreateSpace());
+          // 新建空间按钮：使用 ic_plus 图标替代 unicode '+'
+          Row() {
+            Image($r('app.media.ic_plus'))
+              .width(16)
+              .height(16)
+              .fillColor(this.zc.text);
+          }
+          .width(36)
+          .height(36)
+          .borderRadius(ZRadius.md)
+          .backgroundColor(this.zc.bgActive)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .onClick(() => this.openCreateSpace());
         }
         .width('100%')
         .padding({ bottom: ZSpacing.xs });
 
         Scroll() {
           Column() {
-            ForEach(sortSpaces(this.store.spaces), (sp: Space, idx: number) => {
-              this.spaceRow(sp);
-              if (idx < this.store.spaces.length - 1) {
-                Divider()
-                  .strokeWidth(0.5)
-                  .color(this.zc.lineSoft)
-                  .margin({ left: ZSpacing.lg + 32 + ZSpacing.md });
-              }
-            }, (sp: Space) => sp.id);
+            if (sortSpaces(this.store.spaces).length === 0) {
+              Text('没有空间')
+                .fontSize(ZType.subheadSize)
+                .fontColor(this.zc.text3)
+                .width('100%')
+                .textAlign(TextAlign.Center)
+                .padding({ top: ZSpacing.lg, bottom: ZSpacing.lg });
+            } else {
+              ForEach(sortSpaces(this.store.spaces), (sp: Space, idx: number) => {
+                this.spaceRow(sp);
+                if (idx < this.store.spaces.length - 1) {
+                  Divider()
+                    .strokeWidth(0.5)
+                    .color(this.zc.lineSoft)
+                    .margin({ left: ZSpacing.lg + 32 + ZSpacing.md });
+                }
+              }, (sp: Space) => sp.id);
+            }
           }
           .width('100%')
           .backgroundColor(this.zc.bgElev)
@@ -1030,7 +1387,8 @@ export struct MeTab {
           .textOverflow({ overflow: TextOverflow.Ellipsis });
         Text(`#${sp.order}`)
           .fontSize(ZType.captionSize)
-          .fontColor(this.zc.text3);
+          .fontColor(this.zc.text3)
+          .fontFamily('HarmonyOS Sans Condensed');
       }
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1);
@@ -1043,7 +1401,10 @@ export struct MeTab {
           .backgroundColor(`${this.zc.info}1f`)
           .borderRadius(ZRadius.sm);
       } else {
-        Text('›').fontSize(16).fontColor(this.zc.text4);
+        Image($r('app.media.ic_chevron_right'))
+          .width(14)
+          .height(14)
+          .fillColor(this.zc.text4);
       }
     }
     .width('100%')
@@ -1087,10 +1448,7 @@ export struct MeTab {
           .onSubmit(() => this.submitSpacePrompt());
 
         if (this.spacePromptError) {
-          Text(this.spacePromptError)
-            .fontSize(ZType.footnoteSize)
-            .fontColor(this.zc.danger)
-            .width('100%');
+          this.errorBox(this.spacePromptError);
         }
 
         Row({ space: ZSpacing.md }) {
@@ -1128,7 +1486,7 @@ export struct MeTab {
     .padding({ left: ZSpacing.xl, right: ZSpacing.xl, bottom: this.safeArea.keyboard })
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
-    .backgroundColor('rgba(0,0,0,0.5)');
+    .backgroundColor(this.zc.overlay);
   }
 
   @Builder
@@ -1139,9 +1497,10 @@ export struct MeTab {
         .fontColor(themeStore.mode === value ? this.zc.accentInk : this.zc.text)
         .layoutWeight(1);
       if (themeStore.mode === value) {
-        Text('· 当前')
-          .fontSize(ZType.footnoteSize)
-          .fontColor(this.zc.accentInk);
+        Image($r('app.media.ic_check'))
+          .width(14)
+          .height(14)
+          .fillColor(this.zc.accentInk);
       }
     }
     .width('100%')

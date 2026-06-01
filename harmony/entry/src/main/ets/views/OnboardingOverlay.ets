@@ -13,6 +13,7 @@ import { estimateStrength, type Strength } from '../lib/Password';
 import { safeAreaState, SafeAreaState } from '../state/SafeArea';
 import { SpaceAvatar } from '../components/SpaceAvatar';
 import { DEFAULT_SPACE_ID } from '../lib/Spaces';
+import { isNativeKDF } from '../lib/Crypto';
 
 type Step = 'password' | 'space';
 
@@ -27,6 +28,10 @@ export struct OnboardingOverlay {
   @Local confirm: string = '';
   @Local spaceName: string = '';
   @Local errorText: string = '';
+
+  // reveal toggles for each password field
+  @Local pwRevealed: boolean = false;
+  @Local cfRevealed: boolean = false;
 
   private onNext(): void {
     if (this.password.length < 8) {
@@ -80,6 +85,23 @@ export struct OnboardingOverlay {
     return this.zc.text3;
   }
 
+  private kdfHintText(): string {
+    if (isNativeKDF()) {
+      return '原生加速 · 派生约 0.3 秒';
+    }
+    return '派生需要数秒，请稍候';
+  }
+
+  @Computed
+  get tooShort(): boolean {
+    return this.password.length > 0 && this.password.length < 8;
+  }
+
+  @Computed
+  get mismatch(): boolean {
+    return this.confirm.length > 0 && this.confirm !== this.password;
+  }
+
   @Computed
   get strength(): Strength {
     return estimateStrength(this.password);
@@ -106,7 +128,7 @@ export struct OnboardingOverlay {
             }
             .width(64)
             .height(64)
-            .borderRadius(16)
+            .borderRadius(ZRadius.xl)
             .backgroundColor(this.zc.accent)
             .justifyContent(FlexAlign.Center)
             .alignItems(HorizontalAlign.Center)
@@ -119,7 +141,7 @@ export struct OnboardingOverlay {
                 avatarBg: this.zc.accent,
                 avatarFg: this.zc.accentInk,
                 avatarFontSize: 28,
-                avatarRadius: 16,
+                avatarRadius: ZRadius.xl,
               });
             }
             .margin({ top: ZSpacing.lg, bottom: ZSpacing.lg });
@@ -169,41 +191,93 @@ export struct OnboardingOverlay {
 
           // 底部按钮区
           if (this.isPasswordStep) {
-            Text('下一步')
-              .fontSize(ZType.bodySize)
-              .fontWeight(FontWeight.Medium)
-              .fontColor(this.zc.accentInk)
-              .backgroundColor(this.zc.accent)
-              .borderRadius(ZRadius.lg)
-              .height(48)
-              .width('100%')
-              .textAlign(TextAlign.Center)
-              .onClick(() => this.onNext());
-          } else {
-            Row({ space: ZSpacing.sm }) {
-              Text('返回')
-                .fontSize(ZType.bodySize)
-                .fontColor(this.zc.text)
-                .backgroundColor(this.zc.bgElev)
-                .borderRadius(ZRadius.lg)
-                .height(48)
-                .width(96)
-                .textAlign(TextAlign.Center)
-                .enabled(!this.store.busy)
-                .onClick(() => this.onBack());
-              Text(this.store.busy ? '创建中…' : '创建保险库')
+            // 下一步按钮（带右箭头图标）
+            Row() {
+              Text('下一步')
                 .fontSize(ZType.bodySize)
                 .fontWeight(FontWeight.Medium)
                 .fontColor(this.zc.accentInk)
-                .backgroundColor(this.store.busy ? this.zc.text3 : this.zc.accent)
-                .borderRadius(ZRadius.lg)
-                .height(48)
                 .layoutWeight(1)
-                .textAlign(TextAlign.Center)
-                .enabled(!this.store.busy)
-                .onClick(() => this.onSubmit());
+                .textAlign(TextAlign.End);
+              Image($r('app.media.ic_arrow_right'))
+                .width(16)
+                .height(16)
+                .fillColor(this.zc.accentInk)
+                .margin({ left: ZSpacing.xs });
+            }
+            .backgroundColor(this.zc.accent)
+            .borderRadius(ZRadius.lg)
+            .height(48)
+            .width('100%')
+            .padding({ left: ZSpacing.xl, right: ZSpacing.md })
+            .justifyContent(FlexAlign.Center)
+            .alignItems(VerticalAlign.Center)
+            .onClick(() => this.onNext());
+
+            // KDF 派生时间提示
+            Text(this.kdfHintText())
+              .fontSize(ZType.captionSize)
+              .fontColor(this.zc.text4)
+              .fontFamily('HarmonyOS Sans Condensed')
+              .textAlign(TextAlign.Center)
+              .width('100%');
+          } else {
+            // 返回 + 创建保险库
+            Row({ space: ZSpacing.sm }) {
+              // 返回按钮（带左箭头图标）
+              Row() {
+                Image($r('app.media.ic_arrow_left'))
+                  .width(16)
+                  .height(16)
+                  .fillColor(this.zc.text)
+                  .margin({ right: ZSpacing.xs });
+                Text('返回')
+                  .fontSize(ZType.bodySize)
+                  .fontColor(this.zc.text);
+              }
+              .backgroundColor(this.zc.bgElev)
+              .borderRadius(ZRadius.lg)
+              .height(48)
+              .padding({ left: ZSpacing.md, right: ZSpacing.md })
+              .justifyContent(FlexAlign.Center)
+              .alignItems(VerticalAlign.Center)
+              .enabled(!this.store.busy)
+              .onClick(() => this.onBack());
+
+              // 创建保险库按钮（带勾选图标）
+              Row() {
+                Text(this.store.busy ? '创建中…' : '创建保险库')
+                  .fontSize(ZType.bodySize)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(this.zc.accentInk)
+                  .layoutWeight(1)
+                  .textAlign(TextAlign.End);
+                if (!this.store.busy) {
+                  Image($r('app.media.ic_check'))
+                    .width(16)
+                    .height(16)
+                    .fillColor(this.zc.accentInk)
+                    .margin({ left: ZSpacing.xs });
+                }
+              }
+              .backgroundColor(this.store.busy ? this.zc.text3 : this.zc.accent)
+              .borderRadius(ZRadius.lg)
+              .height(48)
+              .layoutWeight(1)
+              .padding({ left: ZSpacing.md, right: ZSpacing.md })
+              .justifyContent(FlexAlign.Center)
+              .alignItems(VerticalAlign.Center)
+              .enabled(!this.store.busy)
+              .onClick(() => this.onSubmit());
             }
             .width('100%');
+
+            // 创建后提示
+            Text('创建后随时可在「我的 → 空间」里重命名')
+              .fontSize(ZType.captionSize)
+              .fontColor(this.zc.text4)
+              .textAlign(TextAlign.Center)
+              .width('100%');
           }
 
           Row().height(40).width('100%');
@@ -232,25 +306,97 @@ export struct OnboardingOverlay {
     .padding({ bottom: this.safeArea.keyboard });
   }
 
+  /** 字段标签行：大写 + 提示 */
+  @Builder
+  fieldLabel(label: string, hint: string) {
+    Row() {
+      Text(label.toUpperCase())
+        .fontSize(ZType.footnoteSize)
+        .fontColor(this.zc.text3)
+        .letterSpacing(0.4);
+      if (hint) {
+        Text(hint)
+          .fontSize(ZType.captionSize)
+          .fontColor(this.zc.text4)
+          .fontFamily('HarmonyOS Sans Condensed')
+          .margin({ left: ZSpacing.xs });
+      }
+    }
+    .width('100%')
+    .justifyContent(FlexAlign.SpaceBetween)
+    .alignItems(VerticalAlign.Bottom)
+    .margin({ bottom: ZSpacing.xs });
+  }
+
+  /** 错误提示框（带图标的危险色背景行） */
+  @Builder
+  errorBox() {
+    Row({ space: ZSpacing.xs }) {
+      Image($r('app.media.ic_error'))
+        .width(14)
+        .height(14)
+        .fillColor(this.zc.danger);
+      Text(this.errorText)
+        .fontSize(ZType.footnoteSize)
+        .fontColor(this.zc.danger)
+        .layoutWeight(1);
+    }
+    .width('100%')
+    .padding({ left: ZSpacing.sm, right: ZSpacing.sm, top: 6, bottom: 6 })
+    .backgroundColor(this.zc.danger + '1f')
+    .borderRadius(ZRadius.md)
+    .margin({ top: ZSpacing.sm });
+  }
+
   @Builder
   passwordCard() {
     Column({ space: ZSpacing.sm }) {
-      TextInput({ placeholder: '主密码（≥ 8 位）', text: this.password })
-        .type(InputType.Password)
-        .placeholderColor(this.zc.text3)
-        .placeholderFont({ size: ZType.bodySize })
-        .fontColor(this.zc.text)
-        .fontSize(ZType.bodySize)
-        .backgroundColor(this.zc.bg)
-        .borderRadius(ZRadius.lg)
-        .padding({ left: ZSpacing.md, right: ZSpacing.md })
-        .height(48)
-        .width('100%')
-        .onChange((v: string) => {
-          this.password = v;
-          this.errorText = '';
-        });
+      // 主密码字段标签
+      this.fieldLabel('主密码', '至少 8 位字符');
 
+      // 主密码输入框（含锁图标 + 显示/隐藏切换）
+      Row({ space: ZSpacing.sm }) {
+        Image($r('app.media.ic_lock'))
+          .width(16)
+          .height(16)
+          .fillColor(this.zc.text3);
+        TextInput({ placeholder: '主密码', text: this.password })
+          .type(this.pwRevealed ? InputType.Normal : InputType.Password)
+          .placeholderColor(this.zc.text3)
+          .placeholderFont({ size: ZType.bodySize })
+          .fontColor(this.zc.text)
+          .fontSize(ZType.bodySize)
+          .backgroundColor('#00000000')
+          .borderRadius(0)
+          .padding(0)
+          .layoutWeight(1)
+          .onChange((v: string) => {
+            this.password = v;
+            this.errorText = '';
+          });
+        Image(this.pwRevealed ? $r('app.media.ic_eye_off') : $r('app.media.ic_eye'))
+          .width(20)
+          .height(20)
+          .fillColor(this.zc.text3)
+          .onClick(() => {
+            this.pwRevealed = !this.pwRevealed;
+          });
+      }
+      .width('100%')
+      .height(48)
+      .backgroundColor(this.zc.bg)
+      .borderRadius(ZRadius.lg)
+      .border({ width: 1, color: this.tooShort ? this.zc.danger : this.zc.line })
+      .padding({ left: ZSpacing.md, right: ZSpacing.sm });
+
+      if (this.tooShort) {
+        Text('主密码至少 8 位')
+          .fontSize(ZType.captionSize)
+          .fontColor(this.zc.danger)
+          .width('100%');
+      }
+
+      // 密码强度（harmony 扩展，phone 无此功能 — 可接受增强）
       if (this.password.length > 0) {
         Row({ space: ZSpacing.sm }) {
           Text(this.strength.label)
@@ -279,86 +425,162 @@ export struct OnboardingOverlay {
         .height(3);
       }
 
-      TextInput({ placeholder: '再次输入主密码', text: this.confirm })
-        .type(InputType.Password)
-        .placeholderColor(this.zc.text3)
-        .placeholderFont({ size: ZType.bodySize })
-        .fontColor(this.zc.text)
-        .fontSize(ZType.bodySize)
-        .backgroundColor(this.zc.bg)
-        .borderRadius(ZRadius.lg)
-        .padding({ left: ZSpacing.md, right: ZSpacing.md })
-        .height(48)
-        .width('100%')
-        .onChange((v: string) => {
-          this.confirm = v;
-          this.errorText = '';
-        });
+      // 确认密码字段标签
+      this.fieldLabel('确认主密码', '');
 
-      if (this.errorText) {
-        Text(this.errorText)
-          .fontSize(ZType.footnoteSize)
+      // 确认密码输入框（含锁图标 + 显示/隐藏切换）
+      Row({ space: ZSpacing.sm }) {
+        Image($r('app.media.ic_lock'))
+          .width(16)
+          .height(16)
+          .fillColor(this.zc.text3);
+        TextInput({ placeholder: '再次输入', text: this.confirm })
+          .type(this.cfRevealed ? InputType.Normal : InputType.Password)
+          .placeholderColor(this.zc.text3)
+          .placeholderFont({ size: ZType.bodySize })
+          .fontColor(this.zc.text)
+          .fontSize(ZType.bodySize)
+          .backgroundColor('#00000000')
+          .borderRadius(0)
+          .padding(0)
+          .layoutWeight(1)
+          .onChange((v: string) => {
+            this.confirm = v;
+            this.errorText = '';
+          })
+          .onSubmit(() => this.onNext());
+        Image(this.cfRevealed ? $r('app.media.ic_eye_off') : $r('app.media.ic_eye'))
+          .width(20)
+          .height(20)
+          .fillColor(this.zc.text3)
+          .onClick(() => {
+            this.cfRevealed = !this.cfRevealed;
+          });
+      }
+      .width('100%')
+      .height(48)
+      .backgroundColor(this.zc.bg)
+      .borderRadius(ZRadius.lg)
+      .border({ width: 1, color: this.mismatch ? this.zc.danger : this.zc.line })
+      .padding({ left: ZSpacing.md, right: ZSpacing.sm });
+
+      if (this.mismatch) {
+        Text('两次输入不一致')
+          .fontSize(ZType.captionSize)
           .fontColor(this.zc.danger)
           .width('100%');
       }
 
-      Column({ space: ZSpacing.xs }) {
-        Text('数据仅保存在本设备，零知识端到端')
-          .fontSize(ZType.footnoteSize)
-          .fontColor(this.zc.text2);
-        Text('Argon2id 派生主密码 → XChaCha20-Poly1305 加密')
-          .fontSize(ZType.footnoteSize)
-          .fontColor(this.zc.text2);
-        Text('主密码不会离开设备，丢失无法恢复')
-          .fontSize(ZType.footnoteSize)
-          .fontColor(this.zc.text2);
+      // 错误提示框
+      if (this.errorText) {
+        this.errorBox();
+      }
+
+      // 安全特性说明（带勾选徽标）
+      Column({ space: ZSpacing.sm }) {
+        Divider()
+          .strokeWidth(0.5)
+          .color(this.zc.lineSoft)
+          .margin({ top: ZSpacing.sm, bottom: ZSpacing.xs });
+
+        this.securityPoint('数据仅保存在本设备，零知识端到端');
+        this.securityPoint('Argon2id 派生主密码 → XChaCha20-Poly1305 加密');
+        this.securityPoint('主密码不会离开设备，丢失无法恢复');
       }
       .alignItems(HorizontalAlign.Start)
-      .width('100%')
-      .padding({ top: ZSpacing.md });
+      .width('100%');
     }
     .width('100%')
     .padding(ZSpacing.lg)
     .backgroundColor(this.zc.bgElev)
-    .borderRadius(ZRadius.xl);
+    .borderRadius(ZRadius.xl)
+    .clip(true);
+  }
+
+  /** 单条安全说明行：圆形勾徽标 + 文本 */
+  @Builder
+  securityPoint(text: string) {
+    Row({ space: ZSpacing.sm }) {
+      Column() {
+        Image($r('app.media.ic_check'))
+          .width(11)
+          .height(11)
+          .fillColor(this.zc.ok);
+      }
+      .width(20)
+      .height(20)
+      .borderRadius(10)
+      .backgroundColor(this.zc.ok + '1f')
+      .justifyContent(FlexAlign.Center)
+      .alignItems(HorizontalAlign.Center);
+
+      Text(text)
+        .fontSize(ZType.subheadSize)
+        .fontColor(this.zc.text2)
+        .layoutWeight(1);
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Center);
   }
 
   @Builder
   spaceCard() {
     Column({ space: ZSpacing.sm }) {
-      TextInput({ placeholder: '为这个空间取个名字（个人 / 工作 / 家庭）', text: this.spaceName })
-        .placeholderColor(this.zc.text3)
-        .placeholderFont({ size: ZType.bodySize })
-        .fontColor(this.zc.text)
-        .fontSize(ZType.bodySize)
-        .backgroundColor(this.zc.bg)
-        .borderRadius(ZRadius.lg)
-        .padding({ left: ZSpacing.md, right: ZSpacing.md })
-        .height(48)
-        .width('100%')
-        .maxLength(32)
-        .onChange((v: string) => {
-          this.spaceName = v;
-          this.errorText = '';
-        });
+      // 空间名字段标签
+      this.fieldLabel('空间名', '个人 / 工作 / 家庭 …');
 
+      // 空间名输入框（含 tag 图标）
+      Row({ space: ZSpacing.sm }) {
+        Image($r('app.media.ic_tag'))
+          .width(16)
+          .height(16)
+          .fillColor(this.zc.text3);
+        TextInput({ placeholder: '为这个空间取个名字', text: this.spaceName })
+          .placeholderColor(this.zc.text3)
+          .placeholderFont({ size: ZType.bodySize })
+          .fontColor(this.zc.text)
+          .fontSize(ZType.bodySize)
+          .backgroundColor('#00000000')
+          .borderRadius(0)
+          .padding(0)
+          .layoutWeight(1)
+          .maxLength(32)
+          .onChange((v: string) => {
+            this.spaceName = v;
+            this.errorText = '';
+          })
+          .onSubmit(() => this.onSubmit());
+      }
+      .width('100%')
+      .height(48)
+      .backgroundColor(this.zc.bg)
+      .borderRadius(ZRadius.lg)
+      .padding({ left: ZSpacing.md, right: ZSpacing.md });
+
+      // 错误提示框
       if (this.errorText) {
-        Text(this.errorText)
-          .fontSize(ZType.footnoteSize)
-          .fontColor(this.zc.danger)
-          .width('100%');
+        this.errorBox();
       }
 
-      Text('空间是 ZPass 里的顶层隔离容器，类似不同账号。每个空间独立存放条目，可随时新建、切换、重命名。')
-        .fontSize(ZType.footnoteSize)
-        .fontColor(this.zc.text2)
-        .width('100%')
-        .lineHeight(18)
-        .padding({ top: ZSpacing.md });
+      // 空间说明文字
+      Column({ space: ZSpacing.xs }) {
+        Divider()
+          .strokeWidth(0.5)
+          .color(this.zc.lineSoft)
+          .margin({ top: ZSpacing.sm, bottom: ZSpacing.xs });
+        Text('空间是 ZPass 里的顶层隔离容器，类似不同账号。每个空间独立存放条目，可随时新建、切换、重命名。')
+          .fontSize(ZType.subheadSize)
+          .fontColor(this.zc.text2)
+          .width('100%')
+          .lineHeight(20);
+      }
+      .alignItems(HorizontalAlign.Start)
+      .width('100%');
     }
     .width('100%')
     .padding(ZSpacing.lg)
     .backgroundColor(this.zc.bgElev)
-    .borderRadius(ZRadius.xl);
+    .borderRadius(ZRadius.xl)
+    .clip(true);
   }
 }

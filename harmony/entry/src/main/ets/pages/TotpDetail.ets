@@ -179,33 +179,53 @@ struct TotpDetail {
       Row().height(this.safeArea.top).width('100%');
 
       // 顶栏
-      Row({ space: ZSpacing.sm }) {
-        Text('返回')
-          .fontSize(ZType.bodySize)
-          .fontColor(this.zc.text2)
-          .onClick(() => router.back());
+      Row() {
+        // 返回 —— chevron-left 图标按钮（36×36 点击区域）
+        Column() {
+          Image($r('app.media.ic_chevron_left'))
+            .width(20)
+            .height(20)
+            .fillColor(this.zc.text2);
+        }
+        .width(36)
+        .height(36)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(HorizontalAlign.Center)
+        .onClick(() => router.back());
+
         Text('验证码')
           .fontSize(ZType.title2Size)
           .fontWeight(FontWeight.Bold)
           .fontColor(this.zc.text)
           .layoutWeight(1)
           .textAlign(TextAlign.Center);
+
+        // 编辑 —— pencil 图标按钮（36×36 点击区域）；条目不存在时放透明占位
         if (this.item) {
-          Text('编辑')
-            .fontSize(ZType.bodySize)
-            .fontColor(this.zc.accent)
-            .onClick(() => this.onEdit());
+          Column() {
+            Image($r('app.media.ic_edit'))
+              .width(18)
+              .height(18)
+              .fillColor(this.zc.text2);
+          }
+          .width(36)
+          .height(36)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(HorizontalAlign.Center)
+          .onClick(() => this.onEdit());
         } else {
-          Text('').width(40);
+          Row().width(36).height(36);
         }
       }
       .width('100%')
       .padding({
-        left: ZSpacing.lg,
-        right: ZSpacing.lg,
+        left: ZSpacing.sm,
+        right: ZSpacing.sm,
         top: ZSpacing.sm,
         bottom: ZSpacing.sm,
-      });
+      })
+      .justifyContent(FlexAlign.SpaceBetween)
+      .alignItems(VerticalAlign.Center);
 
       if (this.errorText) {
         Column() {
@@ -260,12 +280,13 @@ struct TotpDetail {
             .borderRadius(999)
             .margin({ bottom: ZSpacing.xxxl });
 
-            // 大号验证码
+            // 大号验证码 —— 使用等宽字体防止数字宽度抖动（与 phone tabular-nums 对齐）
             Text(formatTotpCode(this.code))
               .fontSize(60)
               .fontWeight(FontWeight.Lighter)
               .fontColor(this.codeColor)
               .letterSpacing(4)
+              .fontFamily('HarmonyOS Sans Condensed')
               .textAlign(TextAlign.Center)
               .margin({ bottom: ZSpacing.sm });
 
@@ -300,18 +321,25 @@ struct TotpDetail {
               .margin({ bottom: ZSpacing.xxl });
             }
 
-            // 复制按钮
-            Text('复制验证码')
-              .fontSize(ZType.bodySize)
-              .fontWeight(FontWeight.Medium)
-              .fontColor(this.zc.accentInk)
-              .backgroundColor(this.zc.accent)
-              .borderRadius(ZRadius.lg)
-              .height(52)
-              .width('100%')
-              .textAlign(TextAlign.Center)
-              .margin({ bottom: ZSpacing.xxxl })
-              .onClick(() => this.onCopy());
+            // 复制按钮 —— icon + label Row（与 phone icon='doc.on.doc.fill' 对齐）
+            Row({ space: ZSpacing.sm }) {
+              Image($r('app.media.ic_copy'))
+                .width(16)
+                .height(16)
+                .fillColor(this.zc.accentInk);
+              Text('复制验证码')
+                .fontSize(ZType.bodySize)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(this.zc.accentInk);
+            }
+            .height(52)
+            .width('100%')
+            .justifyContent(FlexAlign.Center)
+            .alignItems(VerticalAlign.Center)
+            .backgroundColor(this.zc.accent)
+            .borderRadius(ZRadius.lg)
+            .margin({ bottom: ZSpacing.xxxl })
+            .onClick(() => this.onCopy());
 
             // 元信息卡
             Column() {
@@ -378,7 +406,9 @@ struct TotpDetail {
         .fontColor(this.zc.text3)
         .layoutWeight(1);
       Text(value)
-        .fontSize(ZType.bodySize)
+        // mono 行（算法行）对齐 phone 的 Type.subhead (13px)；
+        // 普通行保持 bodySize (15px)
+        .fontSize(mono ? ZType.subheadSize : ZType.bodySize)
         .fontWeight(FontWeight.Medium)
         .fontColor(this.zc.text)
         .maxLines(1)

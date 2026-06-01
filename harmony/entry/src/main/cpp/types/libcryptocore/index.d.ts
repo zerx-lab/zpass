@@ -14,6 +14,20 @@
 // 写 `import { randomBytes } from '...'` 会去模块的 ES 命名 export 列表里查，
 // 与 exports 对象上的属性是两套，找不到。
 
+/** 单个入站 LAN 同步请求。body 是原始请求体（零拷贝 Uint8Array）。 */
+export interface SyncRequest {
+  reqId: number;
+  method: string;
+  path: string;
+  body: Uint8Array;
+}
+
+/** startSyncServer 的返回：绑定端口 + 可路由 LAN IPv4 列表。 */
+export interface SyncServerInfo {
+  port: number;
+  hosts: string[];
+}
+
 interface Cryptocore {
   /**
    * Argon2id 派生 KEK
@@ -98,6 +112,35 @@ interface Cryptocore {
     aad: ArrayBuffer,
     nonce: ArrayBuffer,
   ) => ArrayBuffer;
+
+  /**
+   * 本设备是否可作为 LAN 同步服务端。HarmonyOS 上恒为 true（传输层已编译进 .so）。
+   */
+  isSyncServerAvailable: () => boolean;
+
+  /**
+   * 注册每个入站同步请求触发的 handler。
+   *
+   * 必须在 startSyncServer 之前调用一次。handler 收到 SyncRequest 后须最终调用
+   * respondSyncRequest(reqId, status, body) 回传。底层走 napi ThreadsafeFunction，
+   * handler 在 ArkTS（JS）线程上被调用。
+   */
+  registerSyncRequestHandler: (handler: (req: SyncRequest) => void) => void;
+
+  /**
+   * 启动 LAN 同步服务端（绑定 0.0.0.0 的 OS 分配端口）。幂等。
+   * 返回绑定端口与可路由 LAN IPv4 列表。
+   */
+  startSyncServer: () => SyncServerInfo;
+
+  /** 停止 LAN 同步服务端。幂等。 */
+  stopSyncServer: () => void;
+
+  /**
+   * 回传被 park 的请求的响应。
+   * reqId 未知（已超时 / 已停止）则忽略；status 不在 100..599 归一为 500。
+   */
+  respondSyncRequest: (reqId: number, status: number, body: Uint8Array) => void;
 }
 
 declare const cryptocore: Cryptocore;

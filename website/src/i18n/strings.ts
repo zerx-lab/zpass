@@ -512,7 +512,7 @@ const en: SiteStrings = {
 		"Without your master password, nobody — including us — can decrypt your vault. That's the whole point of zero-knowledge. To cover that case, ZPass gives you three safety nets: a trusted emergency contact, a printable recovery kit you can store offline, and the option to enroll a hardware key as a second unlock factor.",
 	faq_2_q: "When will ZPass be available?",
 	faq_2_a:
-		"Very soon. Desktop, mobile and the browser extension are all in their final QA pass — the public release is just around the corner. If you need an exact timeline for a partnership or integration, reach out through the contact form.",
+		"It's here. Desktop and Android are publicly available, and the browser extension is live on the Chrome Web Store. iOS and HarmonyOS are in their final QA pass. If you need an exact timeline for a partnership or integration, reach out through the contact form.",
 	faq_3_q: "Can I import from 1Password, Bitwarden or LastPass?",
 	faq_3_a:
 		"Yes. The importer supports 1PUX, Bitwarden JSON, LastPass CSV, Chrome / Firefox / Safari browser exports, and KeePass KDBX. Everything runs locally on your device — nothing is uploaded during the migration.",
@@ -814,7 +814,7 @@ const zh: SiteStrings = {
 		"没有主密码，任何人——包括我们——都无法解密你的密码库，这正是零知识架构的代价，也是它存在的意义。为此 ZPass 提供了三道保险：指定一位可信联系人作为应急联系人、导出一份可离线打印保存的恢复套件、或把硬件密钥注册为第二解锁因素。",
 	faq_2_q: "ZPass 什么时候发布？",
 	faq_2_a:
-		"即将发布。桌面端、移动端与浏览器扩展都已进入发布前的最后一轮 QA——首个公开版本就在眼前。如果你是合作者或集成方，需要一个准确的时间表，欢迎通过页面上的「联系我们」表单联系我们。",
+		"已经发布了。桌面端与 Android 已公开可用，浏览器扩展也已上架 Chrome 应用商店；iOS 与 HarmonyOS 正在进行发布前的最后一轮 QA。如果你是合作者或集成方，需要一个准确的时间表，欢迎通过页面上的「联系我们」表单联系我们。",
 	faq_3_q: "可以从 1Password、Bitwarden、LastPass 迁移过来吗？",
 	faq_3_a:
 		"可以。导入器支持 1PUX、Bitwarden JSON、LastPass CSV、Chrome / Firefox / Safari 浏览器导出以及 KeePass KDBX 等常见格式。整个导入过程都在你的设备上完成，迁移期间不会有任何数据被上传。",

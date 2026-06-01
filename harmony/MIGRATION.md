@@ -97,9 +97,27 @@
   - 删除前 confirm 对话框，与 phone Swipeable 行为一致
 - `cryptocore` x86_64 OHOS .so：用 `CRYPTOCORE_OHOS_ABIS=x86_64 bash cryptocore/scripts/build-harmony.sh` 编译，630 KB，部署到 `harmony/entry/libs/x86_64/`，HarmonyOS 模拟器可用
 
+### Phase 8 ✅ 全量页面对等 + 同步服务端角色
+
+目标升级：从「核心功能可用」推进到「**每个页面与 phone 功能 + UI 布局一致**」，并补齐 phone 的同步**服务端**角色。以 14 个页面对的逐页审计（见 `MIGRATION-PARITY-AUDIT.md`）为驱动，146 项差距按"缺功能/缺UI/布局偏差/可接受适配/设计违例"分诊后逐项落地。
+
+- **设计基础**
+  - `theme/Tokens.ets` LIGHT_PALETTE 对齐 phone（iOS 系统色：danger `#ff3b30` / warn `#ff9500` / ok `#34c759` / info `#007aff` / text·accent `#000`）；深色两端早已一致。
+  - 图标系统：`resources/base/media/` 新增 **57 个 Material Symbols rounded 单色 SVG**（`ic_*.svg`），统一 `Image($r('app.media.ic_*')).fillColor(zc.*)`。清除所有页面残留的 unicode-as-icon 技术债（`★ ＋ › • ✓ × ••••` 等 → 图标 / `LoadingProgress` / 自绘点阵）。
+- **页面对等（12 个已有页）**：VaultTab（收藏 chip / 2FA·泄露 badge / 强度条 / FAB / swipe 图标）、GeneratorTab（批量去重生成 / 字符着色 / 保存到库 / 复制反馈）、SecurityTab（综合评分 hero / StatTile / 行动建议 / 强度直方图 / HIBP）、MeTab（图标行 / 让别人连我入口）、Onboarding（实时校验 + 键盘提交）、Lock（居中 + 反应式生物按钮）、ItemEdit（自定义字段 / TOTP·密码预填）、ItemDetail（实时 TOTP / 强度 / 自定义字段 / 复制）、TotpDetail、Sync、TotpScan（扫码→编辑表单流程）、Index（tab 壳 + 启动水合）。
+- **共享层**：`VaultStore.hydrated`、`PassGen.generateUniqueBatch` + `GenOptions.pronounceable`、`VaultService.nextTimestamp`、`CustomFields.parseCustomFields` 跨端兼容（兼容 phone/desktop 的原生数组与本端 JSON 字符串两种 `_customFields` 形态）。
+- **同步服务端角色（新增，phone sync-host / sync-conflicts 对等）**
+  - `cryptocore`：新增内部 feature `lan-server`（`tiny_http` + `if-addrs`），由 `android` 与 `harmony` 共同启用；抽出 `src/lan_transport.rs` 传输层（android.rs 重构复用）；`src/harmony.rs` 新增 napi **ThreadsafeFunction 反向回调桥**（`registerSyncRequestHandler` / `startSyncServer` / `stopSyncServer` / `respondSyncRequest` / `isSyncServerAvailable`），与 android.rs 的 JNI 桥同构。`cargo check --features harmony` 通过，48 单测全过（46 原 + 2 lan_transport 往返），双 ABI OHOS .so 重新交叉编译部署。
+  - `lib/SyncServer.ets`：`@ObservedV2` 单例协议驱动，逐端点忠实移植 `phone/lib/sync-server.ts`（pair/confirm/manifest/fetch/push/commit/report-conflicts/poll-resolutions + 冲突镜像 + applyMerge），复用 `SyncProtocol.ets` 原语（已补 export）。
+  - `pages/SyncHost.ets` + `pages/SyncConflicts.ets`：两整页 UI；`main_pages.json` 注册；`module.json5` 增 `GET_NETWORK_INFO`；MeTab「让别人连我」入口。
+
+> **验证范围（重要）**：本阶段所有产物**编译通过**（`hvigorw assembleHap` 全绿）+ Rust `cargo check/test` + 交叉编译 + .so 符号在位。但**本环境无设备**，以下为**运行时未验证**项，需真机/模拟器联调：所有页面的实际渲染与交互、以及同步服务端的 napi TSFN 反向回调在 ArkVM 上的真实投递与 LAN 端到端往返。
+
 ## 待完成（后续迭代）
 
 - **主题持久化**：phone 不持久化（每次启动跟随系统）；harmony 当前一致，未来可走 `@ohos.data.preferences`
+- **运行时联调**：连真机/模拟器跑 `task run`，验证 Phase 8 全部页面渲染交互 + 同步服务端往返（见上「验证范围」）。
+- **自定义字段写端格式**：本端 `_customFields` 受 `ItemFields = Record<string,string>` 约束写为 JSON 字符串，phone/desktop 写为原生数组；读端已双向兼容，写端完全对齐需后续统一字段模型。
 
 ## 字节级一致性
 
@@ -137,4 +155,5 @@ task run
 - Random：优先 cryptocore；未加载时回退 `@ohos.security.cryptoFramework`（密码生成器在 vault 未初始化前也能用）
 - HIBP SHA-1 / sync SHA-256：走 `@ohos.security.cryptoFramework` 系统级算法（不引入 @noble JS 兜底）
 - Sync 协议字节：Argon2id + XChaCha20-Poly1305 全部走 cryptocore；HMAC-SHA256 走手写 RFC 2104（基于系统 SHA-256）；CBOR 不用（phone 实际协议是 JSON，cryptocore::sync SPAKE2 模块未用到）
+- Sync 角色：**客户端 + 服务端均支持**（Phase 8 起）。客户端走 `SyncProtocol.ets::connectAndSync`；服务端走 `SyncServer.ets` + cryptocore `lan-server` feature 的 tiny_http 监听 + napi TSFN 反向回调。早期文档「仅客户端」的说法已过时。
 - 信任设备 method 命名：`"huks-harmony"`（与 desktop `dpapi/keychain/libsecret`、phone `keystore-ios/keystore-android` 并列）

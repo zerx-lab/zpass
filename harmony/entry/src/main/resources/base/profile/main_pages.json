@@ -5,6 +5,8 @@
     "pages/ItemEdit",
     "pages/TotpScan",
     "pages/TotpDetail",
-    "pages/Sync"
+    "pages/Sync",
+    "pages/SyncHost",
+    "pages/SyncConflicts"
   ]
 }

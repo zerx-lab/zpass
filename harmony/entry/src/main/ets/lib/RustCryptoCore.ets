@@ -17,6 +17,20 @@
 
 import cryptocore from 'libcryptocore.so';
 
+/** 单个入站 LAN 同步请求（napi 下发；body 为零拷贝 Uint8Array）。 */
+export interface SyncRequest {
+  reqId: number;
+  method: string;
+  path: string;
+  body: Uint8Array;
+}
+
+/** startSyncServer 的返回：绑定端口 + 可路由 LAN IPv4 列表。 */
+export interface SyncServerInfo {
+  port: number;
+  hosts: string[];
+}
+
 interface CryptocoreNative {
   deriveKek: (
     password: string,
@@ -49,6 +63,11 @@ interface CryptocoreNative {
     aad: ArrayBuffer,
     nonce: ArrayBuffer,
   ) => ArrayBuffer;
+  isSyncServerAvailable: () => boolean;
+  registerSyncRequestHandler: (handler: (req: SyncRequest) => void) => void;
+  startSyncServer: () => SyncServerInfo;
+  stopSyncServer: () => void;
+  respondSyncRequest: (reqId: number, status: number, body: Uint8Array) => void;
 }
 
 const native: CryptocoreNative = cryptocore as CryptocoreNative;
@@ -59,6 +78,11 @@ const nativeRandomBytesRaw = native.randomBytes;
 const nativeArgon2idRaw = native.argon2idRaw;
 const nativeSealAeadWithNonce = native.sealAeadWithNonce;
 const nativeOpenAeadWithNonce = native.openAeadWithNonce;
+const nativeIsSyncServerAvailable = native.isSyncServerAvailable;
+const nativeRegisterSyncRequestHandler = native.registerSyncRequestHandler;
+const nativeStartSyncServerRaw = native.startSyncServer;
+const nativeStopSyncServerRaw = native.stopSyncServer;
+const nativeRespondSyncRequestRaw = native.respondSyncRequest;
 
 /* ----------------------------------------------------------------------------
  * 模块可用性探测
@@ -178,4 +202,51 @@ export function openAeadWithNonce(
     toAB(key), toAB(ciphertext), toAB(aad), toAB(nonce),
   );
   return fromAB(out);
+}
+
+/* ----------------------------------------------------------------------------
+ * 局域网同步服务端桥 —— 设备作为 LAN 同步 server
+ *
+ * 与 phone/modules/zpass-crypto 的 nativeStartSyncServer / addSyncRequestListener /
+ * nativeRespondSyncRequest 语义对齐，但：
+ *   - 入站请求经 napi ThreadsafeFunction 直接回调（非 Expo 事件发射器），
+ *     SyncServer.ets 注册一次 handler，每个请求被调用一次。
+ *   - body 走原始 Uint8Array（零拷贝），不像 phone 端走 base64。
+ * 调用方（SyncServer.ets）须先 addSyncRequestListener，再 await nativeStartSyncServer。
+ * -------------------------------------------------------------------------- */
+
+let syncServerAvailable: boolean | null = null;
+
+export function isNativeSyncServerAvailable(): boolean {
+  if (syncServerAvailable !== null) return syncServerAvailable;
+  try {
+    syncServerAvailable = nativeIsSyncServerAvailable();
+  } catch (_e) {
+    syncServerAvailable = false;
+  }
+  return syncServerAvailable;
+}
+
+/** 注册每个入站同步请求的 handler。须在 nativeStartSyncServer 之前调用一次。 */
+export function addSyncRequestListener(handler: (req: SyncRequest) => void): void {
+  nativeRegisterSyncRequestHandler(handler);
+}
+
+/** 启动同步服务端，返回绑定端口与可路由 LAN IPv4。原生为同步，包成 Promise。 */
+export async function nativeStartSyncServer(): Promise<SyncServerInfo> {
+  return nativeStartSyncServerRaw();
+}
+
+/** 停止同步服务端。幂等。 */
+export async function nativeStopSyncServer(): Promise<void> {
+  nativeStopSyncServerRaw();
+}
+
+/** 回传被 park 的请求的响应。reqId 取自 SyncRequest，body 为原始字节。 */
+export async function nativeRespondSyncRequest(
+  reqId: number,
+  status: number,
+  body: Uint8Array,
+): Promise<void> {
+  nativeRespondSyncRequestRaw(reqId, status, body);
 }

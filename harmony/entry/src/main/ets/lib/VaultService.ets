@@ -759,6 +759,21 @@ export class VaultService {
     await writeVaultFile(file);
   }
 
+  /** sync 合并 LWW bump 用的单调时钟（ms）—— 保证 > 上次发放，且与本机写入同源 */
+  private lastIssuedTs: number = 0;
+
+  /**
+   * 发放单调递增时间戳（毫秒）。
+   *
+   * 与 phone/lib/vault-service.ts nextTimestamp 一致：取 Date.now()，若不大于上次发放值
+   * 则 +1，保证严格递增（sync server 端把冲突决策落地时 bump updatedAt 用，须 > 两端 manifest）。
+   */
+  nextTimestamp(): number {
+    const now = Date.now();
+    this.lastIssuedTs = now > this.lastIssuedTs ? now : this.lastIssuedTs + 1;
+    return this.lastIssuedTs;
+  }
+
   /**
    * 摄取来自对端 sync 的 plaintext payload —— LWW（last-write-wins）策略
    *

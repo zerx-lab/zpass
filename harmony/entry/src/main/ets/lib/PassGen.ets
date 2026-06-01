@@ -15,6 +15,8 @@ export interface GenOptions {
   numbers: boolean;
   symbols: boolean;
   avoidAmbiguous: boolean;
+  // 与 phone 一致：易读模式开关存在但不改变生成结果（phone generatePassword 同样未消费此字段）
+  pronounceable?: boolean;
 }
 
 const UPPER = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -115,4 +117,31 @@ export function calcStrength(
     score < 70 ? '一般' :
     score < 85 ? '强' : '很强';
   return { score, label, entropy };
+}
+
+/**
+ * 批量去重生成 —— 与 phone/(tabs)/generator.tsx 字节级一致
+ *
+ * 反复调用 genOne 直到收集 count 条互不相同的结果。count 无上限，故用「连续未命中」
+ * 探测：连续 MAX_CONSECUTIVE_MISSES 次都撞重复即认定候选空间耗尽，返回已收集部分
+ * （不抛错）；命中即清零计数，可填满的大批量不会被误伤。
+ */
+const MAX_CONSECUTIVE_MISSES = 50000;
+
+export function generateUniqueBatch(count: number, genOne: () => string): string[] {
+  if (count < 1) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  let misses = 0;
+  while (out.length < count && misses < MAX_CONSECUTIVE_MISSES) {
+    const candidate = genOne();
+    if (!candidate || seen.has(candidate)) {
+      misses++;
+      continue;
+    }
+    misses = 0;
+    seen.add(candidate);
+    out.push(candidate);
+  }
+  return out;
 }

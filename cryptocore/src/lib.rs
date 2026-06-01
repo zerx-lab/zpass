@@ -21,6 +21,10 @@ pub mod android;
 #[cfg(feature = "harmony")]
 pub mod harmony;
 
+// 局域网同步服务端传输层；JNI（android）与 napi（harmony）两座桥共用。
+#[cfg(feature = "lan-server")]
+mod lan_transport;
+
 pub mod sync;
 
 /// XChaCha20-Poly1305 密钥长度（与 Go chacha20poly1305.KeySize 对齐）

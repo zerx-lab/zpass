@@ -50,6 +50,8 @@ interface Resolved {
 	subtitle: string;
 	primary: ReleaseAsset;
 	primaryNote: string;
+	/** 主资产是否为应用商店链接（决定主按钮文案 / 是否新标签页打开 / 是否显示体积） */
+	isStore: boolean;
 	others: Array<{ asset: ReleaseAsset; note: string }>;
 }
 
@@ -68,6 +70,7 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 		subtitle: isZh ? p.subtitleZh : p.subtitleEn,
 		primary,
 		primaryNote: (isZh ? primary.noteZh : primary.noteEn) ?? "",
+		isStore: Boolean(primary.storeUrl),
 		others,
 	};
 });
@@ -186,33 +189,61 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 										{t.download_recommended}
 									</span>
 									<span class="dl-arch mono">{p.primary.arch}</span>
-									<span class="dl-size mono">
-										{formatSize(p.primary.sizeBytes)}
-									</span>
+									{!p.isStore && (
+										<span class="dl-size mono">
+											{formatSize(p.primary.sizeBytes)}
+										</span>
+									)}
 								</div>
 								<a
 									class="btn primary dl-primary-btn"
 									href={p.primary.url}
 									rel="noopener"
-									download
+									{...p.isStore
+										? { target: "_blank" }
+										: { download: true }}
 								>
-									<svg
-										class="dl-arrow"
-										viewBox="0 0 24 24"
-										width="14"
-										height="14"
-										fill="none"
-										stroke="currentColor"
-										stroke-width="2"
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										aria-hidden="true"
-									>
-										<path d="M12 4v12" />
-										<path d="M6 12l6 6 6-6" />
-										<path d="M4 20h16" />
-									</svg>
-									<span class="dl-btn-text">{p.primary.label}</span>
+									{p.isStore ? (
+										<svg
+											class="dl-arrow"
+											viewBox="0 0 24 24"
+											width="14"
+											height="14"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="2"
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											aria-hidden="true"
+										>
+											<path d="M7 17L17 7" />
+											<path d="M8 7h9v9" />
+										</svg>
+									) : (
+										<svg
+											class="dl-arrow"
+											viewBox="0 0 24 24"
+											width="14"
+											height="14"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="2"
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											aria-hidden="true"
+										>
+											<path d="M12 4v12" />
+											<path d="M6 12l6 6 6-6" />
+											<path d="M4 20h16" />
+										</svg>
+									)}
+									<span class="dl-btn-text">
+										{p.isStore
+											? isZh
+												? "前往 Chrome 应用商店安装"
+												: "Get it on the Chrome Web Store"
+											: p.primary.label}
+									</span>
 								</a>
 								{p.primaryNote && (
 									<p class="dl-primary-note">{p.primaryNote}</p>

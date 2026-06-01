@@ -15,13 +15,25 @@
 //!
 //! 线程：Argon2id 派生主路径耗时数百毫秒，必须用 napi-rs 的 `#[napi]`
 //! 异步形态（async fn）—— 框架会把执行移到 libuv worker，UI 主线程不阻塞。
+//!
+//! 局域网同步服务端：设备作为 LAN 同步 server 时，由 crate::lan_transport 起一个
+//! 阻塞式 tiny_http 监听（独立 OS 线程）。每个入站请求经 napi ThreadsafeFunction
+//! 反向回调到 ArkTS 线程处理，再由 respondSyncRequest 唤醒被 park 的 worker。
+//! 协议状态机全部在 ArkTS（SyncServer.ets），与 android.rs 的 JNI 反向回调同构。
+//
+// Rust guideline compliant 2026-02-21
 
+use crate::lan_transport::{self, Inbound, Listener};
 use crate::{
     argon2id_raw, derive_kek, open_aead, open_aead_with_nonce, random_bytes, seal_aead,
     seal_aead_with_nonce,
 };
-use napi_ohos::bindgen_prelude::{AsyncTask, Buffer, Env, Error, Result as NapiResult, Status, Task};
 use napi_derive_ohos::napi;
+use napi_ohos::bindgen_prelude::{
+    AsyncTask, Buffer, Env, Error, Result as NapiResult, Status, Task, Uint8Array,
+};
+use napi_ohos::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
+use std::sync::{Mutex, OnceLock};
 
 /// 把内部 Error 转 napi::Error；保留 message 便于 ArkTS 端按字符串分支
 fn to_napi(e: crate::Error) -> Error {
@@ -199,4 +211,162 @@ pub fn open_aead_with_nonce_napi(
     open_aead_with_nonce(&key, &ciphertext, &aad, &nonce)
         .map(Buffer::from)
         .map_err(to_napi)
+}
+
+/* ----------------------------------------------------------------------------
+ * 局域网同步服务端桥 —— 设备作为 LAN 同步 server
+ *
+ * 与 android.rs 的 JNI 反向回调同构，仅把 JNI 换成 napi ThreadsafeFunction：
+ *   1. lan_transport worker 分配 reqId，把响应通道存入 pending 表
+ *   2. 经 SYNC_TSFN 反向回调 ArkTS handler，下发 {reqId, method, path, body}
+ *   3. ArkTS 计算响应后调 respondSyncRequest(reqId, status, body) 唤醒 worker
+ *   4. worker 把 (status, body) 写回该 HTTP 连接
+ *
+ * 协议 / vault / crypto 逻辑全部在 ArkTS（SyncServer.ets）。明文 HTTP（局域网内由
+ * PSK + 会话 AEAD 保证机密性，与 desktop server 同构），不需要 TLS。
+ * -------------------------------------------------------------------------- */
+
+/// 下发给 ArkTS handler 的单个入站同步请求。镜像 phone 端 `SyncRequestEvent`。
+///
+/// `body` 走 `Uint8Array`（ArkTS 侧零拷贝 ArrayBuffer），与本桥其余函数一致；
+/// base64 仅在 RN/phone 端使用（Expo 对字节传输支持弱）。`reqId` 用 `u32`：
+/// ArkTS 的 `number` 能无损往返 u32，2^32 个请求/服务端生命周期远超实际需要，
+/// respondSyncRequest 在边界处同样按 u32 取，两端一致。
+#[napi(object)]
+pub struct SyncRequest {
+    pub req_id: u32,
+    pub method: String,
+    pub path: String,
+    pub body: Uint8Array,
+}
+
+/// `startSyncServer` 返回的 `{port, hosts}`。
+#[napi(object)]
+pub struct SyncServerInfo {
+    pub port: u32,
+    pub hosts: Vec<String>,
+}
+
+// napi 自由函数无法持有实例状态，服务端单例只能放 static。整个 .so 由单个 app
+// 进程加载，不跨 DLL 共享，故 M-ISOLATE-DLL-STATE 不适用。
+//
+/// ArkTS 请求 handler，由 registerSyncRequestHandler 注册一次。
+///
+/// `ThreadsafeFunction` 由 napi-ohos 本身 `unsafe impl Send + Sync`（不是本模块
+/// 临时 `unsafe impl`），所以放进 static 并从 tiny_http worker 线程 `call` 是
+/// 安全的。CalleeHandled 取默认 true → 用 `Ok(req)` 调用，JS 侧按 error-first
+/// 收到 `(null, req)`。
+static SYNC_TSFN: OnceLock<ThreadsafeFunction<SyncRequest>> = OnceLock::new();
+
+/// 当前运行中的 listener；None = 未运行。stopSyncServer 后置回 None 使 start 幂等。
+static SERVER: OnceLock<Mutex<Option<Listener>>> = OnceLock::new();
+
+fn server_slot() -> &'static Mutex<Option<Listener>> {
+    SERVER.get_or_init(|| Mutex::new(None))
+}
+
+/// 取锁；panic=abort 下 Mutex 不会真正中毒，into_inner 仅为防御性恢复。
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// 注册每个入站同步请求触发的 ArkTS handler。
+///
+/// 必须在 [`start_sync_server`] 之前调用一次。handler 收到 [`SyncRequest`] 后须
+/// 最终调用 `respondSyncRequest(reqId, ...)` 回传响应。首次注册生效（OnceLock
+/// 黏住），后续重复注册被忽略，以保证 worker 线程缓存的 TSFN 句柄稳定。
+#[napi(js_name = "registerSyncRequestHandler")]
+pub fn register_sync_request_handler(
+    handler: ThreadsafeFunction<SyncRequest>,
+) -> NapiResult<()> {
+    // 黏住：首次注册胜出；若已注册，新传入的 TSFN 在此被 drop 并释放。
+    let _ = SYNC_TSFN.set(handler);
+    Ok(())
+}
+
+/// 本设备是否可作为 LAN 同步服务端。feature=harmony 下恒为 true（传输层已编译进
+/// 来），仅为与 phone 桥对称地探测而存在。
+#[napi(js_name = "isSyncServerAvailable")]
+pub fn is_sync_server_available() -> bool {
+    true
+}
+
+/// 启动局域网同步服务端，绑定 0.0.0.0 的 OS 分配端口。
+///
+/// 幂等：已在运行则返回当前 `{port, hosts}`。ArkTS handler 须已通过
+/// [`register_sync_request_handler`] 注册，否则入站请求一律回 500。
+///
+/// # Errors
+///
+/// 套接字绑定失败或 worker 线程派生失败时返回 `GenericFailure`。
+#[napi(js_name = "startSyncServer")]
+pub fn start_sync_server() -> NapiResult<SyncServerInfo> {
+    let mut guard = lock(server_slot());
+    if let Some(listener) = guard.as_ref() {
+        return Ok(SyncServerInfo {
+            port: u32::from(listener.port()),
+            hosts: listener.hosts().to_vec(),
+        });
+    }
+
+    // emit 在 tiny_http worker 线程上跑：取缓存的 TSFN，NonBlocking 反向回调 ArkTS
+    // —— 绝不让 worker 阻塞在 JS 队列上（worker 随后 park 在自己的 mpsc 通道，直到
+    // respondSyncRequest 唤醒或 RESPONSE_TIMEOUT 超时回 504）。
+    let emit = |inbound: Inbound<'_>| -> bool {
+        let Some(tsfn) = SYNC_TSFN.get() else {
+            return false; // handler 从未注册 → worker 回 500
+        };
+        let req = SyncRequest {
+            req_id: inbound.req_id as u32,
+            method: inbound.method.to_owned(),
+            path: inbound.path.to_owned(),
+            // 拷贝成 owned Uint8Array：ArkTS 线程的生命周期长于此栈帧。
+            body: Uint8Array::new(inbound.body.to_vec()),
+        };
+        let status = tsfn.call(Ok(req), ThreadsafeFunctionCallMode::NonBlocking);
+        status == Status::Ok
+    };
+
+    let listener = lan_transport::start(emit)
+        .map_err(|e| Error::new(Status::GenericFailure, format!("bind: {e}")))?;
+    let info = SyncServerInfo {
+        port: u32::from(listener.port()),
+        hosts: listener.hosts().to_vec(),
+    };
+    *guard = Some(listener);
+    Ok(info)
+}
+
+/// 停止局域网同步服务端。幂等。
+///
+/// 唤醒所有 park 的 worker（送 503）、join worker 线程、关闭监听套接字。
+/// SYNC_TSFN 故意保留注册（黏住），后续 start 复用；TSFN 仅在 .so 卸载时释放。
+#[napi(js_name = "stopSyncServer")]
+pub fn stop_sync_server() {
+    // 先 take 出 listener 释放 SERVER 锁，避免持锁 join 与 respondSyncRequest 死等。
+    let listener = lock(server_slot()).take();
+    if let Some(listener) = listener {
+        lan_transport::stop(listener);
+    }
+}
+
+/// ArkTS 侧算完响应后回传给被 park 的请求。
+///
+/// reqId 未知（已超时 / 已停止）则静默丢弃。status 不在 100..=599 归一为 500。
+#[napi(js_name = "respondSyncRequest")]
+pub fn respond_sync_request(req_id: u32, status: u32, body: Uint8Array) {
+    let status = if (100..=599).contains(&status) {
+        status as u16
+    } else {
+        500
+    };
+    let guard = lock(server_slot());
+    if let Some(listener) = guard.as_ref() {
+        lan_transport::respond(
+            lan_transport::pending(listener),
+            u64::from(req_id),
+            status,
+            body.to_vec(),
+        );
+    }
 }

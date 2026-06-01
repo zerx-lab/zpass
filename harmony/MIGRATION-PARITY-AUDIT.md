@@ -1,0 +1,859 @@
+# ZPass phone → harmony 页面对等审计
+
+> 自动审计 14 个页面对，按行为而非行数判定。可接受适配不计入差距。
+
+**全局差距：高 53 · 中 71 · 低 32（共 156），另有可接受适配若干。**
+
+## sync-host `[整页缺失]` `[范围待定]` — parity≈0%  (高14/中0/低0)
+No harmony counterpart for sync-host exists. The phone page implements a "be the server" mode where the phone acts as a LAN sync server that other devices connect to. The harmony SyncProtocol.ets explicitly documents that harmony only implements the client role because running an HTTP server on HarmonyOS requires an additional native module (Rust tiny_http) that is not present in the harmony build. This is a deliberate architectural constraint, not an oversight — the same comment appears in both phone/lib/sync-server.ts and harmony/lib/SyncProtocol.ets. A human product decision is required: either accept that harmony is client-only (and hide or omit the host entry point), or implement a native HTTP listener module for HarmonyOS to enable the server role. All findings below enumerate the full scope of what would need to be built if the server role is ever ported.
+
+- **[高·缺功能] No sync server (host) mode on harmony — entire page absent**
+  - phone: phone/app/sync-host.tsx is a full page that starts/stops an HTTP server (via native Rust tiny_http) so other devices can connect to the phone as a sync server. The server generates a random 6-digit PIN, discovers LAN IP addresses and port, and exposes /v1/pair, /v1/sync/manifest, /v1/sync/fetch, /v1/sync/push, /v1/sync/commit, /v1/sync/report-conflicts, /v1/sync/poll-resolutions endpoints.
+  - harmony: No SyncHostPage or SyncServer lib exists anywhere in the harmony tree. harmony/lib/SyncProtocol.ets explicitly states harmony only implements the client role because starting an HTTP server requires an extra native module not present in the harmony build.
+  - 位置: `phone/app/sync-host.tsx:1-338 (entire file); harmony: no counterpart`
+  - 实现: Product decision required first (see isScopeQuestion). If server role is to be ported, implement: (1) a native HarmonyOS HTTP server module (replacing Rust tiny_http); (2) a SyncServerLib.ets mirroring phone/lib/sync-server.ts state machine; (3) a SyncHostPage.ets page with all UI blocks listed in subsequent findings.
+- **[高·缺UI] Navigation bar with back button and '同步服务端' title**
+  - phone: phone/app/sync-host.tsx:77-89 renders a top nav row with a back chevron button (IconButton variant=ghost), centered title text '同步服务端', and a 36px spacer for balance.
+  - harmony: No harmony page exists.
+  - 位置: `phone/app/sync-host.tsx:77-89; harmony: none`
+  - 实现: In the new SyncHostPage.ets build a Row nav bar: back button (Text '返回' or chevron icon with router.back()), centered Text '同步服务端' with FontWeight.Bold, and a balanced spacer.
+- **[高·缺UI] Hero section: icon, title '让别人连我', description text**
+  - phone: phone/app/sync-host.tsx:95-103 shows a centered hero with a 56x56 tinted circle containing person.2.fill icon (c.info color), title '让别人连我' (Type.title2), and description footnote '在另一台设备的「局域网同步」里扫码或手输下方 IP 与 PIN 即可连接到本机同步'.
+  - harmony: No harmony page exists.
+  - 位置: `phone/app/sync-host.tsx:95-103; harmony: none`
+  - 实现: Build a Column hero section with: 56x56 circle (backgroundColor info+0x1f, borderRadius ZRadius.xl), a people/group icon or LAN label inside, Title2 text '让别人连我', and footnote description text centered.
+- **[高·缺UI] Start/Stop server toggle button**
+  - phone: phone/app/sync-host.tsx:105-112 shows a full-width large Button labeled '启动服务' (variant=primary, icon=play.fill) when server is stopped, and '停止服务' (variant=danger, icon=stop.fill) when running. Pressing stop shows a confirm dialog before stopping.
+  - harmony: No harmony page exists.
+  - 位置: `phone/app/sync-host.tsx:51-66, 105-112; harmony: none`
+  - 实现: Add a full-width Button with dynamic label/color: accent background when idle ('启动服务'), danger background when running ('停止服务'). Wire to startServer/stopServer; stopping should show promptAction.showDialog confirm before proceeding.
+- **[高·缺UI] Idle hint text shown when server is not running**
+  - phone: phone/app/sync-host.tsx:221-225 shows a centered footnote '启动后本机会监听局域网连接；保持本页打开，对端连接期间请勿锁屏。' when the server is not running.
+  - harmony: No harmony page exists.
+  - 位置: `phone/app/sync-host.tsx:221-225; harmony: none`
+  - 实现: When server is not running, render a centered footnote Text with this guidance string.
+- **[高·缺UI] Status indicator row (colored dot + status label)**
+  - phone: phone/app/sync-host.tsx:117-135 shows a bgElev card row with an 8px colored dot (warn if conflicts, info if paired/applying, ok otherwise) and a text label derived from statusLabel() covering 7 states: listening/paired/merge/applying/done/starting/default.
+  - harmony: No harmony page exists.
+  - 位置: `phone/app/sync-host.tsx:117-135, 231-249; harmony: none`
+  - 实现: Add a status Row card: 8x8 dot with conditional color (ZColors.warn / ZColors.info / ZColors.ok), Text label mapped from server status enum. Show only when server is running.
+- **[高·缺功能] Conflict banner and navigation to conflict resolution page**
+  - phone: phone/app/sync-host.tsx:137-153 shows a pressable conflict banner (warn background tint, exclamation icon, '{N} 项冲突待解决', chevron.right) when pendingConflicts.length > 0. Pressing it navigates to /sync-conflicts where the user resolves each conflict with local/remote/duplicate/skip choices.
+  - harmony: No harmony page exists. There is also no sync-conflicts.tsx equivalent in harmony.
+  - 位置: `phone/app/sync-host.tsx:137-153; harmony: none`
+  - 实现: Add a pressable conflict banner Row (warn background, warn-colored count text, chevron). Also requires a separate SyncConflictsPage.ets (equivalent of phone/app/sync-conflicts.tsx) to handle the conflict resolution UI.
+- **[高·缺UI] PIN display card with 6 individual digit cells**
+  - phone: phone/app/sync-host.tsx:155-175 shows a card labeled '配对 PIN' containing 6 equal-width accent-background cells each showing one digit of the server PIN in monospace font-size 22 bold. This PIN is auto-generated when the server starts.
+  - harmony: No harmony page exists.
+  - 位置: `phone/app/sync-host.tsx:155-175; harmony: none`
+  - 实现: Add a card with label '配对 PIN' and a Row of 6 layoutWeight(1) cells (accent background, borderRadius ZRadius.lg, height 48) each showing one character of the PIN in size-22 bold monospace font.
+- **[高·缺UI] Local address list card with copy-on-tap**
+  - phone: phone/app/sync-host.tsx:177-206 shows a card labeled '本机地址 · 端口 {port}' listing each LAN IP as a tappable row showing '{ip}:{port}' in monospace with a copy icon. Tapping copies the address and shows a toast. Empty state shows '未检测到局域网地址，请确认已连接 Wi-Fi'.
+  - harmony: No harmony page exists.
+  - 位置: `phone/app/sync-host.tsx:177-206; harmony: none`
+  - 实现: Add a card with label '本机地址 · 端口 {port}'. Map server.hosts to tappable Rows showing '{host}:{port}' in monospace with a copy icon; onTap copy to clipboard and show a toast. Show empty-state text if no hosts.
+- **[高·缺UI] QR code card for scan-to-connect**
+  - phone: phone/app/sync-host.tsx:208-219 shows a card labeled '扫码连接' containing a 200px QR code of the zpass-sync:// URI and hint text '另一台手机用「局域网同步」扫此码即可自动填充'. Card is only shown when server.qrPayload is non-empty.
+  - harmony: No harmony page exists. The harmony client (Sync.ets) can scan QR codes via ScanKit but there is no QR code generation (display) component in the harmony codebase.
+  - 位置: `phone/app/sync-host.tsx:208-219; harmony: none`
+  - 实现: Use HarmonyOS QRCode component (from ArkUI, available as QRCode({ value: payload })) to display the zpass-sync:// URI as a 200vp QR code inside a centered card when qrPayload is non-empty. Add footnote hint text below.
+- **[高·缺功能] Auto-stop server on vault lock**
+  - phone: phone/app/sync-host.tsx:38-42 uses a useEffect watching locked state: if the vault becomes locked while the server is running, it automatically calls syncServer.stopServer() to prevent a locked vault from serving data.
+  - harmony: No harmony server implementation exists. The VaultStore.ets has lock state but no server stop integration.
+  - 位置: `phone/app/sync-host.tsx:38-42; harmony: none`
+  - 实现: In the new SyncHostPage.ets @Monitor the vaultStore.locked state: when it becomes true and the server is running, call stopServer().
+- **[高·缺功能] Auto-stop server on page exit**
+  - phone: phone/app/sync-host.tsx:44-49 uses a useEffect cleanup (returns a stop function) so navigating away from the page automatically stops the server.
+  - harmony: No harmony page exists.
+  - 位置: `phone/app/sync-host.tsx:44-49; harmony: none`
+  - 实现: In the new SyncHostPage.ets implement aboutToDisappear() lifecycle hook to call stopServer() when the user navigates away.
+- **[高·缺功能] Native HTTP server module (Rust tiny_http equivalent)**
+  - phone: phone/lib/sync-server.ts imports nativeStartSyncServer / nativeStopSyncServer / addSyncRequestListener / nativeRespondSyncRequest from modules/zpass-crypto. These are native Rust bindings that run a tiny_http server, fire JS events per incoming request, and send responses back.
+  - harmony: No native HTTP server module exists in the harmony build. harmony/lib/SyncProtocol.ets explicitly states this as the reason for client-only mode.
+  - 位置: `phone/lib/sync-server.ts:62-68; harmony/lib/SyncProtocol.ets:10-14`
+  - 实现: If the server role is to be ported, a native HarmonyOS module implementing an HTTP server (listening TCP socket, per-request callback) must be created. This is a significant native engineering task and is the primary blocker for the entire sync-host feature on harmony.
+- **[高·缺功能] Server-side conflict handling protocol (report-conflicts / poll-resolutions endpoints)**
+  - phone: phone/lib/sync-server.ts:524-586 implements handleReportConflicts and handlePollResolutions on the server side. When the connecting client reports conflicts, the server stores them, shows them in the UI (sync-conflicts.tsx), lets the user decide, applies the merge via applyMerge(), and then serves the resolution actions back to the polling client.
+  - harmony: harmony/lib/SyncProtocol.ets only implements the client side of these endpoints (the harmony client sends report-conflicts and polls poll-resolutions from the desktop server). The server handler logic does not exist in harmony.
+  - 位置: `phone/lib/sync-server.ts:524-586; harmony/lib/SyncProtocol.ets:471-558`
+  - 实现: If the server role is ported, implement a SyncServerLib.ets that mirrors phone/lib/sync-server.ts: server-side handleReportConflicts (mirror conflict perspective, populate conflict UI store), handlePollResolutions (return ready+actions once user has resolved), and applyMerge (apply choices to local vault and generate action list for the client).
+
+## sync-conflicts `[整页缺失]` `[范围待定]` — parity≈0%  (高7/中4/低0)
+The sync-conflicts page has no harmony counterpart at all. This is a deliberate architectural decision: harmony is intentionally client-only (explicitly documented in SyncProtocol.ets lines 12-14 and the phone sync-server.ts line 16), meaning harmony devices connect TO a desktop server, not the other way around. In the current design, conflict resolution happens on the desktop/PC server UI, and harmony's Sync.ets result card already reflects this by showing '冲突待在桌面端解决'. A human must decide whether harmony should ever act as a sync server (which would require adding a native HTTP server module); if yes, the entire page plus the underlying sync-server protocol state machine (phone/lib/sync-server.ts) would need to be ported. If this scope decision is confirmed as out-of-scope for harmony, all findings below are accepted and no action is needed. Additionally, one pre-existing design-violation was found in the related Sync.ets page (raw unicode '✓' / '×' / '!' used as visual icons) which should be fixed regardless of the sync-conflicts scope decision.
+
+- **[高·缺功能] Entire sync-conflicts page does not exist in harmony**
+  - phone: phone/app/sync-conflicts.tsx (508 lines) renders a full-screen conflict resolution flow when the phone acts as sync server. It pulls `server.pendingConflicts` from `useSyncServer()`, lets the user step through each conflict one-by-one, choose a resolution (local / remote / duplicate / skip) per conflict, apply all choices via `server.applyMerge()`, and returns to the previous screen with a toast summary. This UI is only reachable when the phone is the sync host/server.
+  - harmony: No harmony counterpart exists. The harmony SyncProtocol.ets (line 12-14) explicitly documents the deliberate decision: 鸿蒙端仅实现 client 角色 — 鸿蒙不需要展示冲突列表. The harmony Sync.ets result card instead shows '冲突待在桌面端解决', deferring conflict resolution to the desktop server.
+  - 位置: `phone: phone/app/sync-conflicts.tsx:1-508 | harmony: (no file)`
+  - 实现: This is a deliberate product/scope decision — harmony is client-only and conflicts are owned by the desktop server. A human must decide whether harmony should ever act as a sync server (which would require a native HTTP server module per sync-server.ts line 16). If yes, the entire page needs to be ported; if no, this finding is accepted as intentional and no action is needed.
+- **[高·缺功能] Sync server role (HTTP listener) not implemented in harmony**
+  - phone: The phone has a native sync-server (phone/lib/sync-server.ts, backed by Rust tiny_http in modules/zpass-crypto, Android-only). When acting as server the phone: accepts pairing, derives session key, serves manifest, handles fetch/push/report-conflicts/poll-resolutions endpoints, accumulates conflicts in pendingConflicts store, and exposes applyMerge() to write decisions to vault and release them to the connecting client.
+  - harmony: Harmony has no HTTP server module and no server-role protocol handler. SyncProtocol.ets implements only the client role (connectAndSync). The harmony comment explicitly states starting an HTTP server requires an extra native module that is not present.
+  - 位置: `phone: phone/lib/sync-server.ts:1-100+ | harmony: harmony/entry/src/main/ets/lib/SyncProtocol.ets:1-14 (comment)`
+  - 实现: Same scope decision as above. If harmony-as-server is required, a native HTTP server (NAPI or a bundled service) must be added, then the full server protocol state machine must be ported from phone/lib/sync-server.ts.
+- **[高·缺UI] Navigation header with conflict counter (N / total) not implemented**
+  - phone: phone/app/sync-conflicts.tsx line 171: Nav title shows '解决冲突  {index+1} / {total}' so the user always knows their position in the conflict list. Back button (chevron.left IconButton) returns to previous screen.
+  - harmony: No harmony page exists.
+  - 位置: `phone: sync-conflicts.tsx:170-172 | harmony: (no file)`
+  - 实现: When porting, render a top Row with a back button and centered title in the format '解决冲突 N/M' using ZType.title2Size.
+- **[高·缺UI] Item title block (item name + conflict-kind label) not implemented**
+  - phone: phone/app/sync-conflicts.tsx lines 180-187: Shows the conflicted item's name (current.local?.name ?? current.remote?.name ?? current.id) in Type.title2 and the human-readable conflict kind ('并发编辑' / '内容分叉' / '一方删除一方修改') in Type.footnote below it.
+  - harmony: No harmony page exists.
+  - 位置: `phone: sync-conflicts.tsx:180-187 | harmony: (no file)`
+  - 实现: When porting, show item name (ZType.title2Size, bold) and a kind-label row (ZType.footnoteSize, zc.text3) with the same Chinese translations of the three conflict kinds.
+- **[高·缺UI] SideCard — per-side data card (local and remote) with field diff highlighting not implemented**
+  - phone: phone/app/sync-conflicts.tsx lines 323-384: Each side (local '本机（此设备）' and remote '对端（连入设备）') is shown in an elevated card with: side label + Badge chips ('建议'/'较新'), a monospace timestamp line '更新于 MM-DD HH:mm', deleted state '（已删除）' in danger color, and a field list. Each field row shows: uppercase field label (64px wide, warn color if differs from other side with '·' suffix) + MaskedValue (tap to reveal, monospace for sensitive fields). Sensitive fields: password/secret/cvv/pin/token/apikey/seed/private/key.
+  - harmony: No harmony page exists.
+  - 位置: `phone: sync-conflicts.tsx:323-384 | harmony: (no file)`
+  - 实现: When porting: two Column cards (bgElev, borderRadius ZRadius.xl) with header row, timestamp in monospace, deleted indicator, and field rows. Implement MaskedValue as a tap-to-toggle Text (hidden with '••••••'). Highlight differing fields in zc.warn color. Use Badge-equivalent custom builder for '建议' (info tone) and '较新' (ok tone).
+- **[高·缺UI] 4-button choice grid (用本机 / 用对端 / 两者都留 / 跳过) not implemented**
+  - phone: phone/app/sync-conflicts.tsx lines 213-242: A 2×2 grid of ChoiceButton. Each button is 47% width, 48px height, Radius.lg. Active state fills with c.accent and shows a leading icon (checkmark/plus/minus) in accentInk. '用对端' button shows '· 建议' suffix when current.suggestedRemote is true. Pressing a button calls server.resolveConflict(id, choice) and auto-advances to the next unresolved conflict.
+  - harmony: No harmony page exists.
+  - 位置: `phone: sync-conflicts.tsx:213-242, 386-423 | harmony: (no file)`
+  - 实现: When porting: use a Flex with wrap or a Grid(2 columns) of 4 buttons. Active state: backgroundColor zc.accent, label color zc.accentInk. Inactive: backgroundColor zc.bgElev, label color zc.text. Use an icon system (no emoji) for the leading checkmark/plus/minus icons.
+- **[高·缺UI] Footer bar with 'all-remote' bulk action, prev/next pager, and 'apply all' CTA not implemented**
+  - phone: phone/app/sync-conflicts.tsx lines 245-292: Fixed bottom bar with: (1) '全部用对端' text button (info color) that calls handleBulkRemote() to set all conflicts to 'remote'; (2) a pager row with left/right chevron IconButtons (tinted variant, disabled at boundaries) and a mono '1/N' counter; (3) full-width '应用全部' primary button (accent fill, 52px height, Radius.lg) that calls handleApply() — disabled (opacity 0.4) until allResolved is true; loading state shows '应用中…'.
+  - harmony: No harmony page exists.
+  - 位置: `phone: sync-conflicts.tsx:245-292 | harmony: (no file)`
+  - 实现: When porting: render a fixed bottom Row outside the Scroll. '全部用对端' as a Text with onClick. Pager with two icon buttons (check bounds). '应用全部' as a full-width Row/Text button with accent backgroundColor, disabled opacity 0.4 when not allResolved or busy.
+- **[中·缺UI] Empty state (no conflicts) screen not implemented**
+  - phone: phone/app/sync-conflicts.tsx lines 149-162: When conflicts array is empty (no current conflict), renders a centered empty state with a checkmark.circle.fill icon (size 40, ok color) and text '没有待解决的冲突'.
+  - harmony: No harmony page exists.
+  - 位置: `phone: sync-conflicts.tsx:149-162 | harmony: (no file)`
+  - 实现: When porting: guard on empty conflict list and show a centered Column with a check icon (SVG or system icon, size 40, zc.ok color) and text '没有待解决的冲突' in zc.text3.
+- **[中·缺功能] Auto-seed default resolutions on page entry not implemented**
+  - phone: phone/app/sync-conflicts.tsx lines 93-105: On mount, for every conflict that has no resolution yet, automatically pre-selects 'remote' if suggestedRemote is true, else 'local'. This means all conflicts have a default decision; user can override any before applying.
+  - harmony: No harmony page exists.
+  - 位置: `phone: sync-conflicts.tsx:93-105 | harmony: (no file)`
+  - 实现: When porting: call resolveConflict for all conflicts on page init (once, guarded by a flag) before the first render or in an onAppear lifecycle hook.
+- **[中·缺功能] applyMerge — vault write + vault refresh + toast + navigation on success not implemented**
+  - phone: phone/app/sync-conflicts.tsx lines 132-147: handleApply() calls server.applyMerge() (writes decisions to local vault, builds action list for the connecting client to poll), then calls refresh() on the vault context, shows toast.ok('已解决', '{n} 项已应用，对端将自动收到') and navigates back. On failure shows toast.warn('无法应用', errorMessage) and stays on the page.
+  - harmony: No harmony page exists.
+  - 位置: `phone: sync-conflicts.tsx:132-147 | harmony: (no file)`
+  - 实现: When porting: call the server applyMerge equivalent, then vaultStore.refresh(), then promptAction.showToast for success, then router.back(). Show a separate error toast on failure.
+- **[中·设计违例] Existing Sync.ets resultCard uses '✓' and '×' and '!' unicode symbols as icons**
+  - phone: phone/app/sync.tsx uses icon system (IconSymbol / Badge components) or text-based semantic indicators — no raw unicode symbols as visual icons.
+  - harmony: harmony/entry/src/main/ets/pages/Sync.ets resultCard (lines 403, 440, 489) uses Text('✓'), Text('×'), Text('!') as visual icon substitutes inside styled containers. This violates ZPass design rules: NO unicode decorative symbols in rendered UI.
+  - 位置: `phone: phone/app/sync.tsx (reference only) | harmony: Sync.ets:403, 440, 489`
+  - 实现: Replace Text('✓'), Text('×'), Text('!') in Sync.ets resultCard and errorCard with proper SVG icon builders or ArkUI SymbolGlyph equivalents. Also apply this rule when implementing the sync-conflicts page — use icon builders for the choice buttons (checkmark/plus/minus), not text symbols.
+
+## item-edit — parity≈42%  (高6/中5/低3)
+The harmony ItemEdit.ets page covers the structural skeleton (nav bar, type chips for new mode, name field, per-type field sets, save/back flow) but is missing four high-severity feature blocks that are core to the phone's edit UX: the entire custom fields section (data model library exists in CustomFields.ets but is unwired from the UI), the tags field, the notes field, and the favorite toggle. Several type-specific fields are also absent: the login type lacks its attached TOTP key field with QR scan, the card type lacks PIN, identity misses address/dob/passport, and SSH misses fingerprint and publicKey. The password generate button present on the phone's password fields is also missing. QR scanning exists on harmony only as a separate standalone TotpScan page that cannot inject a result back into an open ItemEdit form. Cumulatively, a user editing an item on harmony would silently lose custom fields, tags, notes, and the favorite state on every save, making the edit page functionally dangerous relative to the phone.
+
+- **[高·缺功能] Custom fields section entirely absent**
+  - phone: Phone renders a full CustomFieldsSection below the type-specific fields (phone:[id].tsx:414-422). It shows Add buttons for each of the 4 types (text/hidden/boolean/linked), an empty-state placeholder with icon and label, and per-field editor rows that let the user set name, choose type via chip strip, enter value (text input / masked input with reveal / boolean toggle / linked chip selector), and delete the field (trash icon). Custom fields are serialised to `_customFields` JSON and stored with the item.
+  - harmony: The CustomFields.ets lib (harmony:lib/CustomFields.ets:1-127) fully implements the data model, serialisation helpers, and LINKABLE_FIELDS_BY_TYPE. However, ItemEdit.ets has zero UI wiring for custom fields — no Add buttons, no editor rows, no empty state. Custom fields saved from the phone will silently be dropped on the next harmony edit.
+  - 位置: `phone/app/item/[id].tsx:413-651 (CustomFieldsSection + CustomFieldEditorRow) | harmony/entry/src/main/ets/pages/ItemEdit.ets (absent)`
+  - 实现: Add a custom fields section in ItemEdit.ets below the type-specific fields: (1) a row of Add buttons using CUSTOM_FIELD_TYPES, (2) an empty-state Column when customFields.length === 0, (3) per-field editor rows exposing type-chip-strip, name TextInput, type-appropriate value input (TextInput / passwordField / Toggle / linked Chip bar), and a delete icon. Load existing custom fields via parseCustomFields(item.fields) in loadExisting(), collect via serializeCustomFields() in collectFields().
+- **[高·缺UI] Tags field missing**
+  - phone: Phone shows a dedicated 'Tags' field (mono, comma-separated) below the custom fields section and above Notes (phone:[id].tsx:424-431). On save, tags are split by comma and stored as the `tags` array on the item. The field is always shown regardless of item type.
+  - harmony: ItemEdit.ets has no tags field. The VaultStore search (VaultStore.ets:104-107) does handle tags in search, but the edit page never lets the user set them. Tags saved on phone will be invisible and non-editable on harmony.
+  - 位置: `phone/app/item/[id].tsx:424-430 | harmony/entry/src/main/ets/pages/ItemEdit.ets (absent)`
+  - 实现: Add a standard field() row after the custom fields section with label '标签', placeholder '用逗号分隔', storing and loading the comma-joined tags string. On collectFields(), split by ',' and pass as fields.tags array (or comma string if the service accepts it).
+- **[高·缺UI] Notes field missing**
+  - phone: Phone shows a multiline 'Notes / 备注' field (phone:[id].tsx:433-440) for all item types except 'note' (which has its own content field). Notes are stored as the `notes` string on the item.
+  - harmony: ItemEdit.ets has no notes field. The multilineField builder exists but is used only for 'note' type content. There is no general notes field for login/card/identity/ssh/passkey/totp.
+  - 位置: `phone/app/item/[id].tsx:433-440 | harmony/entry/src/main/ets/pages/ItemEdit.ets (absent)`
+  - 实现: Add a multilineField() call below the tags field, guarded by `if (this.itemType !== 'note')`, with label '备注'. Store in a @Local itemNotes field; include in collectFields() as `out.notes = this.itemNotes`.
+- **[高·缺UI] Favorite toggle row missing**
+  - phone: Phone shows a pressable row at the bottom of the scroll area (phone:[id].tsx:443-479) containing a star icon (filled/outlined depending on state), '加入收藏' label, and a custom switch track+thumb. Toggling persists `favorite: true/false` with the item. The star icon background tints warn-color when active.
+  - harmony: ItemEdit.ets has no favorite toggle. The VaultStore has toggleFavorite() (VaultStore.ets:298-301) and the filteredItems getter checks favorite (VaultStore.ets:91-93), but ItemEdit never reads or sets the favorite field when creating or editing.
+  - 位置: `phone/app/item/[id].tsx:443-479 | harmony/entry/src/main/ets/pages/ItemEdit.ets (absent)`
+  - 实现: Add a @Local isFavorite: boolean field. Load it from item.fields.favorite in loadExisting(). Render a Toggle row (or custom Row with a Toggle component) labelled '加入收藏'. In collectFields() set `out.favorite = this.isFavorite`.
+- **[高·缺功能] QR scan for login TOTP field and TOTP secret field absent in ItemEdit**
+  - phone: Phone's Field component renders a QR scan icon button when `f.scan === true` (phone:[id].tsx:567-576). This applies to: login type's `totp` field (key='totp', phone:[id].tsx:61-67), and totp type's `secret` field (phone:[id].tsx:76-79). Pressing opens QrScanner modal; on result the URI is written to the field and for totp type, issuer/account/name are auto-filled from OTP metadata (phone:[id].tsx:222-237).
+  - harmony: ItemEdit.ets passwordField for the TOTP secret (line 305) and the login TOTP field (absent — see separate finding) have no scan button. TotpScan.ets exists as a standalone page for creating a fresh TOTP item but is not invoked from ItemEdit and cannot return a value into an existing form.
+  - 位置: `phone/app/item/[id].tsx:61-67, 76-79, 221-237, 402-410 | harmony/entry/src/main/ets/pages/ItemEdit.ets:304-307 (no scan button)`
+  - 实现: For the TOTP secret field in totp mode, and the totp field in login mode: add a scan icon button (ScanKit icon or SVG qr-code icon) next to the password input. On tap, invoke scanBarcode.startScanForResult() (pattern from TotpScan.ets:33-50), parse via parseOtpauth(), then fill the secret (and for totp type: issuer, account) from the result.
+- **[高·缺UI] Login type missing TOTP key field**
+  - phone: Phone's login type definition includes a 4th field: key='totp', label='TOTP 密钥', placeholder='base32 / otpauth:// 或点扫码', mono=true, scan=true (phone:[id].tsx:62-67). This lets users attach a TOTP secret directly to a login item (not a separate TOTP item).
+  - harmony: ItemEdit.ets login branch (lines 280-282) only shows username, password, url. The totp field is absent entirely. There is no @Local loginTotp or collectFields entry for it.
+  - 位置: `phone/app/item/[id].tsx:62-67 | harmony/entry/src/main/ets/pages/ItemEdit.ets:280-282`
+  - 实现: Add @Local loginTotp: string = '' field. In the login branch, add a passwordField (or custom field with scan button) for 'TOTP 密钥'. In loadExisting(), read `f.totp`. In collectFields() case 'login', set `out.totp = this.loginTotp`.
+- **[中·缺UI] Card type missing PIN field**
+  - phone: Phone's card type definition includes a PIN field (key='pin', secret=true, mono=true, keyboard=numeric, phone:[id].tsx:86) between CVV and brand. Allows storing ATM PIN alongside card data.
+  - harmony: ItemEdit.ets card branch (lines 284-288) shows cardholder, number, exp, CVV, brand — no PIN field. No @Local cardPin or collectFields entry.
+  - 位置: `phone/app/item/[id].tsx:86 | harmony/entry/src/main/ets/pages/ItemEdit.ets:284-288`
+  - 实现: Add @Local cardPin: string = ''. In card branch, add passwordField('PIN', this.cardPin, ...) after CVV. In collectFields() case 'card', set `out.pin = this.cardPin`.
+- **[中·缺UI] Identity type missing address, date-of-birth, and passport fields**
+  - phone: Phone's identity type has 7 fields (phone:[id].tsx:90-98): first, last, email, phone, address (multiline), dob (YYYY-MM-DD, mono), passport (secret, mono). Harmony only implements first, last, email, phone (4 of 7).
+  - harmony: ItemEdit.ets identity branch (lines 291-295) stops at phone. No @Local for idAddress, idDob, idPassport.
+  - 位置: `phone/app/item/[id].tsx:95-98 | harmony/entry/src/main/ets/pages/ItemEdit.ets:291-295`
+  - 实现: Add @Local idAddress, idDob, idPassport fields. In identity branch, add multilineField('地址', ...), field('出生日期', ..., 'YYYY-MM-DD', ...), and passwordField('护照号', ...). In loadExisting and collectFields, handle these three keys.
+- **[中·缺UI] SSH type missing fingerprint and publicKey fields**
+  - phone: Phone's SSH type has 5 fields (phone:[id].tsx:99-105): username, keyType, fingerprint (mono, multiline), publicKey (mono, multiline), apiKey (secret, mono). Harmony only implements username, keyType (as '密钥类型'), apiKey.
+  - harmony: ItemEdit.ets SSH branch (lines 296-299) omits fingerprint and publicKey entirely. No @Local for sshFingerprint, sshPublicKey.
+  - 位置: `phone/app/item/[id].tsx:102-104 | harmony/entry/src/main/ets/pages/ItemEdit.ets:296-299`
+  - 实现: Add @Local sshFingerprint: string = '' and sshPublicKey: string = ''. Add multilineField() for each in the ssh branch after keyType. Handle in loadExisting() and collectFields().
+- **[中·缺功能] initialPassword param on new item creation not handled**
+  - phone: Phone accepts an `initialPassword` route param (phone:[id].tsx:127-152). When creating a new login item with this param, the password field is pre-filled with the value. This allows the generator tab to hand off a generated password directly into a new item's form.
+  - harmony: ItemEdit.ets reads mode and type from params in aboutToAppear() (lines 84-98) but ignores any initialPassword param. Generator-to-ItemEdit flow cannot pre-fill password on harmony.
+  - 位置: `phone/app/item/[id].tsx:127-152 | harmony/entry/src/main/ets/pages/ItemEdit.ets:83-98`
+  - 实现: In aboutToAppear(), read `const ip = params.initialPassword; if (typeof ip === 'string' && ip) this.loginPassword = ip;` to mirror the phone flow.
+- **[中·缺功能] Password generate button absent from password field in ItemEdit**
+  - phone: Phone's password field for login (and potentially other secret fields marked `generate: true`) shows a rotate/clockwise icon button (phone:[id].tsx:557-564) that calls generatePassword(20, {upper, lower, numbers, symbols}) and fills the field. This is distinct from the full Generator tab.
+  - harmony: ItemEdit.ets passwordField builder (lines 392-410) uses ArkUI's built-in InputType.Password (which provides native show/hide) but has no generate button. PassGen.ets (lib/PassGen.ets) exists and generatePassword() is available, but is not called from ItemEdit.
+  - 位置: `phone/app/item/[id].tsx:557-564, 386-400 | harmony/entry/src/main/ets/pages/ItemEdit.ets:392-410`
+  - 实现: For the login password field (and card CVV/pin if desired for parity), replace the plain passwordField builder with a custom row that includes a refresh icon button at the right edge. On tap, call `generatePassword(20, { upper: true, lower: true, numbers: true, symbols: true, avoidAmbiguous: false })` from lib/PassGen.ets and assign to loginPassword.
+- **[低·布局偏差] NavBar title text truncated vs phone**
+  - phone: Phone shows full strings '新建条目' and '编辑条目' as the nav title (phone:[id].tsx:327-329).
+  - harmony: Harmony shows '新建' and '编辑' (ItemEdit.ets:229-231). The strings are shorter, which could feel inconsistent if shown side-by-side, though each platform renders this identically in practice.
+  - 位置: `phone/app/item/[id].tsx:327-329 | harmony/entry/src/main/ets/pages/ItemEdit.ets:229-231`
+  - 实现: Change mode label strings to '新建条目' / '编辑条目' for full parity.
+- **[低·布局偏差] Save button color differs (info vs accent)**
+  - phone: Phone renders the Save button text with `c.info` (blue: #6b9cc4 dark / #3f7eb3 light, phone:[id].tsx:335). This uses the info semantic token to visually distinguish Save from Cancel.
+  - harmony: Harmony uses `this.zc.accent` (black/white) for the Save button (ItemEdit.ets:237). This makes Save visually identical to the type chip active state and loses the blue semantic affordance.
+  - 位置: `phone/app/item/[id].tsx:335 | harmony/entry/src/main/ets/pages/ItemEdit.ets:237`
+  - 实现: Change Save text fontColor to `this.zc.info` to match phone's info-color convention for confirmatory actions.
+- **[低·布局偏差] TOTP field order differs**
+  - phone: Phone's TOTP type renders: issuer first, then account, then secret/scan field (phone:[id].tsx:69-80). The secret field is at the bottom.
+  - harmony: Harmony renders: secret (passwordField) first, then issuer, then account (ItemEdit.ets:305-307). Field order is inverted.
+  - 位置: `phone/app/item/[id].tsx:69-80 | harmony/entry/src/main/ets/pages/ItemEdit.ets:305-307`
+  - 实现: Reorder totp branch: render issuer field, then account field, then the secret passwordField (with scan button when added).
+
+  _可接受适配 (2)：ArkUI native InputType.Password replaces custom reveal-toggle；Delete item action in edit mode is extra harmony feature (not on phone)_
+
+## security-tab — parity≈30%  (高5/中8/低2)
+The Harmony SecurityTab.ets implements only a fraction of the phone security.tsx. The core HIBP breach scanning logic and the weak/duplicate audit metrics are present, but the entire Hero card (composite score, letter grade, three-stat summary), both StatTile cards, the ranked '行动建议' action list with vault navigation, and the '强度分布' password strength histogram are entirely absent. The breach section itself lacks the distinct idle/scanning/clear/error/found UI states with icons, tappable rows with navigation, badges, and the last-scan timestamp. The page title is truncated. Harmony also adds a '重复密码' metric not present on phone — whether this is intentional scope expansion needs human confirmation. The weak-password detection threshold differs (50 vs 60) producing different counts.
+
+- **[高·缺UI] Hero card (composite score, grade ring, three-stat summary row) entirely absent**
+  - phone: Phone renders a prominent Hero card (phone:435-527) showing: numeric score 0-100 (colored by threshold: ok/info/warn/danger), a circular grade ring with letter A/B/C/D, a grade label ('优秀'/'良好'/'需关注'/'存在风险'), and a three-column stat bar (登录 / 已泄露 / 待修复) separated by hairline dividers. Score is computed as avg password strength minus a breach penalty.
+  - harmony: Harmony renders no hero card, no composite score, no grade ring, and no three-column stat summary. The section is entirely absent from SecurityTab.ets.
+  - 位置: `phone: security.tsx:435-527, harmony: SecurityTab.ets — absent`
+  - 实现: Add a hero card Column/Row in build() above the metric cards: display adjustedScore (number) in large monospace font colored by threshold, a circular grade ring with letter grade, a grade label text, and a bottom Row with three stat columns (total logins / breached count / action count) separated by vertical Dividers using ZColors.lineSoft.
+- **[高·缺UI] Stat tiles row (side-by-side 已泄露 + 弱密码 tiles with icons) absent**
+  - phone: Phone renders two side-by-side StatTile cards (phone:530-545) with a colored icon box, a large numeric count, and a label — one for '已泄露' (danger tone) and one for '弱密码' (warn tone). Icon opacity/color switches to text2 when count is 0.
+  - harmony: Harmony has no stat tile row. It uses vertical metric cards for '弱密码' and '重复密码' instead, but the stat tile layout and icon treatment are absent.
+  - 位置: `phone: security.tsx:530-545, harmony: SecurityTab.ets — absent`
+  - 实现: Add a horizontal Row with two equal-width tiles after the hero card. Each tile: icon box (ZColors.danger or ZColors.warn tinted background), large count in bold monospace, small label below. Use layoutWeight(1) for equal split.
+- **[高·缺功能] '行动建议' section (ranked action list with navigation) entirely absent**
+  - phone: Phone renders an '行动建议' SectionCard (phone:721-766) that merges breach issues and weak-password issues into a deduplicated ranked list (breach first, up to 12). Each row is tappable and navigates to router.push('/vault/{id}'). Badge count in section header turns danger if >5 items. Empty state shows '全部清理' with a checkmark icon.
+  - harmony: Harmony has no action list section. There is no way to navigate from the security tab to a specific vault item that needs remediation.
+  - 位置: `phone: security.tsx:366-380, 721-766, harmony: SecurityTab.ets — absent`
+  - 实现: Add a '行动建议' Column card after the breach card. Build a ranked array (breach items first, then weak items, deduped by item id, capped at 12). Render each as a tappable Row navigating to the item detail page (router.pushUrl). Show an OK empty state when the list is empty.
+- **[高·缺功能] '强度分布' histogram section entirely absent**
+  - phone: Phone renders a '强度分布' SectionCard (phone:769-779) with a 5-bin bar chart histogram. Bins: 0-20, 20-40, 40-60, 60-80, 80-100 scored. Each bar is proportionally scaled, colored by semantic token (danger/danger/warn/info/ok), displays count above bar, and shows bin label below. Empty state if no passwords.
+  - harmony: Harmony has no histogram section and no strength distribution visualization anywhere.
+  - 位置: `phone: security.tsx:243-320, 769-779, harmony: SecurityTab.ets — absent`
+  - 实现: Add a '强度分布' Column card at the bottom. Compute 5 bins from login password scores. Render as a Row of 5 proportionally-height columns, each colored by its semantic token, with a count Text above and a label Text below. Use a fixed BAR_AREA_H (e.g. 96vp) as the column height anchor.
+- **[高·缺UI] Empty state (zero logins) not implemented**
+  - phone: When stats.totalLogins === 0, phone shows a centered empty-state card (phone:418-431) with a checkmark.shield icon in an ok-tinted circle, '暂无登录条目' title, and '添加一条登录开始追踪保险库健康度' description. None of the metric content is shown.
+  - harmony: Harmony always renders all cards regardless of whether there are any login items. There is no empty state.
+  - 位置: `phone: security.tsx:418-431, harmony: SecurityTab.ets — absent`
+  - 实现: Add an if (this.audit.total === 0) branch in build() that renders a centered empty state with icon, title, and description. Wrap all audit content in the else branch.
+- **[中·缺UI] Breach card missing idle empty state with HIBP privacy notice icon**
+  - phone: When no scan has been run yet (breachResults === null && !scanning), phone shows a centered 'lock.shield.fill' icon (text3 color) with a paragraph explaining the SHA-1 k-anonymity privacy model (phone:579-587). There is also a persistent 'HIBP 提供支持' footer text at the bottom of the card (phone:716-718).
+  - harmony: Harmony shows no icon in the idle state. The privacy explanation is only in the `breachHint()` text string ('通过 k-anonymity 比对 HIBP（不上传密码）'), which is small subtitle text. The 'HIBP 提供支持' footer is absent.
+  - 位置: `phone: security.tsx:578-587, 716-718, harmony: SecurityTab.ets:308-316`
+  - 实现: In the idle branch of breachCard, add a centered Column with a shield icon (large, text3 tinted) and the privacy explanation text. Add '由 Have I Been Pwned 提供支持' as a centered caption Text at the bottom of the breach card.
+- **[中·缺UI] Breach list rows not tappable and missing badge + chevron**
+  - phone: Each breached item in the scan results list (phone:657-710) is a PressableScale that navigates to the vault item on tap. Each row shows: danger-tinted glyph circle with first-letter initial, item name, '已暴露 N 次' subtitle, a '已泄露' danger badge, and a chevron.right icon. Hairline divider between rows.
+  - harmony: Harmony renders breach result rows (lines 276-289) as plain Row components with no click handler. There is no navigation, no badge component, no chevron icon, and no glyph avatar circle — only the item name text and '${r.count} 次' text.
+  - 位置: `phone: security.tsx:657-710, harmony: SecurityTab.ets:275-289`
+  - 实现: Wrap each breach result Row in an onClick handler navigating to the vault item detail. Add a danger-tinted initial glyph circle (first character of item name), a '已泄露' badge (danger-colored Text with danger-tinted background, borderRadius ZRadius.md), and a right-pointing chevron icon. Add hairline Dividers between rows.
+- **[中·缺UI] Breach scanning state shows '…' text instead of a loading indicator**
+  - phone: Phone shows an ActivityIndicator spinner + '正在扫描…' text in a centered row while scanning (phone:589-597).
+  - harmony: Harmony shows Text('…') in the count position and changes the scan button text to '扫描中…' (line 239). There is no spinner component.
+  - 位置: `phone: security.tsx:589-597, harmony: SecurityTab.ets:224-226, 239`
+  - 实现: Replace the '…' placeholder with a LoadingProgress component (or equivalent ArkUI spinner) in the breach card body during scanning state. The button text change is acceptable adaptation, but the body area should show a spinner + text in a centered Row.
+- **[中·缺UI] Breach scan clear/success state missing dedicated icon and layout**
+  - phone: When scan completes with 0 breaches and 0 errors, phone shows a centered layout (phone:598-615): a 56x56 ok-tinted circle with checkmark.shield icon, '未发现泄露' headline, '所有密码均未出现在已知泄露数据中' subtitle.
+  - harmony: Harmony's done+no-breach state shows only the count '0' in ok color in the header row. The body has no dedicated success state layout — just the existing hint text in breachHint() returning '没有发现已泄露密码'.
+  - 位置: `phone: security.tsx:598-615, harmony: SecurityTab.ets:310-311`
+  - 实现: Add an explicit clear-state block in breachCard(): when scanStatus === 'done' && pwnedCount === 0 && scanFailedCount === 0, render a centered Column with a checkmark icon in an ok-tinted 56vp circle, '未发现泄露' headline, and subtitle text.
+- **[中·缺UI] Breach partial-error state missing warning icon layout**
+  - phone: When scan finishes with 0 breaches but some errors, phone shows a warn-tinted icon circle with exclamationmark.triangle, '{N} 条扫描失败' headline, and '请检查网络后重试' subtitle (phone:616-633).
+  - harmony: Harmony shows only the scan error/failed-count as plain Text components (lines 267-270, 295-299). No icon, no dedicated layout for the pure-error state.
+  - 位置: `phone: security.tsx:616-633, harmony: SecurityTab.ets:266-270, 295-299`
+  - 实现: Add a state branch for done+pwnedCount===0+scanFailedCount>0: render a centered Column with a warn-tinted exclamation icon circle, '{N} 条扫描失败' headline, and '请检查网络后重试' subtitle.
+- **[中·缺UI] Last scan timestamp not shown in breach section header**
+  - phone: Phone displays the time of the last scan (formatted HH:MM) in monospace text next to the scan button in the section header (phone:554-559).
+  - harmony: Harmony has no last-scan timestamp. The scanStatus/scanResults state is maintained, but no timestamp is stored or displayed.
+  - 位置: `phone: security.tsx:396-401, 554-559, harmony: SecurityTab.ets — absent`
+  - 实现: Add a @Local scanLastAt: number = 0 field. Set it in onScanBreaches after results return. Display it as formatted HH:MM monospace Text next to the scan button when > 0.
+- **[中·布局偏差] Page title truncated ('安全' vs '安全中心') and subtitle lede absent**
+  - phone: Phone header (phone:411-416) shows '安全中心' as the page title and '保险库健康度一览 · 轮换弱密码、清理泄露项' as a subtitle lede below it.
+  - harmony: Harmony renders only '安全' as the page title (line 122) with no subtitle.
+  - 位置: `phone: security.tsx:411-416, harmony: SecurityTab.ets:121-125`
+  - 实现: Change the title Text to '安全中心'. Add a subtitle Text below with '保险库健康度一览 · 轮换弱密码、清理泄露项' in ZType.footnoteSize / ZColors.text3.
+- **[中·缺UI] '重复密码' metric card exists in harmony but not in phone**
+  - phone: Phone does not display a duplicates metric card anywhere. The 重复密码 concept is absent from the security.tsx UI.
+  - harmony: Harmony shows a '重复密码' metric card (SecurityTab.ets:149-154) as the third metric, tracking entries that share the same password.
+  - 位置: `phone: security.tsx — absent, harmony: SecurityTab.ets:149-154`
+  - 实现: Remove the '重复密码' metric card from Harmony to match phone parity, or confirm it is an intentional Harmony-exclusive addition. If kept, classify as acceptable platform addition but it should be noted it creates a layout divergence.
+- **[低·缺功能] Weak password threshold differs: phone uses 60, harmony uses 50**
+  - phone: Phone filters weak passwords as strength < 60 (security.tsx:63). The score formula uses avg strength, then gradeForScore thresholds are 85/70/50.
+  - harmony: Harmony's audit @Computed uses estimateStrength(pw).score < 50 (SecurityTab.ets:68) as the weak threshold. This produces a different count of weak passwords than the phone.
+  - 位置: `phone: security.tsx:63, harmony: SecurityTab.ets:68`
+  - 实现: Change the Harmony weak threshold to < 60 to match phone behavior: `if (estimateStrength(pw).score < 60) weak++;`
+- **[低·缺UI] Breach found header row (icon + '发现 N 个密码已泄露') absent**
+  - phone: When breached items are found, phone shows a header row (phone:636-645) with a shield.slash icon in danger color + '发现 {N} 个密码已泄露' text before the list of items.
+  - harmony: Harmony goes directly to the list of breached items without a summary header row.
+  - 位置: `phone: security.tsx:636-645, harmony: SecurityTab.ets:273-293`
+  - 实现: Add a Row before the ForEach loop in the done+pwnedCount>0 branch: an Icon component (shield-slash SVG or equivalent) in ZColors.danger + Text('发现 ${this.pwnedCount} 个密码已泄露') in ZColors.danger subhead weight.
+
+## item-detail — parity≈45%  (高5/中9/低3)
+The harmony ItemDetail.ets implements a basic read-only field list for all vault item types and handles edit navigation, but is missing four entire high-value UI sections present on phone: the live animated TOTP code display, the password strength panel, the custom fields section, and the delete action. The favorite star toggle is also absent from the navbar. Field rendering is structurally different (no section grouping, no hairline dividers, text labels instead of icon buttons for reveal/copy), and several per-type fields have label drift or wrong sensitive flags. The bullet-character mask (`••••••••••••`) violates the ZPass design rule against unicode decorative symbols. The parity shortfall is significant for a read-only detail page — the primary informational sections a user reaches this page to see (TOTP, strength) are simply not there.
+
+- **[高·缺功能] Delete action entirely absent**
+  - phone: Phone renders a full-width red danger 'Button' labelled '删除条目' at the bottom of the scroll content (phone:[id].tsx:574-582). Pressing it invokes `dialog.confirm` with destructive styling ('删除条目', '确认删除「…」？此操作不可撤销。'), triggers warning haptic, calls `deleteItem(item.id)`, then navigates back (phone:[id].tsx:469-480).
+  - harmony: ItemDetail.ets has no delete button, no confirmation dialog, and no call to any vault delete API anywhere in the file.
+  - 位置: `phone:[id].tsx:469-480, 574-582 | harmony:ItemDetail.ets (absent)`
+  - 实现: Add a full-width danger button '删除条目' below the last section. On press, call `promptAction.showDialog` with a destructive confirm, then invoke `vaultStore.deleteItem(item.id)` and `router.back()` on confirmation.
+- **[高·缺功能] Live TOTP code section missing — shows raw secret instead**
+  - phone: Phone renders a dedicated `TotpSection` with: the formatted live OTP code (fontSize 32, monospace, letterSpacing 6), an animated progress bar that counts down each 30-second period (using Animated.Value), a '{remaining}秒后刷新' hint, and an ephemeral-copy icon button. The code turns red (c.danger) when remaining ≤ 5 s. This section renders for `login` items that have a `totp` field (phone:[id].tsx:613) and for `totp`-type items (phone:[id].tsx:705). The raw TOTP secret is NOT shown as a visible field for `login` type — only the live code is displayed.
+  - harmony: For `login` type, harmony lists the totp secret as a plain masked text field labelled 'TOTP 密钥' (ItemDetail.ets:77). For `totp` type it shows secret as a masked field (ItemDetail.ets:110). There is no live code generation, no timer, no progress bar, and no countdown text. The `Totp.ets` library (with `generateTotp`, `totpRemaining`, `formatTotpCode`) exists but is not imported or used in ItemDetail.ets.
+  - 位置: `phone:[id].tsx:368-444, 613, 705 | harmony:ItemDetail.ets:77,110 (no TotpSection equivalent)`
+  - 实现: Add a `TotpSection` @Builder or sub-component. Use `setInterval` / `animateTo` to tick each second; call `generateTotp(secret)` and `totpRemaining()` from `lib/Totp.ets`. Render: formatted code (monospace, large), a `Progress` or custom bar that shrinks with elapsed seconds, the '${remaining}秒后刷新' hint, and an ephemeral-copy button. Show this section (not the raw secret field) for `login` items with a totp value, and additionally render it after the secret field for `totp`-type items.
+- **[高·缺UI] Password strength section entirely absent**
+  - phone: For `login` items that have a password, phone renders a full `StrengthSection` card (phone:[id].tsx:277-364, used at :612): a large score number (font size 44, colored by ok/warn/danger threshold), a `/100` suffix, a colored label badge ('很弱'/'较弱'/'一般'/'强'/'很强'), a filled progress bar (height 6), and a three-column meta row showing 长度, 熵值 (e.g. '72b'), and 破解时间 (e.g. '数月'). The section title is '密码强度'.
+  - harmony: ItemDetail.ets renders no strength section at all. The `Password.ets` lib (`estimateStrength`, `strengthLabel`, `crackTime`) exists but is never imported in ItemDetail.ets.
+  - 位置: `phone:[id].tsx:277-364, 612 | harmony:ItemDetail.ets (absent)`
+  - 实现: After the credentials section for `login` items, add a '密码强度' card. Import `estimateStrength`, `strengthLabel`, `crackTime` from `lib/Password.ets`. Render: score text (fontSize ~44, color based on score vs ok/warn/danger thresholds), '/100' suffix, label badge with translucent colored background, a `Progress` bar driven by score/100, and a three-column row for 长度 / 熵值 / 破解时间.
+- **[高·缺功能] Custom fields section not rendered**
+  - phone: Phone renders a '自定义字段' `Section` whenever `item.customFields` is non-empty (phone:[id].tsx:531-533). Each custom field is rendered by type: `text` and `hidden` fields show label + value (hidden masked with dots) + reveal/copy buttons; `boolean` fields show a read-only toggle switch (on=accent background, off=bgActive) with '已开启'/'已关闭' text; `linked` fields show a link icon + the linked field name in mono font (phone:[id].tsx:713-859).
+  - harmony: ItemDetail.ets `buildFields()` never reads the `_customFields` key from `it.fields` and renders no custom fields section. The `CustomFields.ets` library (`parseCustomFields`, `CustomField`, `CustomFieldType`) exists but is not imported in ItemDetail.ets.
+  - 位置: `phone:[id].tsx:531-533, 713-859 | harmony:ItemDetail.ets:60-116 (buildFields, no _customFields handling)`
+  - 实现: In `buildFields` (or separately), call `parseCustomFields(it.fields)` from `lib/CustomFields.ets` and append results. In the build body, add a '自定义字段' section rendered after type-specific fields. Implement per-type display: `text` = plain field row, `hidden` = masked field row with reveal toggle + ephemeral copy, `boolean` = read-only visual switch (two small circles or Toggle in read mode), `linked` = icon + linked field name.
+- **[高·缺功能] Favorite toggle missing from navbar**
+  - phone: Phone navbar has a star icon button: filled gold star when `item.favorite` is true, outline star in text3 color when false. Tapping it calls `toggleFavorite(item.id)` (phone:[id].tsx:91-99, 507-509). It uses haptic 'selection' feedback.
+  - harmony: Harmony top bar has only '返回' (text), item name (title), and '编辑' (text). There is no favorite/star button and no call to any toggleFavorite API (ItemDetail.ets:154-178).
+  - 位置: `phone:[id].tsx:91-99, 507-509 | harmony:ItemDetail.ets:154-178 (absent)`
+  - 实现: Add a star icon button to the top Row (between title and edit). Use a star SVG or image resource. Bind to `this.item?.favorite` to toggle fill. On press, call `vaultStore.toggleFavorite(item.id)` (add that method if not present) and update local state.
+- **[中·布局偏差] Fields rendered as individual floating cards instead of grouped sections with hairline dividers**
+  - phone: Phone groups related fields into a `Section` component: a uppercase footnote header (e.g. '凭据', '卡片信息', '身份信息') followed by a single elevated card containing all fields of that group, with hairline dividers between rows but no divider after the last row. Fields within the card share horizontal padding. This gives a clear visual grouping per semantic area (phone:[id].tsx:131-163, 606-648).
+  - harmony: Harmony renders every single field as its own separate rounded card (`borderRadius: ZRadius.xl`, `backgroundColor: zc.bgElev`), one card per field, with no section header label above the group (ItemDetail.ets:247-284). This produces a visually fragmented appearance rather than grouped cards.
+  - 位置: `phone:[id].tsx:131-163 (Section component) | harmony:ItemDetail.ets:247-284 (fieldRow @Builder)`
+  - 实现: Wrap type-specific field rows in a section container with an uppercase footnote label and a single elevated card (`bgElev`, `borderRadius: ZRadius.xl`). Fields inside share the card background; use a `Divider` with `lineSoft` color and `hairlineWidth` between rows (not after the last). Remove per-field `backgroundColor`/`borderRadius` from `fieldRow` and instead set it on the section wrapper.
+- **[中·缺UI] Tags section absent**
+  - phone: When `item.tags` is non-empty, phone renders a '标签' `Section` containing a wrapping row of chips. Each chip is a `bgActive`-background rounded rectangle with `#tagname` text in mono font (phone:[id].tsx:535-555).
+  - harmony: ItemDetail.ets never reads or displays `tags` from the item payload.
+  - 位置: `phone:[id].tsx:535-555 | harmony:ItemDetail.ets (absent)`
+  - 实现: After the custom fields section, check if `item.fields._tags` (or `item.tags` per payload shape) is non-empty. If so, render a '标签' section header and a `Flex` with `FlexWrap.Wrap` containing tag chips: `bgActive` background, `borderRadius: ZRadius.md`, text `#tagname` in subhead size.
+- **[中·缺UI] Generic notes field absent for non-note item types**
+  - phone: For any item type that has a top-level `notes` property (separate from the `note` type), phone renders a '备注' section with the notes text (phone:[id].tsx:557-565, `'notes' in item && item.notes`).
+  - harmony: ItemDetail.ets `buildFields()` only handles the `note` *type's* note field. There is no handling for a generic `notes` field that can appear on login/card/identity/ssh/passkey/totp items.
+  - 位置: `phone:[id].tsx:557-565 | harmony:ItemDetail.ets:60-116 (absent in buildFields)`
+  - 实现: In `buildFields`, after the type-specific pushes, check `get('notes')` and if non-empty push a '备注' entry (non-sensitive). Alternatively render it as a dedicated text block outside the field list.
+- **[中·布局偏差] Hero section missing item name large title and type Badge**
+  - phone: Phone hero has three elements stacked: (1) the favicon icon circle (64x64, `borderRadius: Radius.xl`), (2) the item name as a large `title` style text (`Type.title`, ~22px bold), (3) a `Badge` component with `TYPE_LABELS[item.type]` and tone='neutral' (phone:[id].tsx:519-527). The item name in the top navbar is an additional secondary display.
+  - harmony: Harmony hero shows only: favicon icon (56x56), then `typeLabel(item.type)` in footnote/text3 style, then the relative modified time — the item name is only shown in the top bar and not repeated in the hero. There is no Badge component for the type (ItemDetail.ets:193-215).
+  - 位置: `phone:[id].tsx:519-527 | harmony:ItemDetail.ets:193-215`
+  - 实现: Add the item name as a large title text (fontSize ZType.titleSize, fontWeight Bold, zc.text) between the favicon and the type label in the hero Column. Replace the plain type text with a badge-style container (bgActive background, borderRadius ZRadius.md, footnote text) to match the phone Badge appearance.
+- **[中·布局偏差] Last-modified time shown in hero instead of footer**
+  - phone: Phone shows '最后修改 · {relativeTime(item.modified)}' in a centered footer row at the very bottom of the scroll area, in caption size and text3 color (phone:[id].tsx:584-588).
+  - harmony: Harmony shows `修改于 ${relativeTime(item.updatedAt)}` inside the hero card at the top, directly under the type label (ItemDetail.ets:209). This is a different visual position that conflicts with the phone layout.
+  - 位置: `phone:[id].tsx:584-588 | harmony:ItemDetail.ets:209`
+  - 实现: Remove the modified-time from the hero. Add a centered footer Text at the bottom of the Scroll content: '最后修改 · ${relativeTime(this.item.updatedAt)}' in ZType.captionSize and zc.text3.
+- **[中·布局偏差] Reveal/copy controls use text labels instead of icon buttons**
+  - phone: Each field row uses `IconButton` components: an eye/eye.slash icon button (size 34, variant='tinted') to toggle reveal, and a doc.on.doc.fill icon button (size 34, variant='tinted') to copy. Both have haptic feedback. This gives a compact, visually standard iOS-style inline action area (phone:[id].tsx:210-230).
+  - harmony: Harmony uses plain `Text` components labelled '显示'/'隐藏' and '复制' in footnote size with text2/accent colors (ItemDetail.ets:256-265). This is text-only and not platform-idiomatic for HarmonyOS either.
+  - 位置: `phone:[id].tsx:210-230 | harmony:ItemDetail.ets:256-265`
+  - 实现: Replace the text '显示'/'隐藏' and '复制' with icon-based buttons using Image resources or the SymbolGlyph component. Use tinted circular backgrounds (bgActive) sized ~34vp. Keep the same tap semantics (toggle reveal / copy with toast).
+- **[中·缺UI] Masked field uses bullet string literal instead of dot View components**
+  - phone: Phone deliberately avoids the `•` unicode character for masked display. Instead it renders six 6x6 circular `View` elements in a row with `backgroundColor: c.text3` (phone:[id].tsx:44-60, comment on :43). This produces visually uniform, vertically-centered dots.
+  - harmony: Harmony uses the string literal `'••••••••••••'` (12 bullet characters) as the masked value (ItemDetail.ets:270). This uses unicode bullet characters, which violates the ZPass design rule against unicode decorative symbols in the render layer.
+  - 位置: `phone:[id].tsx:44-60 | harmony:ItemDetail.ets:268-271`
+  - 实现: Replace the bullet string with a Row of six small circular shapes (e.g., `ForEach([0,1,2,3,4,5], () => Shape with circle fill in zc.text3, size 6, borderRadius 3)`) to match the phone's dot implementation and comply with the no-unicode-decorative-symbol rule.
+- **[中·设计违例] Unicode bullet characters `••••••••••••` used as mask in rendered UI**
+  - phone: Phone explicitly comments that `•` characters are avoided (phone:[id].tsx:43: '用 6 个圆点表示已遮蔽，统一视觉宽度（不再用 `•` 字符乱长）') and implements dot Views instead.
+  - harmony: Harmony uses `'••••••••••••'` — 12 `•` unicode bullet characters — as the masked value string (ItemDetail.ets:270). The ZPass design rules explicitly prohibit unicode decorative symbols in the render layer.
+  - 位置: `harmony:ItemDetail.ets:270`
+  - 实现: Remove the `'••••••••••••'` literal. Implement dot rendering using small circular shapes (6 dots, 6vp diameter, borderRadius 3, color zc.text3) in a horizontal Row, mirroring phone:[id].tsx:44-60.
+- **[中·缺UI] Card type missing PIN field**
+  - phone: Phone renders a '카드 정보' (card info) section with 6 fields: 持卡人, 卡号 (masked), 有效期, 安全码/CVV (masked), PIN (masked), 卡组织 (phone:[id].tsx:619-626). PIN is a separate field (`item.pin`, mono masked).
+  - harmony: Harmony `buildFields` for `card` type lists only 5 fields: 持卡人, 卡号, 有效期, CVV, 品牌 (ItemDetail.ets:78-84). PIN (`pin` key) is absent.
+  - 位置: `phone:[id].tsx:622-623 | harmony:ItemDetail.ets:78-84`
+  - 实现: Add `push('pin', 'PIN', true)` after the CVV push in the `card` case of `buildFields`.
+- **[低·布局偏差] Field label and sensitive-flag mismatches across item types**
+  - phone: Phone uses: '安全码' for CVV (phone:[id].tsx:621), '卡组织' for brand (:622), '出生日期' for dob (:643), '依赖方 (RP)' for rpId (:679). For SSH, apiKey vs keypair are mutually exclusive conditional sections. Phone marks `credentialId` as `mono masked` (phone:[id].tsx:684). Phone `totp` type field order is: 发行者, 账户, TOTP密钥 (secret last, masked).
+  - harmony: Harmony uses: 'CVV' for cvv (ItemDetail.ets:82), '品牌' for brand (:83), '生日' for dob (:95), 'RP ID' for rpId (:105). SSH type always lists all fields including both apiKey and keypair fields regardless (no conditional branching, :97-103). `credentialId` is marked `sensitive: false` (:107). `totp` type field order: secret first (sensitive), then issuer and account (:109-113).
+  - 位置: `phone:[id].tsx:619-690 | harmony:ItemDetail.ets:78-113`
+  - 实现: Align labels: CVV→'安全码', brand→'卡组织', dob→'出生日期', rpId→'依赖方 (RP)'. For SSH: add conditional branching — if `apiKey` is present show only the API Token view; otherwise show username/keyType/fingerprint/publicKey. Mark `credentialId` as sensitive:true. For `totp` type, reorder fields: issuer first, then account, then secret.
+- **[低·布局偏差] Not-found / error state layout differs from phone**
+  - phone: When item is not found, phone renders a full NavBar ('未找到', all buttons disabled) plus a centered flex container with '条目不存在 (id: {id})' in body text (phone:[id].tsx:482-499).
+  - harmony: Harmony shows a red inline error Text '条目不存在' (or the error message) in the left-aligned top area below the nav bar, in footnote+danger style (ItemDetail.ets:180-186). The top bar still shows an empty item name.
+  - 位置: `phone:[id].tsx:482-499 | harmony:ItemDetail.ets:180-186`
+  - 实现: When `errorText` is set and `item` is null, render a vertically centered error message in the scroll area. Consider showing a static title in the nav bar (e.g. '未找到') rather than an empty string.
+- **[低·布局偏差] Masked/mono fields do not use monospace font**
+  - phone: Phone uses the MONO font family (`Fonts.mono ?? 'monospace'`) for masked fields (password, card number, CVV, PIN, key fields) and any field marked `mono:true` (phone:[id].tsx:198-200, fieldStyles.value used for e.g. card number).
+  - harmony: Harmony `fieldRow` sets `fontFamily` to `'HarmonyOS Sans'` for both branches of the sensitive ternary (ItemDetail.ets:275: `field.sensitive ? 'HarmonyOS Sans' : 'HarmonyOS Sans'`). The two branches are identical — monospace is never applied.
+  - 位置: `phone:[id].tsx:198-200 | harmony:ItemDetail.ets:275`
+  - 实现: Use a monospace font (e.g. 'Courier New' or a system monospace available on HarmonyOS) for sensitive fields and numeric/key fields. Change the fontFamily ternary to `field.sensitive ? 'Courier New' : 'HarmonyOS Sans'` and ensure numeric card/key fields also use mono.
+
+  _可接受适配 (3)：Copy feedback uses toast instead of haptics；Edit navigation uses router.pushUrl instead of expo-router push；onPageShow refresh on back from edit_
+
+## vault-tab — parity≈68%  (高4/中4/低2)
+VaultTab.ets covers the primary vault loop: search, type-filter chips, item list, swipe actions (edit/favorite/delete), new button, empty state, space switching. 8 gaps remain: missing 'fav' favorites filter chip; header count shows total not filtered/total; item row missing 2FA badge, breach badge, password-strength bar; favorite indicator uses Unicode star (design violation); new-item button uses fullwidth plus Unicode (design violation); swipe buttons text-only no icons; list not insetGrouped cards.
+
+- **[高·缺功能] Favorites filter chip absent from FILTER_CHIPS**
+  - phone: vault.tsx:48-58 FILTER_CHIPS has a 'fav' key (label 收藏) as 2nd chip; filters items where favorite===true (vault.tsx:338-339).
+  - harmony: VaultTab.ets:21-30 FILTER_CHIPS lacks 'fav'. VaultStore has onlyFavorites flag (VaultStore.ets:61,84) never set by the chip row.
+  - 位置: `phone vault.tsx:48-58; harmony VaultTab.ets:21-30`
+  - 实现: Add { key:'fav', label:'收藏' } as 2nd chip; map selection to store.onlyFavorites=true; update filteredItems getter.
+- **[高·缺UI] 2FA badge missing from item row**
+  - phone: vault.tsx:99,124 login items with totp show a Badge '2FA' tone info inline after name.
+  - harmony: VaultTab.ets:306-322 itemRow has no totp check / 2FA badge.
+  - 位置: `phone vault.tsx:99,124; harmony VaultTab.ets:306-322`
+  - 实现: In itemRow after name, if login && fields['totp'] render a 2FA badge with zc.info bg, radius sm.
+- **[高·缺UI] Breach warning badge missing from item row**
+  - phone: vault.tsx:100,125-129 login items with breached===true show danger Badge with warning-triangle icon inline.
+  - harmony: VaultTab.ets:305-342 no breach check / indicator.
+  - 位置: `phone vault.tsx:100,125-129; harmony VaultTab.ets:305-342`
+  - 实现: If fields['breached']===true render small danger badge after name.
+- **[高·设计违例] New-item button uses fullwidth Unicode plus '＋'**
+  - phone: vault.tsx:483-491 IconButton icon='plus' as FAB bottom-right.
+  - harmony: VaultTab.ets:153-162 uses Text('＋') (U+FF0B) in header top-right.
+  - 位置: `phone vault.tsx:483-491; harmony VaultTab.ets:153-162`
+  - 实现: Replace Text('＋') with SymbolGlyph/SVG add icon; consider FAB bottom-right placement.
+- **[中·缺UI] Header subtitle shows total only, not filtered/total**
+  - phone: vault.tsx:409 shows {filtered.length} / {items.length} 项.
+  - harmony: VaultTab.ets:141 shows only ${store.items.length} 项.
+  - 位置: `phone vault.tsx:409; harmony VaultTab.ets:141`
+  - 实现: Show ${store.filteredItems.length} / ${store.items.length} 项.
+- **[中·缺UI] Password strength bar absent from login rows**
+  - phone: vault.tsx:98,145-159 login items with strength field show a 36x3 filled track bar colored by score in right column.
+  - harmony: VaultTab.ets:318-320 only shows relativeTime; no strength bar.
+  - 位置: `phone vault.tsx:98,145-159; harmony VaultTab.ets:306-342`
+  - 实现: Add a 36x3 strength track + proportional fill colored by strengthColor in itemRow for login items.
+- **[中·设计违例] Favorite indicator uses Unicode star '★'**
+  - phone: vault.tsx:121-123 uses IconSymbol name='star.fill' colored c.warn.
+  - harmony: VaultTab.ets:314-317 renders Text('★') Unicode star.
+  - 位置: `phone vault.tsx:121-123; harmony VaultTab.ets:314-317`
+  - 实现: Replace Text('★') with SymbolGlyph/SVG star icon colored zc.warn.
+- **[中·缺UI] Swipe action buttons text-only, no icons**
+  - phone: vault.tsx:186-208 each swipe action shows IconSymbol + label below (edit/star/trash).
+  - harmony: VaultTab.ets:387-398 swipeButton renders only Text label.
+  - 位置: `phone vault.tsx:186-208; harmony VaultTab.ets:387-398`
+  - 实现: Add icon above label in swipeButton via SymbolGlyph/SVG.
+- **[低·缺UI] List not insetGrouped card style**
+  - phone: vault.tsx:371-385 items in rowCard with bgElev, marginHorizontal lg, top/bottom radius 14 on first/last.
+  - harmony: VaultTab.ets:233-246 plain List with dividers on zc.bg, no horizontal margin/grouping.
+  - 位置: `phone vault.tsx:371-385; harmony VaultTab.ets:233-246`
+  - 实现: Wrap List in container marginHorizontal lg, bgElev, radius xl; remove per-row bg.
+- **[低·布局偏差] New button: header top-right vs phone bottom-right FAB**
+  - phone: vault.tsx:481-492 FAB bottom-right with shadow, floats over list.
+  - harmony: VaultTab.ets:152-162 fixed text button in header top-right, scrolls with header.
+  - 位置: `phone vault.tsx:481-492; harmony VaultTab.ets:152-162`
+  - 实现: Overlay floating Button bottom-right via Stack/RelativeContainer.
+
+## generator-tab — parity≈42%  (高3/中7/低3)
+GeneratorTab.ets covers the basic three-mode generation flow (password/passphrase/PIN) and strength display, but is missing several high-impact features and has notable UI/layout deviations relative to generator.tsx. The three highest-severity gaps are: (1) batch generation is entirely absent — the phone's count stepper, unique-batch algorithm, multi-result scrollable display, and "复制全部" behavior have no harmony counterpart; (2) the "保存到密码库" save button (navigates to item editor with pre-filled password) is missing; and (3) per-character color tokenization of the displayed password is absent, making the result card visually flat. Additionally, the action button visual hierarchy is inverted (regen is styled as primary, copy as secondary — opposite of phone), the strength row layout is restructured from a single horizontal row into a vertical stack, copy feedback state is missing, the pronounceable toggle is absent, and toggle rows are full-width instead of the 2-column grid used on phone. The PassGen.ets library is well-aligned algorithmically; all gaps are in the UI layer of GeneratorTab.ets.
+
+- **[高·缺功能] Batch generation (count stepper) entirely absent**
+  - phone: Phone has a '生成数量' section with an unbounded Stepper (min=1, no max). When count > 1 it calls generateUniqueBatch(), displays all results as a multi-line scrollable text block, shows 'N 条' badge, and the copy button becomes '复制全部' copying all results joined by newlines (generator.tsx:392–394, 624–634, 502–519, 569–572, 434–438).
+  - harmony: GeneratorTab.ets has no count/batch concept at all. It always generates a single result, always shows it alone, and always copies just that one string (GeneratorTab.ets:34, 51–67, 69–77).
+  - 位置: `phone generator.tsx:392-394,624-634,502-519; harmony GeneratorTab.ets — absent`
+  - 实现: Add a @Local genCount: number = 1 state variable. Add a '生成数量' section (using Slider or a custom stepper with minus/plus buttons) above the mode segmented control. When genCount > 1, call generateUniqueBatch(genCount, genOne) from PassGen, store result in @Local genBatch: string[] = []. In the display card, show a scrollable list of all results when batch length > 1. Change the copy button label to '复制全部' when count > 1 and copy batch.join('\n'). Update the badge to show 'N 条' vs 'N 字符'.
+- **[高·缺UI] Password character colorization absent — all characters displayed in single color**
+  - phone: Phone tokenizes the generated password and renders each character in a semantic color: uppercase letters in c.text, lowercase in c.text2, digits in c.info (blue), symbols in c.warn (orange) (generator.tsx:457–468, 523–529).
+  - harmony: GeneratorTab.ets renders the entire genResult as one Text with uniform fontColor(this.zc.text) (GeneratorTab.ets:111–117). No per-character colorization.
+  - 位置: `phone generator.tsx:457-468,523-529; harmony GeneratorTab.ets:111-117`
+  - 实现: Implement a tokenize helper that splits the password string and classifies each character as upper/lower/number/symbol. Use a ForEach with a Span inside a Text to render each character with the corresponding color (zc.text / zc.text2 / zc.info / zc.warn). Only apply this in single-result mode; batch mode can remain plain text.
+- **[高·缺功能] '保存到密码库' (Save to vault) button missing**
+  - phone: Phone shows a '保存到密码库' button below the options (only when count <= 1). On press it navigates to /item/[id] with id='new', type='login', and initialPassword set to the current generated password, allowing the user to save the result directly into the vault (generator.tsx:442–448, 718–728).
+  - harmony: GeneratorTab.ets has no save button and no navigation to create a new vault item (entire GeneratorTab.ets has no router.pushUrl to the item editor).
+  - 位置: `phone generator.tsx:442-448,718-728; harmony GeneratorTab.ets — absent`
+  - 实现: Add a '保存到密码库' Button below the options column, visible only when genCount <= 1. On click, navigate to the item editor page using router.pushUrl with params { id: 'new', type: 'login', initialPassword: this.genResult }.
+- **[中·缺UI] Header subtitle '零知识 · 本地生成' missing**
+  - phone: Phone renders a subtitle Text '零知识 · 本地生成' in c.text3 / footnote style directly below the '生成器' title (generator.tsx:485–488).
+  - harmony: GeneratorTab.ets only shows the '生成器' title Text; no subtitle is present (GeneratorTab.ets:92–96).
+  - 位置: `phone generator.tsx:485-488; harmony GeneratorTab.ets:91-104`
+  - 实现: Add a Text('零知识 · 本地生成').fontSize(ZType.footnoteSize).fontColor(this.zc.text3) below the title Text inside the header Row/Column.
+- **[中·缺UI] Character / item count badge in display card missing**
+  - phone: Phone renders an absolutely-positioned badge in the top-right corner of the display card showing either 'N 字符' (single mode) or 'N 条' (batch mode) in caption/monofont style (generator.tsx:493–500).
+  - harmony: GeneratorTab.ets has no such badge inside the result card (GeneratorTab.ets:110–145).
+  - 位置: `phone generator.tsx:492-501; harmony GeneratorTab.ets:110-145`
+  - 实现: Add a Stack or RelativeContainer overlay on the result card that positions a Text showing '${this.genResult.length} 字符' in footnote size / zc.text3 to the top-right corner.
+- **[中·布局偏差] Strength indicator row vs column layout and entropy display differ**
+  - phone: Phone renders strength as a horizontal row: [progress bar filling remaining space] [strength label right-aligned, min-width 28] [entropy value 'Nb' in c.text3 monofont, min-width 32], all separated by a hairline top border in c.lineSoft (generator.tsx:530–554).
+  - harmony: Harmony stacks them vertically: Text with '${label}  ·  ${entropy} bit' combined in one Text element, then the progress bar below it in a Stack. No hairline divider. Entropy and strength label are merged (GeneratorTab.ets:119–140).
+  - 位置: `phone generator.tsx:530-554; harmony GeneratorTab.ets:119-140`
+  - 实现: Restructure the bottom of the result card into a Row with three elements: a flex-1 progress bar track+fill Stack, a right-aligned strength label Text in strengthColor(), and a right-aligned entropy Text in zc.text3. Add a hairline 1px top border (Divider or borderTop styled with zc.lineSoft) separating this row from the password text above.
+- **[中·布局偏差] Action button visual hierarchy inverted — regenerate and copy roles swapped**
+  - phone: Phone: '重新生成' uses variant='secondary' (gray/bgElev background, text color) and '复制' uses variant='primary' (accent/filled background, accentInk text). The copy action is primary (generator.tsx:560–577).
+  - harmony: Harmony assigns accent background to '重新生成' and bgElev background to '复制' (GeneratorTab.ets:149–168). The regen action appears as primary, copy as secondary — reversed from phone.
+  - 位置: `phone generator.tsx:560-577; harmony GeneratorTab.ets:148-169`
+  - 实现: Swap the background colors: '重新生成' should use this.zc.bgElev (secondary style) with this.zc.text font color; '复制' should use this.zc.accent (primary style) with this.zc.accentInk font color.
+- **[中·缺UI] Copy button feedback state ('已复制') missing**
+  - phone: Phone sets a copied state to true for 1500ms after copying. During this time the copy button shows label '已复制' and a checkmark icon instead of '复制' (generator.tsx:395,434–439,569–573).
+  - harmony: Harmony only shows a toast '已复制到剪贴板'; the button label itself never changes to '已复制' (GeneratorTab.ets:73–74,159–168).
+  - 位置: `phone generator.tsx:395,434-439,569-573; harmony GeneratorTab.ets:159-168`
+  - 实现: Add @Local genCopied: boolean = false state. In copyResult(), set genCopied = true, then use a setTimeout of 1500ms to reset it to false. Bind the copy button label to genCopied ? '已复制' : '复制'.
+- **[中·缺UI] Password mode 'pronounceable / 易读模式' toggle missing**
+  - phone: Phone renders a 6th ToggleRow in password mode: label '易读模式', sub 'pronounceable', bound to opts.pronounceable (generator.tsx:678–683).
+  - harmony: Harmony PasswordOptions() only shows 5 toggles (upper, lower, numbers, symbols, avoidAmbiguous). No pronounceable toggle exists (GeneratorTab.ets:269–288). PassGen.ets GenOptions interface also lacks the pronounceable field (PassGen.ets:12–18).
+  - 位置: `phone generator.tsx:678-683; harmony GeneratorTab.ets:269-288, PassGen.ets:12-18`
+  - 实现: Add pronounceable: boolean to GenOptions in PassGen.ets. Add @Local genPronounceable: boolean = false to GeneratorTab. Add a sixth toggleRow('易读模式', 'pronounceable', this.genPronounceable, ...) at the end of PasswordOptions(). Wire it into currentOptions() and pass to generatePassword (even if pronounceable is a no-op for now, the toggle must exist for parity).
+- **[中·布局偏差] Password option toggles are full-width single-column instead of 2-column grid**
+  - phone: Phone renders toggles in a 2-column wrapping grid (toggleGrid: flexDirection row, flexWrap wrap, each card width 48%) giving a compact 2-up layout (generator.tsx:646–683, styles 897–912).
+  - harmony: Harmony renders each toggleRow as a full-width Row taking 100% width, resulting in a single-column list (GeneratorTab.ets:269–288, toggleRow builder 373–397).
+  - 位置: `phone generator.tsx:646-683; harmony GeneratorTab.ets:269-288,373-397`
+  - 实现: Wrap toggle rows in a Flex with wrap(FlexWrap.Wrap) and set each toggle item width to '48%' so they render in a 2-column grid matching the phone layout.
+- **[低·缺UI] Passphrase and PIN option hint texts missing**
+  - phone: Phone Stepper shows hint text below the control: passphrase mode shows '单词以 - 分隔，例如：apple-brave-cloud' (generator.tsx:697); PIN mode shows '范围 4 ~ 12 位，仅含数字 0-9' (generator.tsx:713).
+  - harmony: Harmony PassphraseOptions and PinOptions have no hint text below the Slider (GeneratorTab.ets:294–330, 333–370).
+  - 位置: `phone generator.tsx:697,713; harmony GeneratorTab.ets:294-330,333-370`
+  - 实现: Add a Text hint below the Slider in each options block: passphrase '单词以 - 分隔，例如：apple-brave-cloud' and PIN '范围 4 ~ 12 位，仅含数字 0-9', both styled with footnoteSize and zc.text3.
+- **[低·缺功能] Direct numeric input on stepper value (tap-to-type) has no equivalent**
+  - phone: Phone Stepper shows the current value as a tappable Text. Tapping it opens a TextInput with number-pad keyboard, pre-selected, allowing the user to type any number directly. On blur/submit the value is committed (generator.tsx:269–279, 347–375).
+  - harmony: Harmony uses a native Slider component which only allows drag-to-set within its min/max range (GeneratorTab.ets:248–262, 309–321, 349–361). There is no tap-to-type numeric entry.
+  - 位置: `phone generator.tsx:269-279,347-375; harmony GeneratorTab.ets:248-262`
+  - 实现: Add a tappable Text showing the current numeric value next to the Slider. When tapped, swap it for a TextInput (type InputType.Number) that allows the user to type a value directly, committing on Enter/blur with clamp to [min, max]. This is especially important for the batch count stepper if batch generation is added, where the user may want to type a large number.
+- **[低·布局偏差] Password length minimum (8 vs 6) and passphrase/PIN slider ranges differ from phone**
+  - phone: Phone: password length min=8 max=64 (generator.tsx:643); passphrase word count min=2 max=12 (generator.tsx:696); PIN length min=4 max=12 (generator.tsx:709).
+  - harmony: Harmony: password min=6 max=64 (PassGen/GeneratorTab.ets:251); passphrase min=3 max=10 (GeneratorTab.ets:311-318); PIN min=4 max=10 (GeneratorTab.ets:350-356). All three sliders have narrower or shifted ranges vs phone.
+  - 位置: `phone generator.tsx:643,696,709; harmony GeneratorTab.ets:251,311-318,350-356`
+  - 实现: Align all three slider ranges to phone values: password Slider min=8, passphrase Slider min=2 max=12, PIN Slider max=12.
+
+## sync-client — parity≈72%  (高3/中4/低2)
+The Harmony Sync.ets page implements all major functional behaviors from phone/app/sync.tsx: QR URI paste-to-autofill, 6-cell PIN overlay input, progress card with stage labels and progress bar, result stats (applied/pushed/conflicts), conflict warning box, and error card. The sync logic (connectAndSync, parseSyncQRPayload, vaultStore.refresh) is fully wired. However, four design-rule violations exist where unicode decorative characters are used as icon substitutes (bullet '•' for spinner, '✓' for checkmark, '×' for xmark, and text 'LAN' as a hero icon) — these are explicit ZPass design-rule violations requiring icon-system replacements. Additionally, the back button uses a text label instead of a chevron icon button, the connect button is missing its accompanying icon, and the PIN input lacks the phone's cell-level focus indicator and tap-to-reposition behavior.
+
+- **[高·设计违例] Progress card uses unicode bullet '•' instead of an icon**
+  - phone: Phone renders an `ActivityIndicator` spinner (native spinner component) beside the stage label in the progress card (sync.tsx:254-256).
+  - harmony: Harmony renders `Text('•')` (U+2022 bullet, a unicode decorative symbol) at Sync.ets:334-337. The code comment even acknowledges 'no ActivityIndicator', but the replacement is a raw unicode character which violates the 'no unicode decorative symbols' rule.
+  - 位置: `phone/app/sync.tsx:254-256 vs harmony/entry/src/main/ets/pages/Sync.ets:334-337`
+  - 实现: Replace `Text('•')` with a LoadingProgress component (ArkUI built-in) or an SVG icon to satisfy the no-unicode-decorative-symbol rule and give a functional spinner equivalent.
+- **[高·设计违例] Result card uses unicode checkmark '✓' instead of an icon**
+  - phone: Phone renders `IconSymbol name='checkmark.shield.fill'` inside a tinted circle badge in the result card header (sync.tsx:289-293).
+  - harmony: Harmony renders `Text('✓')` (U+2713, a unicode decorative symbol) inside the badge Column at Sync.ets:403-407. This is a ZPass design-rule violation.
+  - 位置: `phone/app/sync.tsx:289-293 vs harmony/entry/src/main/ets/pages/Sync.ets:403-407`
+  - 实现: Replace `Text('✓')` with an SVG checkmark path or an ArkUI Image component pointing to an icon resource. Do not use unicode glyphs as visual icons.
+- **[高·设计违例] Error card uses unicode multiplication sign '×' instead of an icon**
+  - phone: Phone renders `IconSymbol name='xmark.circle.fill'` inside a tinted danger badge in the error card header (sync.tsx:358-361).
+  - harmony: Harmony renders `Text('×')` (U+00D7, a unicode decorative symbol) inside the badge Column at Sync.ets:487-492. This is a ZPass design-rule violation.
+  - 位置: `phone/app/sync.tsx:358-361 vs harmony/entry/src/main/ets/pages/Sync.ets:487-492`
+  - 实现: Replace `Text('×')` with an SVG cross/xmark icon or ArkUI Image icon resource.
+- **[中·设计违例] Hero section uses text label 'LAN' instead of a proper icon**
+  - phone: Phone renders `IconSymbol name='antenna.radiowaves.left.and.right'` (a proper SF Symbol icon, size 26, info-colored) inside the hero icon circle (sync.tsx:129-133).
+  - harmony: Harmony renders `Text('LAN')` at fontSize 13 inside the hero icon circle (Sync.ets:125-129). 'LAN' is an abbreviation text used as a visual icon substitute, which is not an icon-system/SVG representation.
+  - 位置: `phone/app/sync.tsx:129-133 vs harmony/entry/src/main/ets/pages/Sync.ets:125-129`
+  - 实现: Replace `Text('LAN')` with an SVG antenna/wifi icon or ArkUI Image icon resource that visually represents wireless/LAN connectivity. The hero icon area is 56x56 with borderRadius ZRadius.xl — an SVG icon sized ~26vp centered is the correct replacement.
+- **[中·布局偏差] Nav back button uses text '返回' instead of a chevron icon button**
+  - phone: Phone renders an `IconButton` with icon `'chevron.left'` (size 36, iconSize 20, ghost variant) as the back navigation control (sync.tsx:109-115).
+  - harmony: Harmony renders `Text('返回')` at `ZType.bodySize` / `zc.text2` as the back control (Sync.ets:100-103). This is a text label rather than the expected icon button.
+  - 位置: `phone/app/sync.tsx:109-115 vs harmony/entry/src/main/ets/pages/Sync.ets:100-103`
+  - 实现: Replace `Text('返回')` with an SVG left-chevron icon button (36×36 tap target, ghost style) to match the phone's nav pattern. Many other Harmony pages in this project already use this pattern — check existing pages for the shared icon button builder.
+- **[中·布局偏差] Connect button missing icon when not busy**
+  - phone: Phone's connect button renders `icon='antenna.radiowaves.left.and.right'` alongside the label '连接并同步' when not in busy state (sync.tsx:238-246). The icon disappears and label changes to '连接中' when busy.
+  - harmony: Harmony's button is a plain `Text` with no icon in either state (Sync.ets:252-263). It shows '连接中…' when busy and '连接并同步' when idle, but never renders an accompanying icon.
+  - 位置: `phone/app/sync.tsx:238-246 vs harmony/entry/src/main/ets/pages/Sync.ets:252-263`
+  - 实现: Add an antenna/wifi SVG icon to the left of the button label text in non-busy state, using a Row layout inside a custom button builder.
+- **[中·缺UI] PIN cells lack focus/cursor indicator on the active cell**
+  - phone: Phone shows a 2px info-colored border (`borderWidth: 2, borderColor: c.info`) on the currently active empty PIN cell when the hidden input is focused. It also tracks `pinFocused` state so the cursor highlight disappears on blur (sync.tsx:47, 188-189, 205-211).
+  - harmony: Harmony's `pinCell` builder has no focus state tracking and no cursor highlight — the active cell looks identical to other empty cells (Sync.ets:307-328). The `@Local pin` changes but there is no `pinFocused` equivalent or cell border styling.
+  - 位置: `phone/app/sync.tsx:47,188-211 vs harmony/entry/src/main/ets/pages/Sync.ets:307-328`
+  - 实现: Add an `@Local pinFocused: boolean = false` field. On the transparent TextInput, use `.onFocus(() => this.pinFocused = true).onBlur(() => this.pinFocused = false)`. In `pinCell(i)`, apply a 2vp info-colored border when `this.pinFocused && i === this.pin.length`.
+- **[低·缺功能] PIN cell individual-tap to reposition entry point is not implemented**
+  - phone: Phone's `focusPinAt(i)` function: tapping a filled PIN cell at index i truncates the pin to `pin.slice(0, i)` and re-focuses the hidden input, letting the user retype from that position (sync.tsx:56-59). Cells receive individual Pressable tap handlers.
+  - harmony: Harmony's 6-cell Row has `hitTestBehavior(HitTestMode.None)` so all taps pass through to the overlaid transparent TextInput (Sync.ets:285). Individual cell taps cannot be distinguished; only the TextInput as a whole can receive focus.
+  - 位置: `phone/app/sync.tsx:56-59, 202-211 vs harmony/entry/src/main/ets/pages/Sync.ets:273-286`
+  - 实现: This is a minor UX nicety. One approach: remove HitTestMode.None from the cells Row, add individual `.onClick(() => { if (i < this.pin.length) this.pin = this.pin.substring(0, i); })` on each cell Column, and programmatically focus the TextInput via a controller. If ArkUI TextInput controller focus is unavailable, document this as a known platform limitation.
+- **[低·布局偏差] Warning box uses plain text '!' instead of an icon**
+  - phone: Phone's conflict warning box renders `IconSymbol name='exclamationmark.triangle.fill'` (size 14, warn-colored) before the warning text (sync.tsx:337-341).
+  - harmony: Harmony renders `Text('!')` (plain text, not a formal unicode decorative symbol but not an icon either) at Sync.ets:438-443.
+  - 位置: `phone/app/sync.tsx:337-341 vs harmony/entry/src/main/ets/pages/Sync.ets:438-443`
+  - 实现: Replace `Text('!')` with an SVG triangle-exclamation icon to match the phone's visual treatment. Width 20 / height 20 sized icon in warn color.
+
+  _可接受适配 (2)：Keyboard avoidance uses safeArea.keyboard padding instead of KeyboardAvoidingView；Progress card uses animation attribute on progress bar instead of re-render_
+
+## me-tab — parity≈62%  (高2/中8/低5)
+MeTab has solid structural parity: user card, spaces modal, change-password overlay, trusted-device overlay, theme picker, import/export, and reset are all present. However, numerous gaps remain: every list row is icon-less in harmony while phone shows icon symbols on every row; the "清空所有条目" action is entirely absent from the Data section; the "空间" section row ("当前空间") is missing from the scroll list; row labels/values differ in the Security section; and the trusted-device row uses a Toggle switch with a different label rather than a disclosure row with value text. Design violations also exist: the UserCard chevron and other navigation affordances use unicode glyphs (›) instead of icon components, and the page title uses 22 px (titleSize) instead of 32 px (largeTitleSize).
+
+- **[高·缺UI] All list rows missing leading icons**
+  - phone: Every ListRow in every section (Security, Appearance, Data, Stats, About) shows a leading icon symbol (e.g. lock.fill, faceid, antenna, moon.fill, arrow.down.doc.fill, trash, info.circle, key.fill, clock.fill, etc.) with optional tinted background for danger/warn rows.
+  - harmony: rowAction, rowValue, rowCount, rowDanger, and rowTrustedSwitch builders have no icon column at all. All rows render label + optional subtitle + chevron only.
+  - 位置: `phone/app/(tabs)/me.tsx:257-394 (itemTypeRows, all ListRow calls); harmony/entry/src/main/ets/views/MeTab.ets:572-650 (all @Builder row helpers)`
+  - 实现: Add a leading 24×24 Image/SVG or SymbolGlyph column to each row builder (rowAction, rowValue, rowCount, rowDanger, rowTrustedSwitch). Pass an icon resource parameter. Use tinted container (danger+1f alpha background) for the Lock and Clear-All rows matching phone's iconBg pattern.
+- **[高·缺功能] "清空所有条目" action missing from Data section**
+  - phone: Data section has four rows: 导入数据, 导出明文备份, 清空所有条目, 重置 ZPass. "清空所有条目" calls clearAll() after a destructive confirm dialog; if vault is already empty it shows an info toast. The row uses warn-tinted icon.
+  - harmony: Data section has only three rows: 导出 Vault, 从 JSON 导入, 重置保险库. clearAll / 清空 is not implemented anywhere in MeTab.ets, and VaultStore has no clearAll method exposed in harmony.
+  - 位置: `phone/app/(tabs)/me.tsx:177-188, 363-371; harmony/entry/src/main/ets/views/MeTab.ets:441-452 (data section missing the row)`
+  - 实现: Add a 'clearAll' method to VaultStore that deletes all items but retains master password and key material. Add a rowDanger (or warn-toned) row "清空所有条目" in the data Column with a confirm dialog matching phone's copy. Show toast if vault is empty.
+- **[中·缺UI] "空间" section (当前空间 disclosure row) absent from main scroll list**
+  - phone: Below the UserCard, phone renders a standalone ListGroup header="空间" containing one ListRow title="当前空间" value={activeSpaceName} that opens the SpacesModal.
+  - harmony: Harmony has no "空间" section header or 当前空间 row in the scroll list. Space management is only accessible via the UserCard tap.
+  - 位置: `phone/app/(tabs)/me.tsx:286-293; harmony/entry/src/main/ets/views/MeTab.ets:401-560 (build() body, no 空间 sectionHeader+row)`
+  - 实现: After the userCard() call, add this.sectionHeader('空间') and a rowValue('当前空间', this.activeSpaceName, () => this.openSpaces()) inside a styled Column, mirroring the pattern used for 安全与隐私.
+- **[中·布局偏差] "此设备自动解锁" row replaced by differently-labeled Toggle switch**
+  - phone: Row labeled "此设备自动解锁", shows trustedValueLabel as trailing value text ("已启用" / "未启用" / "不支持"), uses disclosure-row style, and is disabled (greyed) when trustedDeviceSupported is false.
+  - harmony: rowTrustedSwitch renders label "生物解锁" (different copy), shows trustedValueLabel as subtitle text below, and renders a manual Toggle graphic instead of a trailing value. When trustedSupported is false the entire row is hidden (not shown with disabled style).
+  - 位置: `phone/app/(tabs)/me.tsx:300-307; harmony/entry/src/main/ets/views/MeTab.ets:411-412, 653-690`
+  - 实现: Rename label to "此设备自动解锁". Move trustedValueLabel to trailing text position (like rowValue). When !trustedSupported, show the row but set .opacity(0.4) and disable the tap rather than hiding it. Keep the Toggle control or switch to a rowValue disclosure style — but align the label text.
+- **[中·布局偏差] "局域网同步" row label and subtitle differ**
+  - phone: Row: title="局域网同步", value="连接桌面端", icon=antenna.radiowaves.left.and.right, navigates to /sync.
+  - harmony: Row: label="设备间同步", sub="PAKE 握手 + 端到端加密" (technical detail as subtitle), no trailing value. Label copy and info presentation differ.
+  - 位置: `phone/app/(tabs)/me.tsx:308-312; harmony/entry/src/main/ets/views/MeTab.ets:415`
+  - 实现: Change rowAction label to '局域网同步' and pass trailing value '连接桌面端' via rowValue instead of a subtitle. Remove the PAKE technical subtitle which is not shown on phone.
+- **[中·布局偏差] "立即锁定" row shows extra subtitle not present on phone**
+  - phone: Row title="立即锁定", no subtitle, danger-tinted icon, danger tone on label text.
+  - harmony: rowDanger('立即锁定', '清空内存中的 DEK', ...) — always renders a subtitle '清空内存中的 DEK' that has no phone counterpart.
+  - 位置: `phone/app/(tabs)/me.tsx:323-335; harmony/entry/src/main/ets/views/MeTab.ets:417`
+  - 实现: Remove the '清空内存中的 DEK' subtitle. Call rowDanger with an empty/undefined sub parameter or create a variant without the subtitle line.
+- **[中·布局偏差] Export row: different label, subtitle instead of item-count value, no pre-export confirm guard**
+  - phone: Row title="导出明文备份", trailing value=`${items.length} 项`. Before exporting, shows a destructive confirm dialog listing item count and plaintext warning. If vault empty, shows warn toast.
+  - harmony: Row label="导出 Vault（明文 JSON）", sub="仅迁移 / 备份用" (no item count). onExport calls exportVaultToFile directly without a confirm guard dialog.
+  - 位置: `phone/app/(tabs)/me.tsx:131-151, 354-360; harmony/entry/src/main/ets/views/MeTab.ets:351-358, 443`
+  - 实现: Rename row to '导出明文备份', show trailing item count (e.g. `${store.items.length} 项`). Add pre-export promptAction.showDialog confirm with destructive copy matching phone. Add early toast if items.length === 0.
+- **[中·布局偏差] Import UX flow differs: upfront warning vs. post-parse confirm with filename and count**
+  - phone: Calls file picker first, parses file, then shows confirm dialog: "已从「{fileName}」解析到 {N} 个条目，全部追加？" with parsed filename and count. Shows alert if parse fails or is empty.
+  - harmony: Shows an upfront warning dialog ("从明文 JSON 导入？") before picking the file, then imports directly on confirmation without showing parsed filename or item count.
+  - 位置: `phone/app/(tabs)/me.tsx:154-174; harmony/entry/src/main/ets/views/MeTab.ets:361-379`
+  - 实现: Rework onImport: pick file first, parse it, then show a post-parse confirm dialog displaying the filename and parsed item count before committing the import. Show a toast/alert if the file is empty or unparseable.
+- **[中·缺UI] Change-password overlay: error shown as plain text, missing styled error box with icon**
+  - phone: Validation error appears in a styled error box: danger+1f background, rounded corners (Radius.md), `exclamationmark.circle.fill` icon (14px, danger color) + error text on same row.
+  - harmony: cpError is shown as a plain `Text(this.cpError)` in danger color with no background box, no icon. Same applies to the confirmPwOverlay (confirmPwError).
+  - 位置: `phone/app/(tabs)/me.tsx:512-523, 607-617; harmony/entry/src/main/ets/views/MeTab.ets:842-847, 728-733`
+  - 实现: Replace plain error Text with a Row containing an error icon (Image/SVG for exclamationmark.circle) + error text, wrapped in a Container with backgroundColor(danger+'1f') and borderRadius(ZRadius.md), matching phone's errorBox style.
+- **[中·设计违例] UserCard chevron uses unicode '›' instead of icon component**
+  - phone: Phone uses `<IconSymbol name="chevron.right" size={18} color={c.text4} />` — a proper icon symbol.
+  - harmony: Harmony renders `Text('›').fontSize(20).fontColor(this.zc.text3)` — a unicode right-angle quotation mark used as a decorative navigation arrow. Same pattern repeated in rowAction, rowValue, and spaceRow builders (all use '›').
+  - 位置: `harmony/entry/src/main/ets/views/MeTab.ets:551-553, 582-583, 604-605, 1046`
+  - 实现: Replace all `Text('›')` chevrons with a proper icon: use Image($r('app.media.chevron_right')) or a SymbolGlyph with the system chevron resource. ZPass design rules prohibit unicode decorative symbols in rendered UI.
+- **[低·设计违例] Page title uses 22 px (titleSize) instead of 32 px (largeTitleSize)**
+  - phone: Page header "我的" uses `Type.largeTitle` = fontSize 32, fontWeight 700, letterSpacing -0.6.
+  - harmony: `Text('我的').fontSize(ZType.titleSize)` — ZType.titleSize = 22. The harmony Tokens.ets defines `largeTitleSize = 32` which is the correct token but is not used here.
+  - 位置: `phone/app/(tabs)/me.tsx:275, 961; harmony/entry/src/main/ets/views/MeTab.ets:388`
+  - 实现: Change `.fontSize(ZType.titleSize)` to `.fontSize(ZType.largeTitleSize)` on the page header Text. Also consider adding `.letterSpacing(-0.6)` to match the phone's largeTitle type spec.
+- **[低·缺UI] SpacesModal missing empty-state text when no spaces exist**
+  - phone: When `ordered.length === 0`, renders centered Text "没有空间" inside the scrollable list area.
+  - harmony: spacesModalOverlay uses ForEach(sortSpaces(store.spaces), ...) with no empty-state branch — if spaces is empty the list renders nothing.
+  - 位置: `phone/app/(tabs)/me.tsx:872-875; harmony/entry/src/main/ets/views/MeTab.ets:959-969`
+  - 实现: Add an if(sortSpaces(this.store.spaces).length === 0) branch inside the Scroll > Column to render a centered Text('没有空间') with text3 color.
+- **[低·布局偏差] Space order shown in caption size without monospace font**
+  - phone: Space order `#sp.order` is rendered with `fontFamily: MONO` (monospace) in addition to footnote size.
+  - harmony: Uses only `fontSize(ZType.captionSize)` and `fontColor(this.zc.text3)` — no monospace font family specified.
+  - 位置: `phone/app/(tabs)/me.tsx:912-913; harmony/entry/src/main/ets/views/MeTab.ets:1031-1033`
+  - 实现: Add `.fontFamily('monospace')` (or a system monospace font) to the `#sp.order` Text in the spaceRow builder.
+- **[低·缺UI] TrustedDevice enable overlay: tapping backdrop does not close (phone closes it)**
+  - phone: SheetModal wraps with a Pressable backdrop that calls onClose() when tapped, allowing dismiss by tapping outside.
+  - harmony: confirmPwOverlay's outer Column onClick handler is a no-op with comment '点击遮罩区不关闭 —— 显式按取消才退出'.
+  - 位置: `phone/app/(tabs)/me.tsx:725-731; harmony/entry/src/main/ets/views/MeTab.ets:771-774`
+  - 实现: Decide on desired UX: if matching phone, change the outer Column onClick to call this.onCancelEnable(). The change-password overlay has the same pattern (also no-op backdrop).
+- **[低·布局偏差] New-password field hint shown as placeholder text instead of separate hint label**
+  - phone: ChangePasswordModal renders a separate `hint` Text below the new-password field: "至少 8 位，建议混合大小写 + 数字 + 符号" in footnote/text3 style.
+  - harmony: Harmony bakes the hint into the placeholder text of the TextInput: `'新主密码（≥ 8 位）'`. No persistent visible hint below the field.
+  - 位置: `phone/app/(tabs)/me.tsx:498-504; harmony/entry/src/main/ets/views/MeTab.ets:807-822`
+  - 实现: Add a persistent Text beneath the new-password TextInput with the hint copy, using ZType.footnoteSize and zc.text3 color, visible at all times (not just when field is empty like a placeholder).
+
+  _可接受适配 (2)："作为同步服务端" row not present in harmony；Spaces long-press uses showActionMenu instead of custom actionSheet_
+
+## lock — parity≈52%  (高2/中8/低1)
+The Harmony LockOverlay implements the core unlock flow (password input, error display, async unlock with busy state, biometric button conditional on trusted device availability, auto-unlock on mount) and is functionally viable. However, significant UI elements are missing or degraded compared to phone: the lock badge on the SpaceAvatar, the leading icon in the password field, the icon and loading state on the unlock button and biometric button, the bottom security hint text, and input-disabled-during-busy behavior. The title is hardcoded to 'ZPass' instead of using the active space name (though the helper method is already implemented), and the title font size is 32px versus phone's 22px. These gaps together make the Harmony screen look noticeably simpler and less polished than the phone original. Haptic feedback is absent and is flagged separately as a platform-scope decision rather than a defect.
+
+- **[高·布局偏差] Title text is hardcoded 'ZPass' instead of showing active space name**
+  - phone: Phone shows `activeSpace?.name ?? 'ZPass'` as the title — when a named space is active, the space name appears as the large title. This is significant branding for multi-space users. lock-overlay.tsx:107.
+  - harmony: Harmony hardcodes `Text('ZPass')` (LockOverlay.ets:116) and never uses the active space name, even though `activeSpaceName()` is already implemented (LockOverlay.ets:30-34).
+  - 位置: `phone: lock-overlay.tsx:107 | harmony: LockOverlay.ets:116`
+  - 实现: Change `Text('ZPass')` to `Text(this.activeSpaceName() ?? 'ZPass')` — the helper is already written, it just isn't wired to the title.
+- **[高·布局偏差] Title font size is 32px (largeTitleSize) vs phone's 22px (titleSize)**
+  - phone: Phone uses `Type.title` which maps to 22px (title size). lock-overlay.tsx:106, constants/theme.ts:Type.title.
+  - harmony: Harmony uses `ZType.largeTitleSize` = 32px (LockOverlay.ets:117), producing a significantly oversized title compared to phone.
+  - 位置: `phone: lock-overlay.tsx:106 | harmony: LockOverlay.ets:117`
+  - 实现: Change `.fontSize(ZType.largeTitleSize)` to `.fontSize(ZType.titleSize)` (22) to match phone's visual weight.
+- **[中·缺UI] Lock badge overlay on SpaceAvatar is absent**
+  - phone: Phone renders a 22×22 circular badge (danger background, 2px white border) at bottom-right of the 72px SpaceAvatar, containing a lock.fill icon (11px, white). This visually communicates the locked state. See lock-overlay.tsx:96-104.
+  - harmony: Harmony renders SpaceAvatar (LockOverlay.ets:106-113) with no badge overlay — just a plain rounded square with the space initial.
+  - 位置: `phone: lock-overlay.tsx:96-104 | harmony: LockOverlay.ets:106-113`
+  - 实现: Add a Stack layout around the SpaceAvatar, position a small 22vp Circle with zc.danger background and a lock SVG icon at the bottom-right offset (-2vp, -2vp). ArkUI Stack + .position() or .offset() can reproduce this exactly.
+- **[中·缺UI] Password input field has no leading lock icon**
+  - phone: Phone wraps a lock.fill icon (16px, text3 color) and TextInput in a horizontal row (flexDirection row, gap: Spacing.sm). The icon provides clear visual context for the password field. lock-overlay.tsx:122-138.
+  - harmony: Harmony TextInput is standalone with no leading icon (LockOverlay.ets:128-143) — just a plain input box.
+  - 位置: `phone: lock-overlay.tsx:122-123 | harmony: LockOverlay.ets:128`
+  - 实现: Wrap the TextInput in a Row with a lock SVG icon (16vp, zc.text3 color) preceding it, or use TextInput's .decoration() / custom builder approach in ArkUI.
+- **[中·缺UI] Error state does not apply danger border color to the input box**
+  - phone: When there is an error, phone changes the input box borderColor to c.danger (transparent when no error). lock-overlay.tsx:118-119.
+  - harmony: Harmony TextInput has no border/outline changes on error — errorText is shown below but the input itself gives no visual error signal (LockOverlay.ets:128-143).
+  - 位置: `phone: lock-overlay.tsx:114-120 | harmony: LockOverlay.ets:128-143`
+  - 实现: Add `.border({ width: 1, color: this.errorText ? this.zc.danger : 'transparent' })` to the TextInput.
+- **[中·缺UI] Unlock button has no icon; uses plain Text not a Button component**
+  - phone: Phone uses a Button component with `icon='lock.shield.fill'` (when not busy) plus label text — the icon disappears only during busy state. lock-overlay.tsx:153-162.
+  - harmony: Harmony uses a styled Text component as the button (LockOverlay.ets:153-163) with no icon at all, neither in idle nor busy state.
+  - 位置: `phone: lock-overlay.tsx:153-162 | harmony: LockOverlay.ets:153-163`
+  - 实现: Replace the Text-as-button with a Row containing a lock.shield SVG icon + label text. In idle state show the icon; in busy state show only the label (matching phone). ArkUI Button or a styled Row with .onClick() both work.
+- **[中·缺UI] No loading spinner shown during unlock — busy state only changes button color**
+  - phone: Phone shows an ActivityIndicator (spinner) as a positioned overlay when busy=true (lines 164-168), giving clear visual feedback during the async KDF unlock which can take ~1s.
+  - harmony: Harmony only changes button background to zc.text3 and text to '解锁中…' when busy (LockOverlay.ets:153-163). No spinner component is displayed.
+  - 位置: `phone: lock-overlay.tsx:164-168 | harmony: LockOverlay.ets:153-163`
+  - 实现: Add a LoadingProgress or custom spinner inside the unlock button (replacing the icon slot when busy=true), or overlay an absolute-positioned LoadingProgress over the button area when this.store.busy is true.
+- **[中·缺功能] TextInput is not disabled during unlock busy state**
+  - phone: Phone sets `editable={!busy}` on the TextInput, preventing the user from modifying the password while the unlock KDF is running. lock-overlay.tsx:136.
+  - harmony: Harmony TextInput has no `.enabled()` modifier tied to `this.store.busy` (LockOverlay.ets:128-143) — user can type into the field while unlocking is in progress.
+  - 位置: `phone: lock-overlay.tsx:136 | harmony: LockOverlay.ets:128-143`
+  - 实现: Add `.enabled(!this.store.busy)` to the TextInput component.
+- **[中·缺UI] Biometric button has no icon and no loading state, and uses different label text**
+  - phone: Phone shows: (1) a faceid icon (18px, c.info color) + '使用设备解锁' label in a horizontal layout; (2) when trustedDeviceTrying=true, shows an ActivityIndicator spinner instead of the icon+text. Button has 0.6 opacity when disabled. lock-overlay.tsx:170-195.
+  - harmony: Harmony shows a plain Text '生物解锁' with no icon. No loading/spinner state during biometric authentication. No opacity change during busy state (LockOverlay.ets:165-175). Label text '生物解锁' vs phone's '使用设备解锁'.
+  - 位置: `phone: lock-overlay.tsx:170-195 | harmony: LockOverlay.ets:165-175`
+  - 实现: Replace plain Text with a Row containing a biometric/face SVG icon (18vp, zc.info color) + '使用设备解锁' text. Add `.opacity(this.store.busy ? 0.6 : 1.0)` and show a LoadingProgress in place of the icon when store.busy is true and a biometric attempt is in progress.
+- **[中·缺UI] Bottom 'zero-knowledge' hint text is absent**
+  - phone: Phone shows '零知识加密 · 主密码永不离开此设备' at the bottom in monospace font, text4 color, center-aligned. This is a trust/security reassurance visible to locked users. lock-overlay.tsx:197-199.
+  - harmony: Harmony has no equivalent hint text anywhere in the LockOverlay layout (LockOverlay.ets:99-199).
+  - 位置: `phone: lock-overlay.tsx:197-199 | harmony: LockOverlay.ets (absent)`
+  - 实现: Add `Text('零知识加密 · 主密码永不离开此设备').fontSize(ZType.captionSize).fontColor(this.zc.text4).textAlign(TextAlign.Center).fontFamily('monospace').margin({ top: ZSpacing.xxl })` at the bottom of the Column.
+- **[低·缺UI] Error row lacks exclamation icon; shows text only**
+  - phone: Phone renders an `exclamationmark.circle.fill` icon (12px, danger color) followed by the error text in a horizontal row, aligned to start. lock-overlay.tsx:141-148.
+  - harmony: Harmony shows only the error Text with danger color, no leading icon (LockOverlay.ets:145-150).
+  - 位置: `phone: lock-overlay.tsx:141-148 | harmony: LockOverlay.ets:145-150`
+  - 实现: Wrap the error display in a Row with a warning/circle SVG icon (12vp, zc.danger color) preceding the error text.
+
+  _可接受适配 (1)：Haptic feedback not implemented — platform scope decision_
+
+## qr-scanner `[范围待定]` — parity≈62%  (高2/中4/低2)
+The harmony TotpScan.ets correctly ports the core scan-and-parse loop using ScanKit (camera + album in one system UI) and the manual paste path. The structural gap is almost entirely in the result-preview screen: harmony shows a minimal 5-field meta card, omitting the secret reveal/hide toggle, the anti-phishing warning, the success badge, and all per-error-type granularity. The architectural flow also differs — phone returns a URI to a parent editor form via onApply, while harmony creates the vault item and navigates back immediately, bypassing any edit step. This flow difference is a product/scope decision a human should confirm.
+
+- **[高·缺UI] Secret field with reveal/hide toggle absent from result preview**
+  - phone: Phone ResultOk shows a 'Secret' row with an eye-icon toggle. When hidden, it renders 16 masked dots (7×7px circles). When revealed, it renders the base32 secret formatted in 4-char groups using formatBase32Groups, selectable as text (phone:557-596).
+  - harmony: Harmony metaRow renders type, issuer, account, algorithm, and digits/period — no secret row exists at all (TotpScan.ets:186-197). The user cannot inspect or copy the secret before saving.
+  - 位置: `phone:qr-scanner.tsx:557-596 / harmony:TotpScan.ets:186-197`
+  - 实现: Add a 密钥 row to the result preview column. Implement a @Local revealSecret: boolean toggle. When false, render a Row of 16 small Circle shapes (7vp, color zc.text3). When true, render Text with formatBase32Groups(meta.secret) in a monospace-like font, and allow selection. Add an eye-icon toggle button alongside the label.
+- **[高·缺功能] Harmony saves directly to vault instead of returning URI to parent editor**
+  - phone: Phone QrScanner is a modal component that calls onApply(uri, meta) on confirm, allowing the parent (totp/[id].tsx edit form) to pre-fill fields for review before the user explicitly saves. The scan modal never creates vault items directly (phone:187-191).
+  - harmony: Harmony TotpScan.saveAsItem() calls vaultStore.createItem() immediately and calls router.back() (TotpScan.ets:70-89), bypassing any edit-before-save step. There is no confirmation step where the user sees and can modify a prefilled form before the item is committed.
+  - 位置: `phone:qr-scanner.tsx:187-191 / harmony:TotpScan.ets:70-89`
+  - 实现: This is a scope/flow decision that a human should confirm. Option A (match phone): have TotpScan navigate to the TOTP item edit page with pre-filled fields rather than saving directly, mirroring the onApply callback pattern. Option B (acceptable shortcut): keep direct-save but add the result preview screen richness (secret reveal, anti-phishing copy, explicit confirm button) so the user has a meaningful review step before the item is committed.
+- **[中·缺UI] Anti-phishing security warning missing from result screen**
+  - phone: Phone ResultOk shows a footnote below the meta card: '请确认 issuer 与账户与你的预期一致再使用。来源不明的二维码可能是钓鱼。' (phone:599-601). This is described as a core design goal (防钓鱼) in the file header.
+  - harmony: No equivalent copy appears anywhere in TotpScan.ets. The preview card goes straight from meta rows to save action.
+  - 位置: `phone:qr-scanner.tsx:599-601 / harmony:TotpScan.ets:186-206`
+  - 实现: Below the meta preview Column, add a Text node: '请确认发行者与账户与你的预期一致再使用。来源不明的二维码可能是钓鱼。' with fontSize(ZType.footnoteSize) and fontColor(zc.text3). Place it between the meta card and the save action.
+- **[中·缺UI] Error state is a single generic string — 5 distinct error types with context are missing**
+  - phone: Phone ResultBad maps 5 distinct error codes (no-qr, not-otpauth, missing-secret, invalid-type, invalid-uri) to individual titles and hint sentences, plus a raw-text preview box showing the first 80 characters of unrecognized content when available (phone:637-699).
+  - harmony: Harmony collapses all failures to one string: '无法识别二维码 / 非 otpauth:// 格式' (TotpScan.ets:61), displayed as a single danger-colored Text. No raw preview box, no per-error guidance.
+  - 位置: `phone:qr-scanner.tsx:637-699 / harmony:TotpScan.ets:59-63, 199-204`
+  - 实现: In applyRaw, set errorText to a specific message per parsed.error value (matching phone's title+hint pattern). Additionally, store a rawPreview: string (first 80 chars of the scanned text) and when errorText is non-empty and rawPreview is non-empty, render a bgElev box below the error text showing '识别到的内容' label and the raw preview in footnote size.
+- **[中·缺UI] Success badge ('识别成功') absent from result preview**
+  - phone: Phone ResultOk renders a Badge component with label='识别成功', tone='ok', icon='checkmark.seal.fill' at the top of the result screen, before the meta card (phone:536-538).
+  - harmony: Harmony's result preview (TotpScan.ets:185-197) goes directly into the meta row Column with no success indicator. The user has no immediate visual confirmation that parsing succeeded.
+  - 位置: `phone:qr-scanner.tsx:536-538 / harmony:TotpScan.ets:185`
+  - 实现: Add a Row above the meta Column when this.meta is non-null: a small rounded badge with ok-colored background (zc.ok), a checkmark SVG icon, and the text '识别成功' in footnoteSize. Use ZRadius.md (7) for border radius.
+- **[中·缺UI] Decoding/loading spinner state is not represented**
+  - phone: Phone shows a Decoding component — a spinning circle border with '正在识别…' text — while `state.kind === 'decoding'` during async image-decode operations (phone:487-501).
+  - harmony: Harmony has no loading state. After calling openScanner(), the UI does not indicate any in-progress state; it either shows results or an error after the await resolves.
+  - 位置: `phone:qr-scanner.tsx:487-501, 257-258 / harmony:TotpScan.ets:30-51`
+  - 实现: Add a @Local isDecoding: boolean = false field. Set it true before awaiting startScanForResult and false in finally. When isDecoding, render a centered LoadingProgress or a Text '正在识别…' instead of the normal content.
+- **[低·缺UI] HOTP type label and counter field not shown in meta preview**
+  - phone: Phone maps OTP type to friendly labels: 'TOTP', 'HOTP', 'Steam Guard'. For HOTP entries, the params line shows '计数器 N' instead of a period (phone:518-523, 526-528).
+  - harmony: Harmony displays meta.type.toUpperCase() (TotpScan.ets:187) and always renders 'digits / period s' (line 191), regardless of whether the type is HOTP. The HOTP counter is never shown.
+  - 位置: `phone:qr-scanner.tsx:518-528 / harmony:TotpScan.ets:187, 191`
+  - 实现: In metaRow for type, apply the same mapping: if meta.type === 'steam' show 'Steam Guard', else show meta.type.toUpperCase(). For the period row, conditionally render '计数器 N' for HOTP or 'N 位 / M s' for TOTP/Steam.
+- **[低·缺功能] Haptic feedback on scan success and failure absent**
+  - phone: Phone triggers Haptics.notificationAsync(Success) on successful parse and Haptics.notificationAsync(Warning) on parse failure (phone:124, 127-130).
+  - harmony: No haptic call exists anywhere in TotpScan.ets.
+  - 位置: `phone:qr-scanner.tsx:124-130 / harmony:TotpScan.ets:53-63`
+  - 实现: Import vibrator from @kit.SensorServiceKit or use @ohos.vibrator. After a successful applyRaw, call vibrator.startVibration with a 'click' effect. On failure, use a 'soft' or 'tick' effect. This is a platform-idiomatic equivalent of expo-haptics.
+
+  _可接受适配 (3)：ScanKit replaces custom camera viewfinder + album picker；Camera permission gate handled by ScanKit system dialog；Mode-switching chips (camera/album/paste) replaced by single-button design_
+
+## onboarding — parity≈72%  (高0/中5/低4)
+The core 2-step onboarding flow is faithfully ported: deferred-initialize state machine, verbatim validation messages, initialize→renameSpace on submit, busy-state button disable, SpaceAvatar in step 2, and the 3-point security blurb in step 1 are all present. The main gaps are secondary affordance UI: both password fields lack an eye/reveal toggle, all field labels (uppercase + hint) are replaced by placeholder text only, footer hint lines are absent in both steps, input leading icons are missing, error boxes are unstyled plain text vs. the phone's tinted icon+box, and the phone's security-point checkmark badges are rendered as plain text lines. Harmony also adds a password strength meter (label + entropy bits + progress bar) that phone onboarding does not have — this is an acceptable enhancement and requires no fix. No scope decision is needed; this is a real page on both platforms.
+
+- **[中·缺功能] Password reveal/eye toggle absent on both password fields**
+  - phone: Phone PasswordInput (onboarding-overlay.tsx:397-433) renders an IconButton (eye.fill / eye.slash.fill) that toggles secureTextEntry for both the main password and confirm fields. Users can reveal what they typed to verify correctness.
+  - harmony: Harmony uses TextInput with type InputType.Password (OnboardingOverlay.ets:239, 282) with no reveal button. Users cannot inspect what they typed.
+  - 位置: `phone onboarding-overlay.tsx:423-430 (both fields); harmony OnboardingOverlay.ets:238-253, 282-296`
+  - 实现: Add a show/hide password toggle icon (a lock or eye SVG) to each password TextInput via a Row wrapper or the TextInput's suffix area, using a @Local revealed boolean per field to toggle InputType.
+- **[中·缺UI] KDF timing hint text missing from step 1 footer**
+  - phone: Phone step 1 footer (onboarding-overlay.tsx:315-321) shows a mono caption: '原生 Go 加速 · 派生约 0.3 秒' / 'WASM 加速 · 派生大约 0.5 秒' / '纯 JS 派生 · 约 3-6 秒' based on isNativeKDF()/isWasmKDF() to set user expectations before the slow KDF runs.
+  - harmony: Harmony has no footer hint text after the 下一步 button (OnboardingOverlay.ets:171-181). The isNativeKDF() function exists in Crypto.ets:139 so this is implementable.
+  - 位置: `phone onboarding-overlay.tsx:315-321; harmony OnboardingOverlay.ets:171-181`
+  - 实现: After the 下一步 button, add a caption-size Text with fontFamily monospace showing '原生加速 · 派生约 0.3 秒' (HarmonyOS native path always true), using ZType.captionSize and zc.text4 color.
+- **[中·缺UI] Step 2 footer hint text missing ('创建后随时可在「我的 → 空间」里重命名')**
+  - phone: Phone step 2 footer (onboarding-overlay.tsx:345-347) shows a centered caption '创建后随时可在「我的 → 空间」里重命名' below the button row, reassuring users that renaming is always possible.
+  - harmony: Harmony has no hint after the 返回/创建保险库 row (OnboardingOverlay.ets:182-207). The section ends immediately.
+  - 位置: `phone onboarding-overlay.tsx:345-347; harmony OnboardingOverlay.ets:182-207`
+  - 实现: After the Row containing 返回 and 创建保险库 buttons, add a Text '创建后随时可在「我的 → 空间」里重命名' at captionSize, fontColor zc.text4, textAlign Center.
+- **[中·缺UI] Field labels (uppercase + monospace hint) replaced by placeholder text only**
+  - phone: Phone renders a FieldLabel above each input: '主密码' + '至少 8 位字符' hint above field 1 (onboarding-overlay.tsx:180), '确认主密码' above field 2 (line 194), and '空间名' + '个人 / 工作 / 家庭 …' hint in step 2 (line 249). Labels use uppercase transform and text3 color; hints use monospace caption + text4.
+  - harmony: Harmony omits all field labels and encodes the label content into placeholder strings only ('主密码（≥ 8 位）' at line 238, '再次输入主密码' at 282, '为这个空间取个名字（个人 / 工作 / 家庭）' at 329). Labels disappear once the user types.
+  - 位置: `phone onboarding-overlay.tsx:180, 194, 249, 359-378; harmony OnboardingOverlay.ets:238, 282, 329`
+  - 实现: Add a Row above each TextInput with Text(label) in footnoteSize uppercase + letterSpacing and Text(hint) in captionSize monospace for the password and space fields, matching the phone FieldLabel component layout.
+- **[中·布局偏差] Error box is plain text; phone uses a tinted box with warning icon**
+  - phone: Phone wraps error messages in a Row with backgroundColor=danger+'1f' (10% tint), borderRadius=Radius.md, and prepends an IconSymbol 'exclamationmark.circle.fill' (size 14, color danger) before the error text (onboarding-overlay.tsx:207-223, 274-290). This creates a visually distinct tinted error pill.
+  - harmony: Harmony shows a bare Text in danger color with no background, no icon, and no border (OnboardingOverlay.ets:298-303, 345-350). The error is readable but much less prominent.
+  - 位置: `phone onboarding-overlay.tsx:207-223, 274-290; harmony OnboardingOverlay.ets:298-303, 345-350`
+  - 实现: Replace the plain Text error with a Row containing a warning SVG icon (14vp, zc.danger) and Text, wrapped in a Column/Row with backgroundColor(zc.danger + '1f') and borderRadius(ZRadius.md), padding horizontal ZSpacing.sm vertical 6.
+- **[低·缺UI] Leading lock/tag icons absent from input fields**
+  - phone: Phone renders IconSymbol 'lock.fill' (size 16, color text3) at the left of both password inputs (onboarding-overlay.tsx:409), and 'tag.fill' (size 16, color text3) at the left of the space name input (line 255), providing visual affordance for field type.
+  - harmony: Harmony TextInput fields have no leading icons (OnboardingOverlay.ets:238-253, 282-296, 329-343). Padding starts directly at the placeholder text.
+  - 位置: `phone onboarding-overlay.tsx:409, 255; harmony OnboardingOverlay.ets:238, 282, 329`
+  - 实现: Wrap each TextInput in a Stack or use a custom Row with a leading SVG icon (lock for password fields, tag for space field) aligned to center-left. Use the project's SVG icon system since ArkUI TextInput natively supports a prefix builder slot.
+- **[低·布局偏差] Security bullet points render as plain text lines instead of checkmark-badged rows**
+  - phone: Phone renders each of the 3 security points (onboarding-overlay.tsx:225-245) in a row: a circular badge (20x20, ok+1f tint, borderRadius 10) containing a checkmark icon (size 11, ok color), then the point text. This creates the characteristic ZPass 'check badge + text' pattern.
+  - harmony: Harmony renders the same 3 strings as plain Text lines in a Column (OnboardingOverlay.ets:305-315) without badges or icons. The text content is correct but the visual hierarchy is flat.
+  - 位置: `phone onboarding-overlay.tsx:225-245; harmony OnboardingOverlay.ets:305-315`
+  - 实现: Wrap each point in a Row, prepend a 20vp circular Column with backgroundColor(zc.ok + '1f') borderRadius(10) containing a checkmark SVG icon (11vp, zc.ok), then the Text. Match the phone's pointRow/pointIcon pattern.
+- **[低·缺UI] Footer action buttons lack icons (arrow.right, arrow.left, checkmark)**
+  - phone: Phone Button components in the footer include icons: '下一步' has iconRight='arrow.right' (line 308), '返回' has icon='arrow.left' (line 328), '创建保险库' has iconRight='checkmark' (line 336). These give directional affordance to the navigation actions.
+  - harmony: Harmony renders footer Text components with no icons (OnboardingOverlay.ets:172-181, 184-204). They are text-only labels.
+  - 位置: `phone onboarding-overlay.tsx:308, 328, 336; harmony OnboardingOverlay.ets:172-181, 184-204`
+  - 实现: Add leading/trailing SVG icons to the button Text elements (or replace with a proper Button builder component). Use the project's icon system for arrow-right, arrow-left, and checkmark glyphs.
+- **[低·缺功能] No haptic feedback on navigation and validation events**
+  - phone: Phone fires Haptics.impactAsync(Light) on successful Next (line 72), Haptics.notificationAsync(Error) on validation failure (lines 65, 94), Haptics.impactAsync(Medium) on submit start (line 89), and Haptics.notificationAsync(Success) on completion (line 103), providing tactile feedback throughout the flow.
+  - harmony: Harmony fires no haptics anywhere in OnboardingOverlay.ets. HarmonyOS provides a vibrator/haptics API so this is implementable.
+  - 位置: `phone onboarding-overlay.tsx:65, 72, 83, 89, 94, 103; harmony OnboardingOverlay.ets:31-74`
+  - 实现: Import @ohos.vibrator and call vibrator.startVibration with a haptic preset (VIBRATION_EFFECT_ID_CLICK for navigation, VIBRATION_EFFECT_ID_DOUBLE_CLICK for error, long for success) at the corresponding points in onNext/onBack/onSubmit.
+
+  _可接受适配 (2)：Harmony adds password strength meter not present in phone onboarding；Keyboard avoidance uses ArkUI safeArea.keyboard padding instead of KeyboardAvoidingView_
+
+## totp-detail — parity≈87%  (高0/中3/低1)
+TotpDetail is a high-fidelity port: all core behaviors are present — TOTP/HOTP/Steam code computation, 1s countdown timer, progress bar, urgent-state coloring, copy-ephemeral, meta info card, error state. The functional gap count is zero. The remaining gaps are entirely UI-polish: the phone uses icon buttons in the navbar and an icon inside the copy button, while harmony substitutes plain text labels; the large OTP code is not rendered in a monospace/tabular-nums font on harmony; and the mono algorithm row in the meta card uses a slightly different font size. No scope or product decision is required — all gaps are straightforward UI corrections.
+
+- **[中·布局偏差] Navbar back and edit controls use plain text instead of icon buttons**
+  - phone: Phone renders a chevron-left IconButton (36x36, ghost variant) for back navigation and a square.and.pencil IconButton (36x36, ghost variant) for edit — phone/app/totp/[id].tsx:267-284. Both are icon-only controls.
+  - harmony: Harmony renders plain Text('返回') and Text('编辑') labels — TotpDetail.ets:183-197. No icon is shown in either position.
+  - 位置: `phone/app/totp/[id].tsx:267-284 | harmony/entry/src/main/ets/pages/TotpDetail.ets:183-197`
+  - 实现: Replace the Text('返回') with an SVG chevron-left icon button and Text('编辑') with a pencil/edit icon button using the harmony icon system. The edit control should only appear when this.item is non-null, matching the existing conditional logic.
+- **[中·缺UI] Copy button is text-only — missing leading icon**
+  - phone: Phone's copy button passes icon='doc.on.doc.fill' to the Button primitive alongside the label '复制验证码', resulting in an icon+label layout — phone/app/totp/[id].tsx:218-225.
+  - harmony: Harmony renders a Text node styled as a filled button with label '复制验证码' but includes no icon — TotpDetail.ets:304-314.
+  - 位置: `phone/app/totp/[id].tsx:218-225 | harmony/entry/src/main/ets/pages/TotpDetail.ets:304-314`
+  - 实现: Add a copy/doc SVG icon to the left of the '复制验证码' label inside the button Row. Use the project icon system (no emoji or unicode symbols).
+- **[中·布局偏差] Large OTP code not rendered in monospace / tabular-nums font**
+  - phone: Phone sets fontFamily to the MONO (monospace) font and fontVariant to ['tabular-nums'] on the 60px OTP code — phone/app/totp/[id].tsx:188, styles.codeText:368-372. This prevents layout jitter when digits change.
+  - harmony: Harmony's 60px code Text (TotpDetail.ets:264-270) sets neither fontFamily nor any tabular digit variant, falling back to the default proportional HarmonyOS Sans. Each second when the countdown ticks, digit-width differences can cause the display to shift.
+  - 位置: `phone/app/totp/[id].tsx:188,368-372 | harmony/entry/src/main/ets/pages/TotpDetail.ets:264-270`
+  - 实现: Add .fontFamily('HarmonyOS Sans Condensed') (the closest fixed-width system font available on HarmonyOS) to the code Text, and consider adding a fixed character width via layoutWeight or a fixed-width container to achieve tabular-digit stability.
+- **[低·布局偏差] Algorithm row value font size differs in mono mode**
+  - phone: Phone's MetaRow base style uses Type.body (15px) but when mono=true, the override spreads Type.subhead which sets fontSize to 13px — phone/app/totp/[id].tsx:309-310, theme.ts:323-326. So the algorithm value renders at 13px.
+  - harmony: Harmony's metaRow @Builder always applies ZType.bodySize (15px) for the value Text even when mono=true — TotpDetail.ets:381-382. The algorithm line renders at 15px instead of 13px.
+  - 位置: `phone/app/totp/[id].tsx:309-310 | harmony/entry/src/main/ets/pages/TotpDetail.ets:381-382`
+  - 实现: In the metaRow @Builder, when mono is true apply .fontSize(ZType.subheadSize) (13px) instead of ZType.bodySize (15px) on the value Text, matching phone behavior.
+
+  _可接受适配 (2)：Copy feedback: haptic replaced by toast notification；Progress bar animation: continuous sweep vs stepped 900ms easing_
+
+## tab-shell `[范围待定]` — parity≈85%  (高0/中2/低4)
+The Harmony Index.ets tab-shell is largely equivalent to the phone layout: 4 tabs in correct order (vault/generator/security/me), correct active/inactive tint mapping to text/text3, onboarding-and-lock guards, and safe area expansion. The most significant missing piece is a hydration loading state — phone shows a branded "Z" BootSplash while the vault status asynchronously hydrates, preventing a wrong-screen flash on every cold start; Harmony has no equivalent guard. Minor gaps include a missing 1px top border on the tab bar divider, tab label font weight not specified, and a tab label font size of 11 vs the phone's 10. Navigation route declarations (Stack screens for sync, vault/[id], item/[id], etc.) are an acceptable platform adaptation via ArkUI router/Navigation. The sync-host route exists on phone as a screen — it is unclear whether Harmony is intentionally a sync-client-only platform; a human must confirm scope.
+
+- **[中·缺功能] No hydration loading guard (BootSplash) — wrong screen flashes on cold start**
+  - phone: phone/_layout.tsx:87-89 checks `hydrated` from VaultContext; while vault state is being asynchronously loaded, it renders a static BootSplash (64x64 'Z' logo box, phone/_layout.tsx:31-56). Only after `hydrated === true` does it decide between OnboardingOverlay, LockOverlay, or Tabs. This prevents flashing the wrong overlay during the async status probe.
+  - harmony: Index.ets:43-46 calls `this.store.refresh()` (async) in `aboutToAppear`, but the initial VaultStore.status is `{ initialized: false, unlocked: false }` (VaultStore.ets:38). The build() at Index.ets:56 immediately evaluates this initial state, rendering OnboardingOverlay for one or more frames before refresh() completes — exactly the flash phone's BootSplash was designed to prevent. There is no `hydrated` flag and no branded splash screen.
+  - 位置: `phone/app/_layout.tsx:31-89, harmony/entry/src/main/ets/pages/Index.ets:43-46 and 56-64, harmony/entry/src/main/ets/state/VaultStore.ets:38`
+  - 实现: Add a `@Trace hydrated: boolean = false` field to VaultStore. Set it to `true` after the first `refresh()` completes. In Index.ets build(), add a first branch: if `!this.store.hydrated`, render a Column with the ZPass 'Z' logo (64x64 box, backgroundColor=zc.text, Text 'Z' in zc.bg, fontSize 32, fontWeight FontWeight.Bold) centered on zc.bg. Only then branch to OnboardingOverlay / LockOverlay / Tabs.
+- **[中·缺UI] Tab bar top border (divider line) missing in Harmony**
+  - phone: phone/app/(tabs)/_layout.tsx:23-24: `borderTopColor: c.line, borderTopWidth: 1` — a 1px hairline separator between tab bar and content using the 'line' design token, providing visual separation between page content and the navigation bar.
+  - harmony: Index.ets:81-93: the ArkUI Tabs component uses `.barBackgroundColor(this.zc.bg)` only. There is no border or divider at the top edge of the tab bar. The tab bar blends into page content with no stroke separation.
+  - 位置: `phone/app/(tabs)/_layout.tsx:23-24, harmony/entry/src/main/ets/pages/Index.ets:81-93`
+  - 实现: On the tabBarItem builder or via an overlay, add a 1vp top border to the tab bar. One approach: wrap the Tabs in a Column and place a Divider() of height 1 and color `this.zc.line` immediately above it. Alternatively apply `.border({ width: { top: 1 }, color: this.zc.line })` to the Tabs component if supported, or render a 1vp Row with backgroundColor(this.zc.line) above the Tabs.
+- **[低·布局偏差] Tab label font size 11 in Harmony vs 10 on phone**
+  - phone: phone/app/(tabs)/_layout.tsx:33: `fontSize: 10` for tab bar labels — this is below the design token scale minimum (ZType.captionSize = 11) but is deliberately smaller for the compact tab context.
+  - harmony: Index.ets:120: `Text(tab.label).fontSize(11)` — uses ZType.captionSize (11fp). While 11 is actually on the token scale (ZType.captionSize), it is visually larger than phone's 10px label, making the tab bar slightly taller in appearance.
+  - 位置: `phone/app/(tabs)/_layout.tsx:33, harmony/entry/src/main/ets/pages/Index.ets:120`
+  - 实现: Change the tab label fontSize to 10 to match phone. Note: 10 is off the token scale but is the correct value for this compact tab bar context. If using token values is a hard rule, 11 is acceptable but differs from phone.
+- **[低·布局偏差] Tab label font weight not set in Harmony**
+  - phone: phone/app/(tabs)/_layout.tsx:34: `fontWeight: '500'` is applied to all tab labels, giving them a medium weight consistent with the Type.caption token.
+  - harmony: Index.ets:119-121: the tab label `Text(tab.label)` has no `.fontWeight()` modifier — it renders at the ArkUI default weight (400/Normal).
+  - 位置: `phone/app/(tabs)/_layout.tsx:34, harmony/entry/src/main/ets/pages/Index.ets:119-121`
+  - 实现: Add `.fontWeight(FontWeight.Medium)` to the tab label Text in `tabBarItem()` builder at Index.ets:120.
+- **[低·缺功能] No haptic feedback on tab press**
+  - phone: phone/components/haptic-tab.tsx:9-13: tapping any tab triggers `Haptics.impactAsync(ImpactFeedbackStyle.Light)` on iOS. Android does not get haptics on phone either (gated to `EXPO_OS === 'ios'`).
+  - harmony: Index.ets tab bar uses the built-in ArkUI Tabs onChange (Index.ets:87-90) with no haptic/vibration call. HarmonyOS has vibration capability via @kit.SensorServiceKit / vibrator API.
+  - 位置: `phone/components/haptic-tab.tsx:9-13, harmony/entry/src/main/ets/pages/Index.ets:87-90`
+  - 实现: On tab press (in the .onChange callback at Index.ets:87), call `vibrator.startVibration({ type: 'time', duration: 10 }, { id: 0, usage: 'touch' })` using @kit.SensorServiceKit to produce a light touch haptic equivalent. Add ohos.permission.VIBRATE to module.json5.
+- **[低·设计违例] Light-mode semantic token values diverge between phone and Harmony**
+  - phone: phone/constants/theme.ts light palette: danger=#ff3b30, warn=#ff9500, ok=#34c759, info=#007aff, text=#000000, accent=#000000 (System Red/Orange/Green/Blue — iOS HIG standard values).
+  - harmony: harmony/theme/Tokens.ets LIGHT_PALETTE: danger=#c2452f, warn=#a8741f, ok=#3c8a5e, info=#3f7eb3, text=#0c0c0d, accent=#0c0c0d. These are distinct values for every semantic color in light mode. The design rule states tokens must be 'byte-aligned between phone and harmony.' Dark palettes are correctly aligned; light palettes are not. This surfaces on every page that uses semantic colors in light mode.
+  - 位置: `phone/constants/theme.ts:149-152 and 135/144, harmony/entry/src/main/ets/theme/Tokens.ets:63-82`
+  - 实现: Align the LIGHT_PALETTE in Tokens.ets to match phone theme.ts: danger='#ff3b30', warn='#ff9500', ok='#34c759', info='#007aff', text='#000000', accent='#000000'. This is a cross-cutting change affecting all pages in light mode. Coordinate with the product/design owner before changing, as the current Harmony light values appear to have been deliberately tuned for a different look.
+
+  _可接受适配 (3)：Stack route declarations handled by ArkUI router/Navigation rather than expo-router Stack；No DialogHost component — ArkUI promptAction is hostless；StatusBar management handled by EntryAbility rather than inline component_

@@ -58,27 +58,27 @@ const DARK_PALETTE: Palette = {
   overlay: 'rgba(0,0,0,0.55)',
 };
 
-/** 浅色调色板 —— iOS Light HIG 风格 + 黑白克制（禁紫） */
+/** 浅色调色板 —— 与 phone/constants/theme.ts light 字节级对齐（iOS HIG 系统色） */
 const LIGHT_PALETTE: Palette = {
   bg: '#ffffff',
-  bgElev: '#f4f4f6',
-  bgElev2: '#ebebef',
-  bgHover: '#e6e6ea',
-  bgActive: '#dcdce0',
-  line: '#d6d6db',
+  bgElev: '#f7f7f9',
+  bgElev2: '#ffffff',
+  bgHover: '#f0f0f3',
+  bgActive: '#e8e8eb',
+  line: '#d8d8dc',
   lineSoft: '#ececef',
-  text: '#0c0c0d',
-  text2: '#45454a',
-  text3: '#8a8a8f',
-  text4: '#c4c4c9',
-  accent: '#0c0c0d',
+  text: '#000000',
+  text2: '#3c3c43',
+  text3: '#8e8e93',
+  text4: '#c7c7cc',
+  accent: '#000000',
   accentInk: '#ffffff',
   accentGlow: 'rgba(0,0,0,0.04)',
-  danger: '#c2452f',
-  warn: '#a8741f',
-  ok: '#3c8a5e',
-  info: '#3f7eb3',
-  overlay: 'rgba(0,0,0,0.40)',
+  danger: '#ff3b30',
+  warn: '#ff9500',
+  ok: '#34c759',
+  info: '#007aff',
+  overlay: 'rgba(0,0,0,0.32)',
 };
 
 /** favicon 头像色板 —— 已剔除偏紫色，统一 12 色 */

@@ -43,6 +43,9 @@ export class VaultStore {
   /** 解锁中 / 初始化中标志 —— UI 进度条 / 防双击 */
   @Trace busy: boolean = false;
 
+  /** 首次 refresh 完成（status 已水合）—— Index 启动闪屏守卫，避免冷启动闪错屏 */
+  @Trace hydrated: boolean = false;
+
   /* ----- 数据 ----- */
 
   /** 当前 active space 的解密 item 集合（不含 tombstone） */
@@ -128,6 +131,8 @@ export class VaultStore {
       this.lastError = '';
     } catch (e) {
       this.lastError = (e as Error).message;
+    } finally {
+      this.hydrated = true;
     }
   }
 
