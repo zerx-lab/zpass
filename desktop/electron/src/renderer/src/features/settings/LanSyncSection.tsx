@@ -20,10 +20,10 @@ import {
   disconnectSync,
   getSyncStatus,
   resolveConflict,
-  startSyncServer,
-  stopSyncServer,
   type SyncConflict,
   type SyncStatus,
+  startSyncServer,
+  stopSyncServer,
 } from "@/lib/sync-api";
 
 /* ----------------------------------------------------------------------------

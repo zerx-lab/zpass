@@ -19,7 +19,8 @@
 //                       ├── /vault/:itemId   → <VaultPage />（深链选中条目）
 //                       ├── /generator       → <GeneratorPage />
 //                       ├── /health          → <HealthPage />
-//                       └── /settings        → <SettingsPage />
+//                       └── /settings        → <SettingsLayout />（嵌套子路由，
+//                                                每个菜单一个面板，index→appearance）
 //
 //   *  → <Navigate to="/vault" />                         ← 兜底（由 OnboardingGuard 接管再分流）
 //
@@ -78,7 +79,6 @@ import {
 	Outlet,
 	useNavigate,
 } from "react-router-dom";
-import { useLockStore } from "@/stores/lock";
 import { AppShell } from "@/app/AppShell";
 import { LockGuard } from "@/app/LockGuard";
 import { OnboardingGuard } from "@/app/OnboardingGuard";
@@ -87,12 +87,22 @@ import { Toast } from "@/components/Toast";
 import { GeneratorPage } from "@/features/generator/GeneratorPage";
 import { HealthPage } from "@/features/health/HealthPage";
 import { OnboardingPage } from "@/features/onboarding/OnboardingPage";
-import { SettingsPage } from "@/features/settings/SettingsPage";
+import { LanSyncSection } from "@/features/settings/LanSyncSection";
+import { SettingsLayout } from "@/features/settings/SettingsLayout";
+import { AboutSection } from "@/features/settings/sections/AboutSection";
+import { AppearanceSection } from "@/features/settings/sections/AppearanceSection";
+import { LanguageSection } from "@/features/settings/sections/LanguageSection";
+import { SecuritySection } from "@/features/settings/sections/SecuritySection";
+import { SpacesSection } from "@/features/settings/sections/SpacesSection";
+import { TrustedDeviceSection } from "@/features/settings/sections/TrustedDeviceSection";
+import { WindowSection } from "@/features/settings/sections/WindowSection";
 import { SignInPage } from "@/features/signin/SignInPage";
+import { SshAgentSection } from "@/features/sshagent/SshAgentSection";
 import { TotpPage } from "@/features/totp/TotpPage";
 import { UnlockPage } from "@/features/unlock/UnlockPage";
 import { VaultPage } from "@/features/vault/VaultPage";
 import { WelcomePage } from "@/features/welcome/WelcomePage";
+import { useLockStore } from "@/stores/lock";
 
 /**
  * 根 Layout —— 所有路由的公共父节点
@@ -258,8 +268,35 @@ export const router = createBrowserRouter([
 										element: <HealthPage />,
 									},
 									{
+										// 设置页 —— layout 路由：每个菜单是一个子路由，
+										// 只挂载当前面板（性能优先），index 重定向到外观，
+										// 覆盖全部 navigate("/settings") 入口。
 										path: "settings",
-										element: <SettingsPage />,
+										element: <SettingsLayout />,
+										children: [
+											{
+												index: true,
+												element: <Navigate to="appearance" replace />,
+											},
+											{
+												path: "appearance",
+												element: <AppearanceSection />,
+											},
+											{ path: "language", element: <LanguageSection /> },
+											{ path: "spaces", element: <SpacesSection /> },
+											{ path: "window", element: <WindowSection /> },
+											{ path: "security", element: <SecuritySection /> },
+											{
+												path: "trusted-device",
+												element: <TrustedDeviceSection />,
+											},
+											{
+												path: "ssh-agent",
+												element: <SshAgentSection />,
+											},
+											{ path: "lan-sync", element: <LanSyncSection /> },
+											{ path: "about", element: <AboutSection /> },
+										],
 									},
 								],
 							},
