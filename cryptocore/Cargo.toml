@@ -12,6 +12,15 @@ description = "ZPass cross-platform crypto primitives (Argon2id + XChaCha20-Poly
 # staticlib —— 给 iOS 出 .a
 crate-type = ["rlib", "cdylib", "staticlib"]
 
+# wasm-pack: 禁用捆绑 wasm-opt。Rust 默认生成 bulk-memory 指令(memory.copy/fill),
+# 而 wasm-pack 捆绑的旧版 wasm-opt 未开 --enable-bulk-memory 会校验失败。
+# MVP 不需要体积优化;跳过 wasm-opt 即可(产物功能不受影响)。
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
+[package.metadata.wasm-pack.profile.dev]
+wasm-opt = false
+
 [features]
 default = []
 # 第五端：cryptocore -> WASM。让【整个 crate】的 OsRng 走 Web Crypto

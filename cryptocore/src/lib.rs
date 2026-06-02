@@ -15,6 +15,19 @@ use chacha20poly1305::{
 };
 use rand_core::{OsRng, RngCore};
 
+// M1 新增原语（非 SRP）：HKDF / X25519 sealed-box / 2SKD / 信封常量。
+pub mod envelope;
+pub mod hkdf;
+pub mod kdf2;
+pub mod keyset;
+
+// Ms 里程碑：SRP-6a（RFC 5054 §2.5-2.6）认证原语。
+pub mod srp;
+
+// WASM 第五端薄绑定；用 cfg 隔离，不进 default / 移动端编译图。
+#[cfg(feature = "wasm")]
+pub mod wasm;
+
 #[cfg(feature = "android")]
 pub mod android;
 
@@ -25,6 +38,10 @@ pub mod harmony;
 #[cfg(feature = "lan-server")]
 mod lan_transport;
 
+// LAN 同步协议模块。依赖 spake2 / ciborium / std::net（lan_transport），
+// 这些符号在 wasm32 上不可编译；Web Vault 第五端只走云端 changes API，
+// 不需要 LAN 同步，故整模块在 wasm32 目标上排除（D5 / E7 wasm32 编译门）。
+#[cfg(not(target_arch = "wasm32"))]
 pub mod sync;
 
 /// XChaCha20-Poly1305 密钥长度（与 Go chacha20poly1305.KeySize 对齐）
@@ -464,6 +481,157 @@ mod tests {
         ));
     }
 
+    // ------------------------------------------------------------------
+    // M1 新增原语 KAT 向量（hkdf / keyset / 2skd / envelope）
+    // ------------------------------------------------------------------
+
+    use crate::envelope;
+    use crate::hkdf::hkdf_sha256;
+    use crate::kdf2::{Argon2Params, derive_auk, derive_srp_x};
+    use crate::keyset::{keyset_generate, open_with_privkey, seal_to_pubkey};
+
+    /// RFC 5869 附录 A.1（Test Case 1，SHA-256）逐字节匹配。
+    #[test]
+    fn hkdf_sha256_rfc5869_vector_a1() {
+        let ikm = hex::decode("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b").unwrap();
+        let salt = hex::decode("000102030405060708090a0b0c").unwrap();
+        let info = hex::decode("f0f1f2f3f4f5f6f7f8f9").unwrap();
+        let okm = hkdf_sha256(&ikm, &salt, &info, 42).unwrap();
+        let want = hex::decode(
+            "3cb25f25faacd57a90434f64d0362f2a\
+             2d2d0a90cf1a5a4c5db02d56ecc4c5bf\
+             34007208d5b887185865",
+        )
+        .unwrap();
+        assert_eq!(okm, want, "HKDF-SHA256 与 RFC 5869 A.1 分叉");
+    }
+
+    #[test]
+    fn hkdf_sha256_rejects_bad_len() {
+        assert!(matches!(
+            hkdf_sha256(b"ikm", b"salt", b"info", 0),
+            Err(Error::InvalidRandomCount)
+        ));
+        // 255*32 = 8160 是上界，+1 必须返错。
+        assert!(matches!(
+            hkdf_sha256(b"ikm", b"salt", b"info", 255 * 32 + 1),
+            Err(Error::InvalidRandomCount)
+        ));
+    }
+
+    /// X25519 sealed-box：seal_to_pubkey -> open_with_privkey 还原明文。
+    #[test]
+    fn x25519_seal_open_roundtrip() {
+        let (pub32, priv32) = keyset_generate().unwrap();
+        let pt = b"the vault key bytes (32) or any payload";
+        let sealed = seal_to_pubkey(&pub32, pt).unwrap();
+        // 信封 = eph_pub(32) || nonce(24) || ct || tag(16)。
+        assert_eq!(sealed.len(), 32 + NONCE_SIZE + pt.len() + TAG_SIZE);
+        let out = open_with_privkey(&priv32, &sealed).unwrap();
+        assert_eq!(out, pt);
+    }
+
+    #[test]
+    fn x25519_open_rejects_wrong_key() {
+        let (pub_a, _priv_a) = keyset_generate().unwrap();
+        let (_pub_b, priv_b) = keyset_generate().unwrap();
+        let sealed = seal_to_pubkey(&pub_a, b"secret").unwrap();
+        assert!(matches!(
+            open_with_privkey(&priv_b, &sealed),
+            Err(Error::AeadAuthentication)
+        ));
+    }
+
+    #[test]
+    fn x25519_rejects_bad_lengths() {
+        assert!(matches!(
+            seal_to_pubkey(&[0u8; 31], b"x"),
+            Err(Error::KeyLength { .. })
+        ));
+        assert!(matches!(
+            open_with_privkey(&[0u8; 31], &[0u8; 80]),
+            Err(Error::KeyLength { .. })
+        ));
+        assert!(matches!(
+            open_with_privkey(&[0u8; 32], b"short"),
+            Err(Error::SealedTooShort { .. })
+        ));
+    }
+
+    /// 固定 2SKD 输入（不取随机），可逐字节锁向量。
+    const SK_RAW: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23"; // 26 字符（zpass SK raw 长度）
+    const ACCOUNT_ID: &[u8] = b"acct-000001";
+    // 测试用低成本 Argon2id 参数（仍 >= 8 MiB 下限）。
+    fn test_params() -> Argon2Params {
+        Argon2Params::new(8 * 1024, 2, 1)
+    }
+
+    /// derive_auk 锁定向量：固定输入 -> 固定 32B 输出。
+    #[test]
+    fn derive_auk_known_vector() {
+        let salt_enc = [0x11u8; SALT_SIZE];
+        let got = derive_auk(
+            "  correct horse battery staple  ",
+            &salt_enc,
+            SK_RAW,
+            ACCOUNT_ID,
+            test_params(),
+        )
+        .unwrap();
+        // 重锁（info 域分离）：HKDF info 由写死的 INFO_SK_V1 改为 INFO_AUK_V1，
+        // mix 字节随之变化，故此向量相对旧值已重新锁定。
+        let want =
+            hex::decode("2c28dc7944fa1b1d4ec80dbc015593b1d36104d75e193ae59af4634c1f518a1d")
+                .unwrap();
+        assert_eq!(got.to_vec(), want, "derive_auk 字节分叉");
+    }
+
+    /// derive_srp_x 锁定向量：只断言 32B 输出（字节->bignum 是 Ms-T1.c）。
+    #[test]
+    fn derive_srp_x_known_vector() {
+        let salt_auth = [0x22u8; SALT_SIZE];
+        let got = derive_srp_x(
+            "  correct horse battery staple  ",
+            &salt_auth,
+            SK_RAW,
+            ACCOUNT_ID,
+            test_params(),
+        )
+        .unwrap();
+        assert_eq!(got.len(), 32);
+        // 重锁（info 域分离）：HKDF info 由写死的 INFO_SK_V1 改为 INFO_SRPX_V1，
+        // mix 字节随之变化，故此向量相对旧值已重新锁定。
+        let want =
+            hex::decode("7ab0f4188c0bf29b3000010ba19ed5085f331986655263a22aefe2af75a19430")
+                .unwrap();
+        assert_eq!(got.to_vec(), want, "derive_srp_x 字节分叉");
+    }
+
+    /// 同 pw/SK/account_id，仅 salt_enc != salt_auth -> AUK != SRP-x（二者独立）。
+    #[test]
+    fn auk_perp_srpx() {
+        let salt_enc = [0x11u8; SALT_SIZE];
+        let salt_auth = [0x22u8; SALT_SIZE];
+        let auk = derive_auk("pw same", &salt_enc, SK_RAW, ACCOUNT_ID, test_params()).unwrap();
+        let srpx = derive_srp_x("pw same", &salt_auth, SK_RAW, ACCOUNT_ID, test_params()).unwrap();
+        assert_ne!(auk, srpx, "AUK 与 SRP-x 未独立");
+    }
+
+    /// 信封 alg_id / format_version / 域分离常量锁定，防止被随意改动。
+    #[test]
+    fn envelope_constants_locked() {
+        assert_eq!(envelope::FORMAT_VERSION_V1, 0x01);
+        assert_eq!(envelope::ALG_XCHACHA20POLY1305, 0x01);
+        assert_eq!(envelope::ALG_ARGON2ID_WRAP, 0x02);
+        assert_eq!(envelope::ALG_X25519_SEAL, 0x10);
+        assert_eq!(envelope::ALG_SRP_VERIFIER, 0x20);
+        assert_eq!(envelope::INFO_SK_V1, b"zpass-sk-v1");
+        assert_eq!(envelope::INFO_AUK_V1, b"zpass-auk-v1");
+        assert_eq!(envelope::INFO_SRPX_V1, b"zpass-srpx-v1");
+        assert_eq!(envelope::INFO_KEYSET_PRIV_V1, b"zpass-keyset-priv-v1");
+        assert_eq!(envelope::INFO_VAULTKEY_V1, b"zpass-vaultkey-v1");
+    }
+
     /// 模拟 vault unlock 完整路径：DeriveKEK → unwrap DEK → open verifier
     #[test]
     fn verifier_flow() {
@@ -487,6 +655,196 @@ mod tests {
         assert!(matches!(
             open_aead(&wrong_kek, &wrapped_dek, AAD_DEK),
             Err(Error::AeadAuthentication)
+        ));
+    }
+
+    // ------------------------------------------------------------------
+    // Ms 里程碑：SRP-6a（RFC 5054 §2.5-2.6）KAT 向量
+    //
+    // 群（T1.a）: RFC 5054 附录 A 2048-bit safe prime, g=2。
+    // x 布局（T1.c）: derive_srp_x 的 32B 输出按大端解释为 bignum, 不 mod N。
+    // 哈希: SHA-256；K = H(S) = SHA256(PAD(S))。
+    // ------------------------------------------------------------------
+
+    use crate::srp;
+    use sha2::{Digest, Sha256};
+
+    /// derive_srp_x M1 向量复用：固定 x -> 固定 v / K / M1 / M2 的字节锚点。
+    const SRP_X_HEX: &str = "15f605aa05dfd55b199de8403fce5a7db6ded022bb37c373e490801e3a5d8ae5";
+
+    /// T1.a：锁定 SRP 群 N 的字节（SHA-256 + 长度 + 首尾字节）与 g。
+    ///
+    /// 任何换群/改字节都会触发断言失败。拍板群：RFC 5054 附录 A 2048-bit, g=2。
+    #[test]
+    fn srp_group_params_locked() {
+        // srp_register 内部用 N_BYTES；这里通过 register 一个已知 x 间接锁 N，
+        // 并直接断言群常量的字节指纹。
+        assert_eq!(srp::N_BYTE_LEN, 256, "SRP 群字节长度应为 256（2048-bit）");
+
+        // verifier v = g^x mod N，PAD 到 256 字节；其字节由 N/g/x 共同决定。
+        let x = hex::decode(SRP_X_HEX).unwrap();
+        let salt = [0x22u8; SALT_SIZE];
+        let reg = srp::srp_register(&x, &salt).unwrap();
+        // N 的 SHA-256 指纹通过 v 的 SHA-256 间接锁定（v 依赖 N/g/x 全字节）。
+        let v_fp = Sha256::digest(&reg.verifier);
+        assert_eq!(
+            hex::encode(v_fp),
+            "9699a2f3474fe36316948999221a2a383b014a735e431910412cfa0aa1294b39",
+            "SRP 群参数或 x 布局分叉（v 指纹变化）"
+        );
+        assert_eq!(reg.verifier.len(), 256, "verifier 应 PAD 到 256 字节");
+    }
+
+    /// srp_register_verifier_vector：固定 x + 拍板群 -> 锁定的 v 字节逐字节匹配。
+    #[test]
+    fn srp_register_verifier_vector() {
+        let x = hex::decode(SRP_X_HEX).unwrap();
+        let salt = [0x22u8; SALT_SIZE];
+        let reg = srp::srp_register(&x, &salt).unwrap();
+        let want_v = "013aff033e37dde2c743b8924c440ec2e595768a9db0ff5fd96b8f797e0eeb43\
+                      1d68e9aafaf4808975391f16f6249815bd5036143ffcb1c1f58a8aaf3237bcf9\
+                      318d09800467bc86ede6e47df9929723d126cf097c4c852806db7791ffef3537\
+                      65c1dadf6e67e0d03b0498956ae79473c436b70434ee4b4607c5f82fbe7df1e9\
+                      d24c3bf9a93b1b6867d32a02bbfb9546322ab94653e32580ac965e7b35740c3b\
+                      0a2dd5e7435f947c362a5934f065ad8d7e092b1828b778147255bda5b9a7d0dc\
+                      dbe50be82c88f4d87b971c08240096e2845b972a69a192904302176a841efafd\
+                      25ec62c6c77e765284bae10d4ff054d5298e1efb9e89f8b684031c3b00888273";
+        assert_eq!(hex::encode(&reg.verifier), want_v, "SRP verifier 字节分叉");
+        assert_eq!(reg.salt, salt.to_vec());
+    }
+
+    /// srp_full_handshake_roundtrip：纯 Rust 跑两方，断言 S/K/M1/M2 全相等，
+    /// 服务端验 M1 通过、客户端验 M2 通过。用随机 ephemeral（协议正确性）。
+    #[test]
+    fn srp_full_handshake_roundtrip() {
+        let x = hex::decode(SRP_X_HEX).unwrap();
+        let salt = [0x22u8; SALT_SIZE];
+        let identity = b"alice@example.com";
+        let reg = srp::srp_register(&x, &salt).unwrap();
+
+        let client = srp::srp_client_start().unwrap();
+        let server = srp::srp_server_start(&reg.verifier).unwrap();
+
+        let cproof = srp::srp_client_finish(
+            client.secret_a(),
+            &client.a_pub,
+            &server.b_pub,
+            &x,
+            &salt,
+            identity,
+        )
+        .unwrap();
+
+        let sproof = srp::srp_server_finish(
+            server.secret_b(),
+            &client.a_pub,
+            &server.b_pub,
+            &reg.verifier,
+            &cproof.m1,
+            &salt,
+            identity,
+        )
+        .unwrap();
+
+        // K 两侧相等（S 相等的可观测证据）。
+        assert_eq!(
+            cproof.session_key, sproof.session_key,
+            "客户端/服务端 K = H(S) 不相等"
+        );
+        // 服务端验 M1 通过。
+        assert!(sproof.verified, "服务端拒绝了正确的 M1");
+        // 客户端验 M2 通过。
+        assert!(
+            cproof.verify_server(&client.a_pub, &sproof.m2),
+            "客户端拒绝了服务端 M2"
+        );
+    }
+
+    /// 固定 ephemeral 的握手 KAT：锁定 K / M1 / M2 的精确字节（参考向量来自
+    /// Python 实现，与本模块逐字节一致）。a = 0x33*32, b = 0x44*32。
+    #[test]
+    fn srp_handshake_fixed_ephemeral_vector() {
+        let x = hex::decode(SRP_X_HEX).unwrap();
+        let salt = [0x22u8; SALT_SIZE];
+        let identity = b"alice@example.com";
+        let reg = srp::srp_register(&x, &salt).unwrap();
+
+        let a_secret = [0x33u8; 32];
+        let b_secret = [0x44u8; 32];
+
+        // 用固定 ephemeral 重算 A / B（与 srp_*_start 内部公式一致）。
+        let a_pub = srp::derive_a_pub_for_test(&a_secret);
+        let b_pub = srp::derive_b_pub_for_test(&b_secret, &reg.verifier);
+
+        let cproof =
+            srp::srp_client_finish(&a_secret, &a_pub, &b_pub, &x, &salt, identity).unwrap();
+        let sproof = srp::srp_server_finish(
+            &b_secret, &a_pub, &b_pub, &reg.verifier, &cproof.m1, &salt, identity,
+        )
+        .unwrap();
+
+        assert_eq!(
+            hex::encode(cproof.session_key),
+            "bd0474804e7cd08e89e4d3b78b5690994245baa49ed21592799a30c3a4ac27ec",
+            "K 字节分叉"
+        );
+        assert_eq!(
+            hex::encode(cproof.m1),
+            "258c13078a2abe1ed88ae16dca4aa97dd6865836dd6212931853838189c5cf1f",
+            "M1 字节分叉"
+        );
+        assert_eq!(
+            hex::encode(sproof.m2),
+            "c02a1c775c3c869df96dde8cae360fc59824cbe573b385ff3ad9779c9c6d183d",
+            "M2 字节分叉"
+        );
+        assert!(sproof.verified);
+        assert!(cproof.verify_server(&a_pub, &sproof.m2));
+    }
+
+    /// 错误密码（错 x）-> 服务端拒 M1（与缺 Secret Key 失败方式不可区分）。
+    #[test]
+    fn srp_wrong_password_rejected() {
+        let x = hex::decode(SRP_X_HEX).unwrap();
+        let salt = [0x22u8; SALT_SIZE];
+        let identity = b"alice@example.com";
+        let reg = srp::srp_register(&x, &salt).unwrap();
+
+        let client = srp::srp_client_start().unwrap();
+        let server = srp::srp_server_start(&reg.verifier).unwrap();
+
+        // 客户端用错误的 x（错误密码）算 M1。
+        let wrong_x = [0xEEu8; 32];
+        let cproof = srp::srp_client_finish(
+            client.secret_a(),
+            &client.a_pub,
+            &server.b_pub,
+            &wrong_x,
+            &salt,
+            identity,
+        )
+        .unwrap();
+
+        let sproof = srp::srp_server_finish(
+            server.secret_b(),
+            &client.a_pub,
+            &server.b_pub,
+            &reg.verifier,
+            &cproof.m1,
+            &salt,
+            identity,
+        )
+        .unwrap();
+
+        assert!(!sproof.verified, "服务端应拒绝错误密码的 M1");
+    }
+
+    /// x 长度非法 -> srp_register 返回 KeyLength 错误（不 panic）。
+    #[test]
+    fn srp_register_rejects_bad_x_len() {
+        assert!(matches!(
+            srp::srp_register(&[0u8; 31], &[0u8; SALT_SIZE]),
+            Err(Error::KeyLength { .. })
         ));
     }
 }
