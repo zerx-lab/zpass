@@ -14,6 +14,10 @@ crate-type = ["rlib", "cdylib", "staticlib"]
 
 [features]
 default = []
+# 第五端：cryptocore -> WASM。让【整个 crate】的 OsRng 走 Web Crypto
+# （getrandom/js），并编入 #[wasm_bindgen] 薄绑定层（wasm.rs）。
+# 不进 default：android/harmony/cdylib/staticlib 编译图不受影响。
+wasm = ["dep:wasm-bindgen", "getrandom/js"]
 # 内部 feature：局域网同步服务端传输层（tiny_http 监听 + 本机 LAN IPv4 枚举）。
 # 不是独立可用的公开 feature —— 仅由 android / harmony 传递性开启，
 # 把 tiny_http / if-addrs 收敛到一处，避免两座桥各自重复声明依赖。
@@ -33,6 +37,21 @@ chacha20poly1305 = { version = "0.10", default-features = false, features = ["al
 # 操作系统 CSPRNG；失败要返错而非 panic
 rand_core = { version = "0.6", features = ["std"] }
 getrandom = "0.2"
+# HKDF-SHA256（RFC 5869）；底层 SHA-256 复用已有 sha2 0.10，避免引入第二份哈希实现
+hkdf = "0.12"
+# X25519（账户 keyset + sealed-box）；curve25519-dalek 4.x 已经由 spake2 引入，
+# x25519-dalek 2.x 共用同一份 curve25519-dalek，不会引入第二个 rand_core/getrandom。
+# static_secrets：keyset_generate 需要 StaticSecret 持有可序列化的 32B 私钥。
+x25519-dalek = { version = "2", default-features = false, features = ["static_secrets"] }
+# SRP-6a bignum modexp 自控实现（自 num-bigint），便于逐字节锁 PAD/k/u/M1/M2 向量。
+# 不用 RustCrypto srp crate：其 transcript/PAD 与 RFC 5054 不逐字一致，会破坏四端对齐。
+num-bigint = { version = "0.4", default-features = false }
+# 主密码 NFKD 规范化（2SKD Step 4），四端必须一致（Go x/text/unicode/norm / JS normalize("NFKD")）
+unicode-normalization = "0.1"
+# 敏感字节 Drop 时强制清零（write_volatile + 内存屏障）；AGENTS.md 铁律
+zeroize = { version = "1.8", features = ["derive"] }
+# WASM 第五端薄绑定；仅在 feature=wasm 时编入，不污染 default / 移动端编译图
+wasm-bindgen = { version = "0.2", optional = true }
 # 仅在 feature=android 时启用
 jni = { version = "0.21", default-features = false, optional = true }
 # 仅在 feature=harmony 时启用 —— 使用 ohos-rs 提供的 napi-ohos fork。

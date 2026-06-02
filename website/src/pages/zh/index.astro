@@ -3,7 +3,7 @@
 // ZPass 官网 — 中文首页（zh locale）
 // 路径：/zh/
 // 依次渲染 Nav → Hero → Subscribe → Features → How → Live → Mobile →
-//        Security → Pricing → Changelog → FAQ → Footer。
+//        Security → Changelog → FAQ → Footer。
 // 文案来自 src/i18n/strings.ts 中的 `zh` 集合。
 //
 // 注：发布前版本——
@@ -21,7 +21,6 @@ import Live from "../../components/Live.astro";
 import Desktop from "../../components/Desktop.astro";
 import Mobile from "../../components/Mobile.astro";
 import Security from "../../components/Security.astro";
-import Pricing from "../../components/Pricing.astro";
 import Changelog from "../../components/Changelog.astro";
 import Faq from "../../components/Faq.astro";
 import Footer from "../../components/Footer.astro";
@@ -60,7 +59,6 @@ const pageDesc =
 		<Mobile t={t} />
 		<Release t={t} locale={locale} variant="soft" />
 		<Security t={t} variant="ink" />
-		<Pricing t={t} />
 		<Changelog t={t} variant="soft" />
 		<Faq t={t} />
 	</main>
