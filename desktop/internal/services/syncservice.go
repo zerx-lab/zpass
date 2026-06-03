@@ -1282,7 +1282,7 @@ func (s *SyncService) applyServerMerge(conflicts []SyncConflict) (int, error) {
 				applied++
 				continue
 			}
-			local, err := s.vault.GetItem(c.ID)
+			local, err := s.vault.getItemAnySpace(c.ID)
 			if err != nil || local == nil {
 				actions = append(actions, SyncResolutionAction{ID: c.ID, Op: "noop"})
 				continue
@@ -1292,7 +1292,7 @@ func (s *SyncService) applyServerMerge(conflicts []SyncConflict) (int, error) {
 				continue
 			}
 			// 读一遍最新的（updatedAt 现在已经是 now，内容不变）
-			latest, _ := s.vault.GetItem(c.ID)
+			latest, _ := s.vault.getItemAnySpace(c.ID)
 			if latest == nil {
 				latest = local
 			}
@@ -1314,7 +1314,7 @@ func (s *SyncService) applyServerMerge(conflicts []SyncConflict) (int, error) {
 				// phone 端是 tombstone（report-conflicts 没带 payload）—— 用户选
 				// 保留对端决定 = 让 desktop 也删除该条。phone 端不动（它本来就是
 				// tombstone），decideBoth 双 tombstone identical 兜底下次同步。
-				if err := s.vault.DeleteItem(c.ID); err == nil {
+				if err := s.vault.deleteItemAnySpace(c.ID); err == nil {
 					applied++
 				}
 				actions = append(actions, SyncResolutionAction{ID: c.ID, Op: "noop"})
@@ -1324,7 +1324,7 @@ func (s *SyncService) applyServerMerge(conflicts []SyncConflict) (int, error) {
 			// 内容已经是这个版本，只需把 row.updatedAt 推到 now 让两端对齐。
 			remoteCopy := *c.Remote
 			createdAt := remoteCopy.CreatedAt
-			if existing, err := s.vault.GetItem(c.ID); err == nil && existing != nil {
+			if existing, err := s.vault.getItemAnySpace(c.ID); err == nil && existing != nil {
 				createdAt = existing.CreatedAt
 			}
 			if _, err := s.vault.IngestForeignPayload(c.ID, &remoteCopy, createdAt, now); err != nil {
@@ -1332,7 +1332,7 @@ func (s *SyncService) applyServerMerge(conflicts []SyncConflict) (int, error) {
 				continue
 			}
 			// 读 desktop 端刚写入的 payload（与 phone 内容一致）回传给 phone
-			latest, _ := s.vault.GetItem(c.ID)
+			latest, _ := s.vault.getItemAnySpace(c.ID)
 			if latest == nil {
 				latest = &remoteCopy
 				latest.UpdatedAt = now
@@ -1359,13 +1359,15 @@ func (s *SyncService) applyServerMerge(conflicts []SyncConflict) (int, error) {
 			dup := *c.Remote
 			dup.ID = ""
 			dup.DeletedAt = nil
-			created, err := s.vault.CreateItem(dup)
+			// 副本归属对端原空间（dup.SpaceID 来自对端 payload）；为空则
+			// createItemInSpace fallback 到当前激活空间。
+			created, err := s.vault.createItemInSpace(dup, dup.SpaceID)
 			if err != nil || created == nil {
 				actions = append(actions, SyncResolutionAction{ID: c.ID, Op: "noop"})
 				continue
 			}
 			// 告诉 phone：原 id 用 desktop 当前 payload 覆盖；额外创建一份 newId 副本
-			if local, err := s.vault.GetItem(c.ID); err == nil && local != nil {
+			if local, err := s.vault.getItemAnySpace(c.ID); err == nil && local != nil {
 				if b, err := json.Marshal(local); err == nil {
 					actions = append(actions, SyncResolutionAction{
 						ID:         c.ID,
@@ -1428,7 +1430,7 @@ func (s *SyncService) handleReportConflictsServer(w http.ResponseWriter, r *http
 			SuggestedRemote: !rc.SuggestedRemote,
 		}
 		// server 端 local payload —— 从本端 vault 现拉
-		if local, err := s.vault.GetItem(rc.ID); err == nil && local != nil {
+		if local, err := s.vault.getItemAnySpace(rc.ID); err == nil && local != nil {
 			uiC.Local = local
 		}
 		// server 视角的 remote = client 端推过来的 plaintext payload
@@ -1586,7 +1588,7 @@ func (s *SyncService) runClientSync(ctx context.Context) error {
 			if isCanceled(ctx) {
 				return context.Canceled
 			}
-			_ = s.vault.DeleteItem(step.ID)
+			_ = s.vault.deleteItemAnySpace(step.ID)
 		}
 	}
 
@@ -1656,7 +1658,7 @@ func (s *SyncService) runClientSync(ctx context.Context) error {
 			SuggestedRemote: c.SuggestedRemote,
 		}
 		if c.Local.UpdatedAt > 0 && c.Local.DeletedAt == 0 {
-			if local, err := s.vault.GetItem(c.ID); err == nil && local != nil {
+			if local, err := s.vault.getItemAnySpace(c.ID); err == nil && local != nil {
 				uiC.Local = local
 			}
 		}
@@ -1796,7 +1798,7 @@ func (s *SyncService) fetchRecords(ids []string, offset, limit int) ([]SyncItemR
 			// tombstone：对端不需要 payload，只需要 id + deletedAt
 		} else {
 			// 活动行：解密 → JSON marshal plaintext
-			payload, err := s.vault.GetItem(row.ID)
+			payload, err := s.vault.getItemAnySpace(row.ID)
 			if err != nil || payload == nil {
 				continue // 解密失败 / tombstone 路径，跳过
 			}
@@ -1829,7 +1831,7 @@ func (s *SyncService) buildRecordFromLocal(id string) (SyncItemRecord, error) {
 		rec.DeletedAt = *row.DeletedAt
 		return rec, nil
 	}
-	payload, err := s.vault.GetItem(row.ID)
+	payload, err := s.vault.getItemAnySpace(row.ID)
 	if err != nil || payload == nil {
 		return SyncItemRecord{}, fmt.Errorf("local %s payload unavailable", id)
 	}
@@ -1851,7 +1853,7 @@ func (s *SyncService) buildRecordFromLocal(id string) (SyncItemRecord, error) {
 func (s *SyncService) applyRemoteRecord(rec SyncItemRecord) error {
 	if rec.DeletedAt > 0 {
 		// tombstone 路径：让本端 DeleteItem 用本端 DEK 写一个新 tombstone
-		err := s.vault.DeleteItem(rec.ID)
+		err := s.vault.deleteItemAnySpace(rec.ID)
 		if errors.Is(err, ErrItemNotFound) {
 			return nil // 本端从没有过该 id，没什么可删的
 		}
@@ -1881,10 +1883,11 @@ func (s *SyncService) duplicateRemoteAsNew(rec SyncItemRecord) error {
 	if payload == nil {
 		return errors.New("duplicate: remote payload unavailable")
 	}
-	// CreateItem 内部会生成新 id 并写入；时间戳由后端覆盖
+	// createItemInSpace 内部会生成新 id 并写入；时间戳由后端覆盖。副本归属
+	// 对端原空间（payload.SpaceID）；为空则 fallback 到当前激活空间。
 	payload.ID = ""
 	payload.DeletedAt = nil
-	_, err = s.vault.CreateItem(*payload)
+	_, err = s.vault.createItemInSpace(*payload, payload.SpaceID)
 	return err
 }
 

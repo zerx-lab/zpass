@@ -113,10 +113,20 @@ func openTestVault(t *testing.T) *VaultDB {
 	return db
 }
 
+// testSpaceID 是测试默认激活的空间 id
+//
+// 空间隔离后所有写操作（CreateItem 等）都要求先 SetActiveSpace（生产中由前端
+// 在解锁后完成）。SetActiveSpace 不要求已解锁，且 currentSpaceID 跨
+// Initialize/Unlock/Lock 保留，因此在 newTestService 里设一次即覆盖整条用例。
+const testSpaceID = "space-test"
+
 // newTestService 在临时 HOME 下打开 DB 并构造 VaultService
 //
 // 返回 (svc, dbPath) —— dbPath 用于 TestRestartUnlock 之类需要"关闭后
 // 重新 Open"的场景验证持久化。
+//
+// 默认激活 testSpaceID —— 需要测「未选空间」行为的用例自行构造裸 service
+// 并跳过 SetActiveSpace（见 spaceisolation_test.go）。
 func newTestService(t *testing.T) (*VaultService, string) {
 	t.Helper()
 	home := withTempHome(t)
@@ -129,7 +139,11 @@ func newTestService(t *testing.T) (*VaultService, string) {
 	t.Cleanup(func() {
 		_ = db.Close()
 	})
-	return NewVaultService(db), dbPath
+	svc := NewVaultService(db)
+	if err := svc.SetActiveSpace(testSpaceID); err != nil {
+		t.Fatalf("set active space: %v", err)
+	}
+	return svc, dbPath
 }
 
 // ---------------------------------------------------------------------------
@@ -793,6 +807,9 @@ func TestRestart_DataPersists(t *testing.T) {
 		t.Fatalf("open db1: %v", err)
 	}
 	svc1 := NewVaultService(db1)
+	if err := svc1.SetActiveSpace(testSpaceID); err != nil {
+		t.Fatalf("set active space svc1: %v", err)
+	}
 	if err := svc1.Initialize(pw); err != nil {
 		t.Fatalf("init: %v", err)
 	}
@@ -821,6 +838,9 @@ func TestRestart_DataPersists(t *testing.T) {
 	}
 	defer db2.Close()
 	svc2 := NewVaultService(db2)
+	if err := svc2.SetActiveSpace(testSpaceID); err != nil {
+		t.Fatalf("set active space svc2: %v", err)
+	}
 
 	st, err := svc2.Status()
 	if err != nil {
@@ -932,6 +952,9 @@ func TestDB_NoPlaintextLeakage(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	svc := NewVaultService(db)
+	if err := svc.SetActiveSpace(testSpaceID); err != nil {
+		t.Fatalf("set active space: %v", err)
+	}
 	if err := svc.Initialize(pw); err != nil {
 		t.Fatalf("initialize: %v", err)
 	}

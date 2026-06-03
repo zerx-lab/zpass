@@ -119,6 +119,14 @@ export interface VaultState {
 	status: VaultLoadStatus;
 	/** 上一次操作错误的人类可读消息；操作成功时清空 */
 	error: string | null;
+	/**
+	 * 空间切换的单调 epoch —— 防多触发点 load 竞态
+	 *
+	 * 切空间时 reloadForSpace 递增它；每次 load 在开始时记下当时的 epoch，
+	 * 结果回写前若 epoch 已过期（用户又切了空间 / 飞行中的旧 load 后到）则
+	 * 丢弃结果，避免旧空间的数据盖回新空间的列表。
+	 */
+	spaceEpoch: number;
 
 	// ---- Actions ----
 	/**
@@ -136,6 +144,16 @@ export interface VaultState {
 	 * 进 vault 列表会重新走 load。
 	 */
 	load: () => Promise<void>;
+
+	/**
+	 * 切换空间后重载：清空当前空间的内存视图（items / 详情缓存 / 选中 / OTP
+	 * 快照）→ 递增 spaceEpoch → 重新 load 新空间的数据
+	 *
+	 * 由 SpaceSync 在 activeSpaceId 变化时调用（已先 setActiveSpace 推送后端）。
+	 * 必须清缓存：itemDetails / otpSnapshots / selectedId 都是上一个空间的，
+	 * 留着会让详情面板短暂显示旧空间条目。
+	 */
+	reloadForSpace: () => Promise<void>;
 
 	/**
 	 * 拉取单条完整 payload（含 fields）；结果缓存到 itemDetails
@@ -267,11 +285,16 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
 	breachResults: null,
 	breachScanning: false,
 	breachLastScanAt: null,
+	spaceEpoch: 0,
 
 	load: async () => {
+		// 记下本次 load 归属的 epoch；若期间用户切了空间（reloadForSpace 递增
+		// epoch），结果回写前会被丢弃，避免旧空间数据盖回新空间列表。
+		const epoch = get().spaceEpoch;
 		set({ status: "loading", error: null });
 		try {
 			const items = await vaultApi.listItems();
+			if (get().spaceEpoch !== epoch) return; // 已切空间，丢弃过期结果
 			set((state) => {
 				// 选中态校验：如果之前选中的条目在新列表里已经不存在了
 				// （被外部进程删了？多设备同步还没接入但留好接口），自动
@@ -311,6 +334,7 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
 				}
 			})();
 		} catch (err) {
+			if (get().spaceEpoch !== epoch) return; // 已切空间，丢弃过期错误
 			const kind = vaultErrorKind(err);
 			set({
 				status: "error",
@@ -321,6 +345,21 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
 					kind === "locked" || kind === "not-initialized" ? [] : get().items,
 			});
 		}
+	},
+
+	reloadForSpace: async () => {
+		// 清空上一个空间的内存视图，并递增 epoch 让飞行中的旧 load 失效。
+		set((state) => ({
+			items: [],
+			itemDetails: {},
+			otpSnapshots: {},
+			selectedId: null,
+			healthIssueCount: null,
+			status: "loading",
+			error: null,
+			spaceEpoch: state.spaceEpoch + 1,
+		}));
+		await get().load();
 	},
 
 	fetchItem: async (id) => {

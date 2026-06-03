@@ -369,6 +369,7 @@ export const en = {
 	import_count_note: "Secure notes",
 	import_count_identity: "Identities",
 	import_count_ssh: "SSH / API keys",
+	import_count_passkey: "Passkeys",
 	import_count_skipped: "Skipped",
 	import_warning_skipped:
 		"{{n}} item(s) will be skipped (unsupported type or missing required field).",
@@ -532,10 +533,18 @@ export const en = {
 		"Manage your encrypted spaces. Each space has its own vault.",
 	settings_space_rename: "Edit space",
 	settings_space_delete: "Delete space",
+	settings_space_delete_nonempty: "Empty this space before deleting it",
 	settings_space_delete_title: "Delete space",
 	settings_space_delete_msg:
-		"All items in this space will be permanently deleted. This action cannot be undone.",
-	settings_space_delete_confirm: "Delete permanently",
+		"This space will be removed. Only empty spaces can be deleted, so no items are affected.",
+	settings_space_delete_confirm: "Delete space",
+	settings_space_clear: "Clear items",
+	settings_space_clear_title: "Clear items in space",
+	settings_space_clear_msg:
+		"All {{count}} items in {{name}} will be deleted.",
+	settings_space_clear_warning:
+		"This cannot be undone. These items are also removed from any synced devices.",
+	settings_space_clear_confirm: "Clear items",
 	settings_space_cancel: "Cancel",
 	settings_space_rename_title: "Edit space",
 	settings_space_rename_placeholder: "New name",

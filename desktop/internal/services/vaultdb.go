@@ -92,7 +92,10 @@ const (
 	// v2 → v3：新增 vault_audit 表，持久化 SSH agent 签名审计日志。
 	// v3 → v4：vault_items 新增 deleted_at 列（软删除 tombstone）+ 索引。
 	// 同步功能需要保留删除标记以避免对端把已删条目「复活」回来。
-	vaultSchemaVersion = 4
+	// v4 → v5：vault_items 新增 space_id 列（空间隔离）+ 索引。每个条目归属
+	// 一个「空间(Space)」，所有读写按当前激活空间过滤；老条目迁移时 space_id
+	// 默认 ''（orphan，待前端首次解锁后认领到当前激活空间）。
+	vaultSchemaVersion = 5
 
 	// kdfNameArgon2id 写入 vault_meta.kdf 字段的标识
 	// 未来若引入新 KDF（比如 PHC 接班的算法），这里增加新常量并在
@@ -139,12 +142,22 @@ type VaultMeta struct {
 //   - 非 nil = 该时刻被删除；ListItems 默认过滤；ListItemsWithTombstones 才返回
 //
 // 顶层缓存方便 SQL 层快速过滤；权威值仍在加密 payload 内（AEAD 保护）。
+//
+// SpaceID 空间归属（明文列）—— 空间隔离：
+//   - '' = orphan（v4→v5 迁移的老条目，待前端认领到当前激活空间）
+//   - 非空 = 该条目所属空间 id（与前端 spaces store 的 Space.id 对应）
+//
+// 明文化 space_id 是刻意的：它只是 UI 分组标识，不是敏感字段（不像 password）。
+// 明文列让 ListItemsBySpace / CountLiveItemsBySpace 不必解密即可按空间过滤 +
+// 走索引。空间归属的权威副本同时存在加密 payload 的 SpaceID 字段里（随同步
+// 跨设备传播），DB 列是它的查询投影；写路径两者同时维护，读路径以 DB 列为准。
 type VaultItemRow struct {
 	ID        string
 	Payload   []byte
 	CreatedAt int64
 	UpdatedAt int64
 	DeletedAt *int64
+	SpaceID   string
 }
 
 // TrustedDeviceRow 是 vault_trusted_device 表的内存表示
@@ -309,14 +322,16 @@ func (db *VaultDB) initSchema() error {
 			payload    BLOB    NOT NULL,
 			created_at INTEGER NOT NULL,
 			updated_at INTEGER NOT NULL,
-			deleted_at INTEGER          -- 软删除 tombstone：NULL = 未删除
+			deleted_at INTEGER,                 -- 软删除 tombstone：NULL = 未删除
+			space_id   TEXT    NOT NULL DEFAULT ''  -- 空间归属（v5）：'' = orphan（待认领）
 		);
 
 		CREATE INDEX IF NOT EXISTS idx_vault_items_updated_at
 			ON vault_items (updated_at DESC);
-		-- 注意：idx_vault_items_live_updated 在 ensureVaultItemsV4Schema()
-		-- 里建，因为对老表（v1-v3，没有 deleted_at 列）必须先 ALTER ADD
-		-- COLUMN 再 CREATE INDEX，不能放在 CREATE TABLE 段里直接执行。
+		-- 注意：idx_vault_items_live_updated 在 ensureVaultItemsV4Schema()、
+		-- idx_vault_items_space 在 ensureVaultItemsV5Schema() 里建，因为对老表
+		-- （v1-v4，缺 deleted_at / space_id 列）必须先 ALTER ADD COLUMN 再
+		-- CREATE INDEX，不能放在 CREATE TABLE 段里直接执行。
 
 		CREATE TABLE IF NOT EXISTS vault_trusted_device (
 			id         INTEGER PRIMARY KEY CHECK (id = 1),
@@ -343,6 +358,10 @@ func (db *VaultDB) initSchema() error {
 	// 直接含 deleted_at，下面的 ALTER 会被 hasColumn 短路。
 	if err := db.ensureVaultItemsV4Schema(); err != nil {
 		return fmt.Errorf("ensure vault_items v4 schema: %w", err)
+	}
+	// 同理幂等补齐 v5 的 space_id 列与索引（老表 v1-v4 缺此列）。
+	if err := db.ensureVaultItemsV5Schema(); err != nil {
+		return fmt.Errorf("ensure vault_items v5 schema: %w", err)
 	}
 
 	// 若 vault_meta 已有行，检查 version；落后就跑 migrate
@@ -427,6 +446,61 @@ func (db *VaultDB) ensureVaultItemsV4Schema() error {
 	return nil
 }
 
+// ensureVaultItemsV5Schema 幂等地把 vault_items 升级到 v5 schema（空间隔离）
+//
+// 与 ensureVaultItemsV4Schema 完全相同的幂等模式：
+//  1. PRAGMA table_info(vault_items) 看是否已有 space_id 列
+//  2. 没有 → ALTER TABLE vault_items ADD COLUMN space_id TEXT NOT NULL DEFAULT ''
+//     —— SQLite 允许给非空列加默认值，已有行自动回填 ''（=orphan，待认领）
+//  3. CREATE INDEX IF NOT EXISTS idx_vault_items_space（按空间+时间复合，仅活动行）
+//
+// 调用时机：每次 initSchema 启动都跑一次，无论 vault 是否已 Initialize；
+// 对已是 v5 的表 PRAGMA 检查会短路 ALTER，索引用 IF NOT EXISTS 反复跑无副作用。
+func (db *VaultDB) ensureVaultItemsV5Schema() error {
+	rows, err := db.handle.Query(`PRAGMA table_info(vault_items)`)
+	if err != nil {
+		return fmt.Errorf("pragma table_info: %w", err)
+	}
+	hasSpaceID := false
+	for rows.Next() {
+		var (
+			cid       int
+			name      string
+			ctype     string
+			notnull   int
+			dfltValue sql.NullString
+			pk        int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan table_info: %w", err)
+		}
+		if name == "space_id" {
+			hasSpaceID = true
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate table_info: %w", err)
+	}
+
+	if !hasSpaceID {
+		if _, err := db.handle.Exec(
+			`ALTER TABLE vault_items ADD COLUMN space_id TEXT NOT NULL DEFAULT ''`,
+		); err != nil {
+			return fmt.Errorf("add space_id column: %w", err)
+		}
+	}
+	// 复合部分索引：加速「按空间列活动条目」的默认查询（ListItemsBySpace）。
+	if _, err := db.handle.Exec(
+		`CREATE INDEX IF NOT EXISTS idx_vault_items_space
+			ON vault_items (space_id, updated_at DESC) WHERE deleted_at IS NULL`,
+	); err != nil {
+		return fmt.Errorf("create idx_vault_items_space: %w", err)
+	}
+	return nil
+}
+
 // migrate 顺序执行从 from+1 到 to 的迁移步骤
 //
 // v1 是首版，没有任何迁移分支。未来加列时按下例：
@@ -495,6 +569,14 @@ func (db *VaultDB) migrate(from, to int) error {
 			// 因此走 ensureVaultItemsV4Schema 而非直接 ALTER）。
 			if err := db.ensureVaultItemsV4Schema(); err != nil {
 				return fmt.Errorf("v4: ensure deleted_at schema: %w", err)
+			}
+		case 5:
+			// v4 → v5：vault_items 新增 space_id 列与索引（空间隔离）。
+			// 同 v4，实际改动已在 initSchema 头部的 ensureVaultItemsV5Schema()
+			// 幂等执行过；此处只需确认成功。老条目 space_id 回填为 ''（orphan，
+			// 待前端首次解锁后 ClaimOrphanItems 认领到当前激活空间）。
+			if err := db.ensureVaultItemsV5Schema(); err != nil {
+				return fmt.Errorf("v5: ensure space_id schema: %w", err)
 			}
 		}
 		// 落版本号 —— 每个分支结束后单独 UPDATE，避免某个分支内部
@@ -680,7 +762,7 @@ func (db *VaultDB) WriteMeta(m *VaultMeta) error {
 // 调用方如果需要其它顺序（创建时间 / 字母序）自己在内存里 sort。
 func (db *VaultDB) ListItems() ([]VaultItemRow, error) {
 	rows, err := db.handle.Query(`
-		SELECT id, payload, created_at, updated_at, deleted_at
+		SELECT id, payload, created_at, updated_at, deleted_at, space_id
 		FROM vault_items
 		WHERE deleted_at IS NULL
 		ORDER BY updated_at DESC
@@ -688,13 +770,24 @@ func (db *VaultDB) ListItems() ([]VaultItemRow, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query items: %w", err)
 	}
-	defer rows.Close()
+	return scanItemRows(rows)
+}
 
+// scanItemRows 把一组 vault_items 查询结果扫成 []VaultItemRow
+//
+// ListItems / ListItemsWithTombstones / ListItemsBySpace / ListOrphanItems
+// 共用 —— 它们的 SELECT 列顺序必须严格一致：
+//
+//	id, payload, created_at, updated_at, deleted_at, space_id
+//
+// 负责 rows.Close() + deleted_at 的 NullInt64 → *int64 转换 + 迭代错误检查。
+func scanItemRows(rows *sql.Rows) ([]VaultItemRow, error) {
+	defer rows.Close()
 	out := make([]VaultItemRow, 0, 16)
 	for rows.Next() {
 		var r VaultItemRow
 		var deletedAt sql.NullInt64
-		if err := rows.Scan(&r.ID, &r.Payload, &r.CreatedAt, &r.UpdatedAt, &deletedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.Payload, &r.CreatedAt, &r.UpdatedAt, &deletedAt, &r.SpaceID); err != nil {
 			return nil, fmt.Errorf("scan item: %w", err)
 		}
 		if deletedAt.Valid {
@@ -709,34 +802,56 @@ func (db *VaultDB) ListItems() ([]VaultItemRow, error) {
 	return out, nil
 }
 
+// ListItemsBySpace 返回指定空间的「未删除」条目（按 updated_at 倒序）
+//
+// 空间隔离的核心查询：vaultservice.ListItems 在持有当前激活空间时调本方法，
+// 走 idx_vault_items_space 复合部分索引。spaceID 为 '' 时返回 orphan（未认领）
+// 条目 —— 但 vaultservice 层禁止 currentSpaceID 为 ''（见 ErrSpaceNotSelected），
+// 所以正常路径不会用 '' 调到这里；DB 层不额外拦截，保持职责单一。
+func (db *VaultDB) ListItemsBySpace(spaceID string) ([]VaultItemRow, error) {
+	rows, err := db.handle.Query(`
+		SELECT id, payload, created_at, updated_at, deleted_at, space_id
+		FROM vault_items
+		WHERE deleted_at IS NULL AND space_id = ?
+		ORDER BY updated_at DESC
+	`, spaceID)
+	if err != nil {
+		return nil, fmt.Errorf("query items by space: %w", err)
+	}
+	return scanItemRows(rows)
+}
+
+// ListOrphanItems 返回所有 space_id = '' 的条目（含 tombstone）
+//
+// 供 vaultservice.ClaimOrphanItems 一次性认领历史数据用。**含 tombstone**：
+// orphan 墓碑也必须被认领，否则它们永远是孤儿，且会在同步时把「未归属」状态
+// 传播给对端造成空间归属漂移。
+func (db *VaultDB) ListOrphanItems() ([]VaultItemRow, error) {
+	rows, err := db.handle.Query(`
+		SELECT id, payload, created_at, updated_at, deleted_at, space_id
+		FROM vault_items
+		WHERE space_id = ''
+		ORDER BY updated_at DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query orphan items: %w", err)
+	}
+	return scanItemRows(rows)
+}
+
 // ListItemsWithTombstones 返回所有条目（含 tombstone），同步协议用
 //
 // 顺序与 ListItems 一致：updated_at DESC。前端绝不应调此接口（会看到墓碑）。
 func (db *VaultDB) ListItemsWithTombstones() ([]VaultItemRow, error) {
 	rows, err := db.handle.Query(`
-		SELECT id, payload, created_at, updated_at, deleted_at
+		SELECT id, payload, created_at, updated_at, deleted_at, space_id
 		FROM vault_items
 		ORDER BY updated_at DESC
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("query items with tombstones: %w", err)
 	}
-	defer rows.Close()
-
-	out := make([]VaultItemRow, 0, 16)
-	for rows.Next() {
-		var r VaultItemRow
-		var deletedAt sql.NullInt64
-		if err := rows.Scan(&r.ID, &r.Payload, &r.CreatedAt, &r.UpdatedAt, &deletedAt); err != nil {
-			return nil, fmt.Errorf("scan item: %w", err)
-		}
-		if deletedAt.Valid {
-			v := deletedAt.Int64
-			r.DeletedAt = &v
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
+	return scanItemRows(rows)
 }
 
 // CountLiveItems 返回未删除条目数（SQL COUNT，不解密）
@@ -750,6 +865,22 @@ func (db *VaultDB) CountLiveItems() (int, error) {
 	).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("count live items: %w", err)
+	}
+	return n, nil
+}
+
+// CountLiveItemsBySpace 返回指定空间未删除条目数（SQL COUNT，不解密）
+//
+// 用途：SpacesSection 删除空间前的非空校验（禁止删除非空空间），以及未来
+// 可能的「每空间条目数」展示。走 idx_vault_items_space 索引。
+func (db *VaultDB) CountLiveItemsBySpace(spaceID string) (int, error) {
+	var n int
+	err := db.handle.QueryRow(
+		`SELECT COUNT(*) FROM vault_items WHERE deleted_at IS NULL AND space_id = ?`,
+		spaceID,
+	).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count live items by space: %w", err)
 	}
 	return n, nil
 }
@@ -771,9 +902,9 @@ func (db *VaultDB) GetItem(id string) (*VaultItemRow, error) {
 	var r VaultItemRow
 	var deletedAt sql.NullInt64
 	err := db.handle.QueryRow(`
-		SELECT id, payload, created_at, updated_at, deleted_at
+		SELECT id, payload, created_at, updated_at, deleted_at, space_id
 		FROM vault_items WHERE id = ?
-	`, id).Scan(&r.ID, &r.Payload, &r.CreatedAt, &r.UpdatedAt, &deletedAt)
+	`, id).Scan(&r.ID, &r.Payload, &r.CreatedAt, &r.UpdatedAt, &deletedAt, &r.SpaceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -815,9 +946,9 @@ func (db *VaultDB) InsertItem(r *VaultItemRow) error {
 		deletedAt = sql.NullInt64{Int64: *r.DeletedAt, Valid: true}
 	}
 	_, err := db.handle.Exec(`
-		INSERT INTO vault_items (id, payload, created_at, updated_at, deleted_at)
-		VALUES (?, ?, ?, ?, ?)
-	`, r.ID, r.Payload, r.CreatedAt, r.UpdatedAt, deletedAt)
+		INSERT INTO vault_items (id, payload, created_at, updated_at, deleted_at, space_id)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, r.ID, r.Payload, r.CreatedAt, r.UpdatedAt, deletedAt, r.SpaceID)
 	if err != nil {
 		return fmt.Errorf("insert item %s: %w", r.ID, err)
 	}
@@ -866,9 +997,9 @@ func (db *VaultDB) InsertItemBatch(rows []*VaultItemRow) error {
 			deletedAt = sql.NullInt64{Int64: *r.DeletedAt, Valid: true}
 		}
 		_, err := tx.Exec(`
-			INSERT INTO vault_items (id, payload, created_at, updated_at, deleted_at)
-			VALUES (?, ?, ?, ?, ?)
-		`, r.ID, r.Payload, r.CreatedAt, r.UpdatedAt, deletedAt)
+			INSERT INTO vault_items (id, payload, created_at, updated_at, deleted_at, space_id)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`, r.ID, r.Payload, r.CreatedAt, r.UpdatedAt, deletedAt, r.SpaceID)
 		if err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("batch insert item %s: %w", r.ID, err)
@@ -968,6 +1099,64 @@ func (db *VaultDB) RestoreItem(id string, payload []byte, updatedAt int64) error
 	`, payload, updatedAt, id)
 	if err != nil {
 		return fmt.Errorf("restore item %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrItemNotFound
+	}
+	return nil
+}
+
+// UpdateItemSpace 改写条目的 payload + space_id（**不动** created_at / updated_at / deleted_at）
+//
+// 专供 vaultservice.ClaimOrphanItems 认领历史 orphan 条目用：把 space_id 从
+// '' 改成目标空间，同时重写 payload（其内嵌的 SpaceID 字段也要更新，供同步
+// 跨设备传播）。时间戳保持不变是刻意的 —— 认领不是「修改」，不应改变条目在
+// 列表里的排序，也不应污染同步的 LWW（last-write-wins）顺序把它顶成「最新」。
+//
+// 找不到 id 返回 ErrItemNotFound。
+func (db *VaultDB) UpdateItemSpace(id, spaceID string, payload []byte) error {
+	if id == "" {
+		return errors.New("item id cannot be empty")
+	}
+	if len(payload) == 0 {
+		return errors.New("payload cannot be empty")
+	}
+	res, err := db.handle.Exec(`
+		UPDATE vault_items SET payload = ?, space_id = ? WHERE id = ?
+	`, payload, spaceID, id)
+	if err != nil {
+		return fmt.Errorf("update item space %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrItemNotFound
+	}
+	return nil
+}
+
+// SetItemSpace 仅改写条目的 space_id 列（不动 payload / 时间戳）
+//
+// 给 ClaimOrphanItems 处理「密文损坏、无法解密重写 payload」的 orphan 条目用：
+// 至少把它从 '' 归属到目标空间，避免永久孤儿（否则它每次启动都被当 orphan
+// 重复扫描）。正常条目走 UpdateItemSpace（连 payload 内嵌 SpaceID 一起重写）。
+//
+// 找不到 id 返回 ErrItemNotFound。
+func (db *VaultDB) SetItemSpace(id, spaceID string) error {
+	if id == "" {
+		return errors.New("item id cannot be empty")
+	}
+	res, err := db.handle.Exec(`
+		UPDATE vault_items SET space_id = ? WHERE id = ?
+	`, spaceID, id)
+	if err != nil {
+		return fmt.Errorf("set item space %s: %w", id, err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {

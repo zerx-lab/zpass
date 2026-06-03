@@ -20,6 +20,9 @@ func TestPasskeyCreateListAndEncryptedStorage(t *testing.T) {
 		t.Fatalf("open vault db: %v", err)
 	}
 	svc := NewVaultService(db)
+	if err := svc.SetActiveSpace(testSpaceID); err != nil {
+		t.Fatalf("set active space: %v", err)
+	}
 	if err := svc.Initialize("passkey-test-master-password"); err != nil {
 		t.Fatalf("initialize: %v", err)
 	}

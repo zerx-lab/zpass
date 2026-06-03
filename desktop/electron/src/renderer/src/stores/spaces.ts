@@ -101,6 +101,14 @@ export interface SpacesState {
 	 *   - 显式字段 = 显式意图，与 prefs 的 langFollowSystem 同理。
 	 */
 	hasCompletedOnboarding: boolean;
+	/**
+	 * 是否已认领过历史 orphan 数据（v5 空间隔离迁移）
+	 *
+	 * v5 之前的条目没有空间归属（后端迁移后 space_id=''）。首次解锁后由
+	 * SpaceSync 调 vaultApi.claimOrphanItems(activeSpaceId) 把它们一次性归到
+	 * 当前激活空间（产品决策：历史数据 → 当前激活空间），然后置 true 防重复。
+	 */
+	hasClaimedLegacyItems: boolean;
 
 	/** 切换到指定空间 —— 找不到时静默忽略（防止 persist 过期数据把 UI 打崩） */
 	switchSpace: (id: string) => void;
@@ -128,6 +136,8 @@ export interface SpacesState {
 	 * "导入已有配置"场景使用。
 	 */
 	completeOnboarding: () => void;
+	/** 标记历史 orphan 已认领（由 SpaceSync 在 claimOrphanItems 成功后调用） */
+	markLegacyClaimed: () => void;
 }
 
 /** 默认 glyph：取 name 首字符大写；中文直接原样取第一个字符 */
@@ -164,6 +174,7 @@ export const useSpacesStore = create<SpacesState>()(
 			spaces: getInitialSpaces(),
 			activeSpaceId: "",
 			hasCompletedOnboarding: false,
+			hasClaimedLegacyItems: false,
 
 			switchSpace: (id) => {
 				const exists = get().spaces.some((s) => s.id === id);
@@ -228,6 +239,8 @@ export const useSpacesStore = create<SpacesState>()(
 				}),
 
 			completeOnboarding: () => set({ hasCompletedOnboarding: true }),
+
+			markLegacyClaimed: () => set({ hasClaimedLegacyItems: true }),
 		}),
 		{
 			// name 同时是 Rust 侧 namespace，落盘到 ~/.config/zpass/zpass.spaces.json
@@ -235,11 +248,12 @@ export const useSpacesStore = create<SpacesState>()(
 			// 走 Tauri 配置文件存储，严禁使用浏览器 store（产品硬性约束）
 			// 详见 src/lib/config-storage.ts 头部注释
 			storage: createTauriConfigStorage<Partial<SpacesState>>(),
-			version: 3,
+			version: 4,
 			partialize: (state) => ({
 				spaces: state.spaces,
 				activeSpaceId: state.activeSpaceId,
 				hasCompletedOnboarding: state.hasCompletedOnboarding,
+				hasClaimedLegacyItems: state.hasClaimedLegacyItems,
 			}),
 			/**
 			 * 迁移链
@@ -267,6 +281,10 @@ export const useSpacesStore = create<SpacesState>()(
 					};
 				}
 				// v2 → v3 仅是可选字段新增，无需主动迁移
+				// v3 → v4 新增 hasClaimedLegacyItems：默认 false（经 merge 从初始
+				//   状态补上）。**刻意不在迁移里置 true** —— v3 老用户的历史数据在
+				//   后端 v5 迁移后是 orphan，必须让 SpaceSync 首次解锁时认领到当前
+				//   激活空间（产品决策 Q1）。新用户同样 false，认领 no-op（无 orphan）。
 				return next as SpacesState;
 			},
 			/**

@@ -29,6 +29,13 @@ export const UpdateItem = svc.UpdateItem;
 export const DeleteItem = svc.DeleteItem;
 export const BatchCreateItems = svc.BatchCreateItems;
 
+// space isolation
+export const SetActiveSpace = svc.SetActiveSpace;
+export const GetActiveSpace = svc.GetActiveSpace;
+export const ClaimOrphanItems = svc.ClaimOrphanItems;
+export const CountItemsInSpace = svc.CountItemsInSpace;
+export const ClearSpace = svc.ClearSpace;
+
 // passkeys
 export const CreatePasskey = svc.CreatePasskey;
 export const ListPasskeys = svc.ListPasskeys;

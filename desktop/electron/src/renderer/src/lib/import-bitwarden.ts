@@ -250,17 +250,61 @@ function mapAdditionalUris(
 	}));
 }
 
-function mapFido2(
-	fido2: BitwardenFido2[] | undefined,
-	seed: string,
-): CustomField[] {
-	if (!Array.isArray(fido2) || fido2.length === 0) return [];
-	return fido2.map((c, i) => ({
-		id: `cf-${seed}-passkey-${i + 1}`,
-		type: "hidden" as const,
-		name: `Passkey · ${safeStr(c.rpName) || safeStr(c.rpId) || `#${i + 1}`}`,
-		value: JSON.stringify(c, null, 2),
-	}));
+/** passkey 条目展示名：`<rpName|rpId> (<account>)` */
+function passkeyDisplayName(c: BitwardenFido2): string {
+	const label = safeStr(c.rpName) || safeStr(c.rpId) || "Passkey";
+	const account = safeStr(c.userDisplayName) || safeStr(c.userName);
+	return account ? `${label} (${account})` : label;
+}
+
+/**
+ * 把 Bitwarden login.fido2Credentials[] 转成 ZPass 原生 passkey 条目。
+ *
+ * 关键点（详见 desktop/internal/services/passkeyservice.go）：
+ *   - credentialId 是 Bitwarden 的 GUID 字符串，rawId 是它的 16 原始字节；
+ *     这里原样透传，Go 侧 completeImportedPasskey 归一化为 base64url。
+ *   - keyValue 是 PKCS#8 私钥（base64url）；Go 侧据此反推 publicKeyCose/Spki。
+ *   - userHandle 已是 base64url，作为 userId 透传。
+ * 字段名（rpId / credentialId / privateKeyPkcs8 / userId / signCount /
+ * residentKey）必须与 passkeyservice 的读取约定一致。
+ */
+function mapPasskeys(
+	login: BitwardenLogin,
+	skipped: Array<{ name: string; reason: string }>,
+): VaultItemInput[] {
+	const creds = login.fido2Credentials;
+	if (!Array.isArray(creds) || creds.length === 0) return [];
+	const out: VaultItemInput[] = [];
+	for (const c of creds) {
+		const rpId = safeStr(c.rpId);
+		const keyValue = safeStr(c.keyValue);
+		const credentialId = safeStr(c.credentialId);
+		// 三者缺一不可用：跳过并计入 skipped，不静默丢弃
+		if (!rpId || !keyValue || !credentialId) {
+			skipped.push({
+				name: passkeyDisplayName(c),
+				reason: "passkey_incomplete",
+			});
+			continue;
+		}
+		const fields: Record<string, unknown> = {
+			rpId,
+			credentialId, // GUID；Go 侧归一化为 base64url
+			privateKeyPkcs8: keyValue, // PKCS#8 base64url；Go 侧派生公钥
+			signCount: Number(safeStr(c.counter)) || 0,
+			residentKey: safeStr(c.discoverable) === "true",
+		};
+		setIfNonEmpty(fields, "rpName", safeStr(c.rpName));
+		setIfNonEmpty(fields, "userName", safeStr(c.userName));
+		setIfNonEmpty(fields, "userDisplayName", safeStr(c.userDisplayName));
+		setIfNonEmpty(fields, "userId", safeStr(c.userHandle));
+		out.push({
+			type: "passkey",
+			name: passkeyDisplayName(c),
+			fields,
+		});
+	}
+	return out;
 }
 
 function mapHistory(
@@ -352,10 +396,11 @@ function pushExtra(
 
 function mapLogin(it: BitwardenItem, seed: string): VaultItemInput {
 	const login = it.login ?? {};
+	// fido2Credentials 不再塞进 _customFields：改由 convertBitwarden 产出
+	// 独立的原生 passkey 条目（mapPasskeys），使其可被认证器真正使用。
 	const cf: CustomField[] = [
 		...mapBwFields(it.fields, seed),
 		...mapAdditionalUris(login.uris, seed),
-		...mapFido2(login.fido2Credentials, seed),
 		...mapHistory(it.passwordHistory, seed),
 		...mapMetaFlags(it, seed),
 		...mapUriMatchHint(login.uris, seed),
@@ -605,6 +650,14 @@ function convertBitwarden(obj: BitwardenExport): ImportResult {
 		}
 		out.push(mapped);
 		stats[ztype] = (stats[ztype] || 0) + 1;
+
+		// login 条目若带 passkey，额外产出独立的原生 passkey 条目。
+		// 与 Bitwarden 数据结构一致：login（用户名/网址）+ passkey 并存。
+		if (ztype === "login" && it.login) {
+			const passkeys = mapPasskeys(it.login, skipped);
+			for (const pk of passkeys) out.push(pk);
+			stats.passkey += passkeys.length;
+		}
 	}
 
 	return {

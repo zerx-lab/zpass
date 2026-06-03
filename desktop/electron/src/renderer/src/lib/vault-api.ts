@@ -293,6 +293,7 @@ export type VaultErrorKind =
 	| "totp-secret-invalid" // ErrTOTPSecretInvalid：TOTP 密钥不是合法 base32
 	| "otp-type-mismatch" // ErrOTPTypeMismatch：对非 HOTP 条目调用 advanceHOTPCounter
 	| "passkey-not-found" // ErrPasskeyNotFound：passkey 凭据不存在或 RP 不匹配
+	| "space-not-selected" // ErrSpaceNotSelected：尚未 SetActiveSpace 就写入
 	| "unknown"; // 其它（IO / 解码失败 / 内部错误）
 
 /**
@@ -320,6 +321,9 @@ export function vaultErrorKind(err: unknown): VaultErrorKind {
 	if (msg.includes("totp secret not set")) return "totp-secret-missing";
 	if (msg.includes("operation only valid for hotp")) return "otp-type-mismatch";
 	if (msg.includes("passkey credential not found")) return "passkey-not-found";
+	// 注意顺序：先匹配「no active space selected」再走通用 not-found，
+	// 避免被其它分支吞掉（本串不含 "not found"，但放这里语义清晰）
+	if (msg.includes("no active space selected")) return "space-not-selected";
 	if (msg.includes("not found")) return "not-found";
 	return "unknown";
 }
@@ -715,6 +719,69 @@ export async function createItem(input: VaultItemInput): Promise<VaultItemSummar
 		updatedAt: result.updatedAt,
 		hasTOTP: false,
 	};
+}
+
+// ---------------------------------------------------------------------------
+// 空间隔离（Space）
+// ---------------------------------------------------------------------------
+
+/**
+ * 设置后端「当前激活空间」会话态
+ *
+ * 前端在解锁后及每次切空间调用，让后端所有读写（列表/CRUD/passkey/TOTP/导出/
+ * SSH agent/autofill）作用于该空间。mock 运行时不做真隔离，no-op 即可。
+ */
+export async function setActiveSpace(spaceId: string): Promise<void> {
+	if (!spaceId) throw new Error("spaceId cannot be empty");
+	if (!isWailsRuntime()) return;
+	await callWails("SetActiveSpace", () => VaultService.SetActiveSpace(spaceId));
+}
+
+/**
+ * 把所有「未归属空间」（v5 迁移遗留）的历史条目认领到指定空间，返回认领条目数
+ *
+ * 前端在升级后首次解锁时调用一次（传当前激活空间），并自行持久化「已认领」
+ * 标记防止重复。幂等：再次调用返回 0。mock 运行时无 orphan，返回 0。
+ */
+export async function claimOrphanItems(spaceId: string): Promise<number> {
+	if (!spaceId) throw new Error("spaceId cannot be empty");
+	if (!isWailsRuntime()) return 0;
+	const n = await callWails("ClaimOrphanItems", () =>
+		VaultService.ClaimOrphanItems(spaceId),
+	);
+	return Number(n ?? 0);
+}
+
+/**
+ * 返回指定空间的未删除条目数（删除空间前的非空校验用）
+ *
+ * 锁定态后端返回 ErrVaultLocked；调用方应在已解锁时调用。mock 返回 0。
+ */
+export async function countItemsInSpace(spaceId: string): Promise<number> {
+	if (!spaceId) return 0;
+	if (!isWailsRuntime()) return 0;
+	const n = await callWails("CountItemsInSpace", () =>
+		VaultService.CountItemsInSpace(spaceId),
+	);
+	return Number(n ?? 0);
+}
+
+/**
+ * 清空指定空间内的所有账户（软删除，写 tombstone 以正确同步删除），返回清空条目数
+ *
+ * 设置页「清空空间」用 —— 删除空间前需先清空（禁止删非空空间）。可作用于任意
+ * 空间（含非当前激活空间）。mock 运行时按当前 mock 集合粗略清空。
+ */
+export async function clearSpace(spaceId: string): Promise<number> {
+	if (!spaceId) throw new Error("spaceId cannot be empty");
+	if (!isWailsRuntime()) {
+		// mock 不做真隔离：清空整个 mock 集合（仅用于无后端的本地预览）
+		const n = mockState.items.size;
+		mockState.items.clear();
+		return n;
+	}
+	const n = await callWails("ClearSpace", () => VaultService.ClearSpace(spaceId));
+	return Number(n ?? 0);
 }
 
 /**
@@ -1729,6 +1796,10 @@ export const vaultApi = {
 	batchCreateItems,
 	updateItem,
 	deleteItem,
+	setActiveSpace,
+	claimOrphanItems,
+	countItemsInSpace,
+	clearSpace,
 	createPasskey,
 	listPasskeys,
 	getPasskey,

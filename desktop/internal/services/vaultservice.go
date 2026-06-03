@@ -212,9 +212,15 @@ func migrateLegacyTypeInPlace(p *ItemPayload) {
 //	modified  → 由 UpdatedAt 派生，不在 payload 里持久化
 //	一切其它字段（username/password/url/notes/totp/...） → Fields[]
 type ItemPayload struct {
-	ID        string         `json:"id"`
-	Type      ItemType       `json:"type"`
-	Name      string         `json:"name"`
+	ID   string   `json:"id"`
+	Type ItemType `json:"type"`
+	Name string   `json:"name"`
+	// SpaceID 空间归属 —— 见 VaultItemRow.SpaceID。这是加密 payload 内的权威
+	// 副本（随同步跨设备传播，对端解密后据此落本端 space_id 列）；DB 明文列
+	// space_id 是它的查询投影。前端 createItem 时携带当前激活空间；decryptItem
+	// 读出后会用 DB 行的 space_id 覆盖本字段（DB 列是读路径的事实来源）。
+	// omitempty：v5 之前写入的老 payload 没有此字段，解码为 ""，读路径用 DB 列补上。
+	SpaceID   string         `json:"spaceId,omitempty"`
 	Fields    map[string]any `json:"fields"`    // 类型特定字段
 	CreatedAt int64          `json:"createdAt"` // unix ms（后端写入，前端只读）
 	UpdatedAt int64          `json:"updatedAt"` // unix ms（后端写入，前端只读）
@@ -273,6 +279,12 @@ var (
 	// ErrPasswordTooWeak：Initialize / ChangeMasterPassword 时主密码不
 	// 满足最低强度要求。前端会展示提示让用户重输。
 	ErrPasswordTooWeak = errors.New("master password too weak (minimum 8 characters)")
+
+	// ErrSpaceNotSelected：在 currentSpaceID 为空（尚未 SetActiveSpace）时
+	// 调用需要空间归属的写操作（CreateItem / UpdateItem / DeleteItem）返回。
+	// 前端正常流程会在解锁后、首次 load 前先 SetActiveSpace，不应触达此分支；
+	// 触达说明前端状态机有 bug（类似 Unlock 的「不做幂等捷径」防御思路）。
+	ErrSpaceNotSelected = errors.New("no active space selected")
 )
 
 // ---------------------------------------------------------------------------
@@ -293,6 +305,27 @@ type VaultService struct {
 	db  *VaultDB
 	mu  sync.RWMutex
 	dek []byte // 明文 DEK；nil = 已锁定
+
+	// currentSpaceID 是「当前激活空间」的会话态（受 s.mu 保护，与 dek 同层）。
+	//
+	// 空间隔离的核心：所有面向用户的读写（ListItems / CreateItem / GetItem /
+	// passkey 认证 / SSH agent / autofill / 导出）默认只作用于这个空间。前端
+	// 在解锁后及每次切空间调 SetActiveSpace(id) 推送。后台入口（浏览器扩展的
+	// passkey 认证、agent daemon 转发的 SSH sign、native host 的 autofill）
+	// 自身拿不到「当前空间」，靠共享这个进程级会话态被统一约束 —— 这正是
+	// 选「会话态」而非「每个 API 加 spaceId 参数」的根本原因。
+	//
+	// 取值约定：
+	//   - ""  = 未选择空间。CreateItem/UpdateItem/DeleteItem 拒绝（ErrSpaceNotSelected）；
+	//          ListItems 返回空列表（不报错，避免切空间瞬间 UI 抖动）。**绝不**
+	//          用 "" 去匹配 DB 里 space_id='' 的 orphan —— 二者语义不同，必须解耦。
+	//   - 非空 = 当前空间 id（与前端 spaces store 的 Space.id 对应）。
+	//
+	// 同步是唯一例外：sync 走 db 层全空间遍历，不读 currentSpaceID（见 syncservice）。
+	//
+	// 生命周期：Lock() 不清空它（空间选择是设备级偏好，跨锁定保留可减少解锁后
+	// 重设的时序窗口）；进程级单状态，单 webview 桌面端足够。
+	currentSpaceID string
 
 	// breachCache 缓存 HIBP 泄露检测结果，key = 密码的 SHA-1 哈希（大写十六进制）。
 	//
@@ -750,6 +783,181 @@ func (s *VaultService) Lock() error {
 }
 
 // ---------------------------------------------------------------------------
+// 空间隔离（Space）
+// ---------------------------------------------------------------------------
+
+// SetActiveSpace 设置「当前激活空间」会话态
+//
+// 前端在以下时机调用：
+//   - 解锁成功后、首次 ListItems 之前（保证 currentSpaceID 在第一次读之前就位）
+//   - 用户通过 WorkspaceSwitcher 切换空间时
+//
+// 不要求 vault 已解锁 —— 前端可能在解锁流程中先设空间；真正需要 DEK 的 CRUD
+// 仍各自校验 s.dek。spaceID 不能为空（空 = 未选择，是 CRUD 的拒绝态，不应被
+// 显式设置）。
+//
+// 副作用：切换空间后主动通知 SSH agent 重推公钥 —— 严格隔离下 agent 只应暴露
+// 当前空间的 ssh key，切空间必须让 agent 立即刷新（否则它持有旧空间的 key
+// 直到下次 vault 变更事件）。通知在锁外异步发，避免 PushVaultKeys 内部 RLock
+// 与本处写锁重入死锁。
+func (s *VaultService) SetActiveSpace(spaceID string) error {
+	if strings.TrimSpace(spaceID) == "" {
+		return errors.New("spaceID cannot be empty")
+	}
+	s.mu.Lock()
+	changed := s.currentSpaceID != spaceID
+	s.currentSpaceID = spaceID
+	s.mu.Unlock()
+
+	if changed {
+		s.notifySshAgentSafe(func(n SshAgentNotifier) {
+			go func() { _ = n.PushVaultKeys() }()
+		})
+	}
+	return nil
+}
+
+// GetActiveSpace 返回当前激活空间 id（"" = 未选择）
+//
+// 给前端回读校验用（确认后端会话态与前端 activeSpaceId 一致）。在锁定态也
+// 可安全调用。
+func (s *VaultService) GetActiveSpace() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.currentSpaceID
+}
+
+// ClaimOrphanItems 把所有「未归属空间」（space_id=''）的历史条目认领到指定空间
+//
+// 用途：v4→v5 迁移后老条目 space_id 为空（orphan）。前端首次解锁后调用本方法
+// （传当前激活空间）把这批历史数据一次性归到用户当前所在的空间，并由前端持久化
+// 一个「已认领」标记防止重复调用。
+//
+// 实现要点：
+//   - 对每条 orphan：解密 → 设 payload.SpaceID=spaceID → 重新加密(aad=id) →
+//     UpdateItemSpace（同时改 payload 与 space_id 列）。**时间戳不变** —— 认领不是
+//     「修改」，不污染列表排序，也不污染同步 LWW。
+//   - 含 tombstone（ListOrphanItems 返回墓碑）：墓碑也认领，否则它们永远 orphan
+//     且会把「未归属」状态传播给同步对端造成漂移。
+//   - 密文损坏无法解密的条目：仅用 SetItemSpace 改 space_id 列（至少脱离 orphan），
+//     log 跳过，不让一条坏数据中断整批认领。
+//
+// 返回认领的条目数。幂等：再次调用时已无 orphan，返回 0。需要 dek（已解锁）。
+func (s *VaultService) ClaimOrphanItems(spaceID string) (int, error) {
+	if strings.TrimSpace(spaceID) == "" {
+		return 0, errors.New("spaceID cannot be empty")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dek == nil {
+		return 0, ErrVaultLocked
+	}
+
+	rows, err := s.db.ListOrphanItems()
+	if err != nil {
+		return 0, fmt.Errorf("list orphan items: %w", err)
+	}
+
+	claimed := 0
+	for i := range rows {
+		row := &rows[i]
+		payload, err := s.decryptItem(row)
+		if err != nil {
+			// 密文损坏：仅改 space_id 列，至少脱离 orphan（否则每次启动都重扫）
+			fmt.Printf("[vault] claim orphan: decrypt %s failed: %v\n", row.ID, err)
+			if e := s.db.SetItemSpace(row.ID, spaceID); e != nil {
+				fmt.Printf("[vault] claim orphan: set space %s failed: %v\n", row.ID, e)
+				continue
+			}
+			claimed++
+			continue
+		}
+		// decryptItem 把 payload.SpaceID 设成了 row.SpaceID（=''），这里覆盖为目标空间
+		payload.SpaceID = spaceID
+		plaintext, err := json.Marshal(payload)
+		if err != nil {
+			fmt.Printf("[vault] claim orphan: marshal %s failed: %v\n", row.ID, err)
+			continue
+		}
+		ciphertext, err := SealAEAD(s.dek, plaintext, []byte(row.ID))
+		WipeBytes(plaintext)
+		if err != nil {
+			fmt.Printf("[vault] claim orphan: seal %s failed: %v\n", row.ID, err)
+			continue
+		}
+		if err := s.db.UpdateItemSpace(row.ID, spaceID, ciphertext); err != nil {
+			fmt.Printf("[vault] claim orphan: update %s failed: %v\n", row.ID, err)
+			continue
+		}
+		claimed++
+	}
+
+	if claimed > 0 {
+		// 认领改变了当前空间的可见集合，通知前端刷新列表
+		s.notifyVaultChanged("claim-orphans", "", "")
+	}
+	return claimed, nil
+}
+
+// CountItemsInSpace 返回指定空间的未删除条目数（不切换当前激活空间）
+//
+// 给前端「删除空间」前的非空校验用：禁止删除还有条目的空间，避免留下永久不可见
+// 且仍参与同步的孤儿数据（删空间只删前端 UI 记录，后端 vault_items 不会被清）。
+// 需要 dek（已解锁）—— count 本身不解密，但锁定态不暴露条目数（与 Status 的侧
+// 信道考量一致）。spaceID 为空返回 0。
+func (s *VaultService) CountItemsInSpace(spaceID string) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.dek == nil {
+		return 0, ErrVaultLocked
+	}
+	if strings.TrimSpace(spaceID) == "" {
+		return 0, nil
+	}
+	return s.db.CountLiveItemsBySpace(spaceID)
+}
+
+// ClearSpace 软删除指定空间内的所有活动条目（写 tombstone），返回清空的条目数
+//
+// 用途：设置页「清空空间内账户」—— 删除空间前必须先清空（禁止删非空空间）。
+//
+// 为什么软删除而非物理删除：与 DeleteItem 一致，同步需要 tombstone 让对端也
+// 删除对应条目，否则下次同步对端会把它们当「我有他没有的新条目」复活回来。
+//
+// **不受 currentSpaceID 约束**：用户在设置页可对任意空间（含非当前激活空间）
+// 操作，故按传入 spaceID 直接清空，不做空间门禁。复用 softDeleteRowLocked，
+// 每条会各自通知 SSH agent / 前端 vault:changed（前端有防抖会合并成一次刷新）。
+//
+// 单条软删除失败 log + 跳过，不让一条损坏中断整批。需要 dek（已解锁）。
+func (s *VaultService) ClearSpace(spaceID string) (int, error) {
+	if strings.TrimSpace(spaceID) == "" {
+		return 0, errors.New("spaceID cannot be empty")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dek == nil {
+		return 0, ErrVaultLocked
+	}
+
+	// ListItemsBySpace 只返回活动行（deleted_at IS NULL），正好是要清空的集合；
+	// 已是 tombstone 的不在内，避免重复写墓碑污染同步顺序。
+	rows, err := s.db.ListItemsBySpace(spaceID)
+	if err != nil {
+		return 0, fmt.Errorf("list space items: %w", err)
+	}
+
+	cleared := 0
+	for i := range rows {
+		if err := s.softDeleteRowLocked(rows[i].ID, &rows[i]); err != nil {
+			fmt.Printf("[vault] clear space: soft delete %s failed: %v\n", rows[i].ID, err)
+			continue
+		}
+		cleared++
+	}
+	return cleared, nil
+}
+
+// ---------------------------------------------------------------------------
 // 信任设备 / 自动解锁
 // ---------------------------------------------------------------------------
 //
@@ -1100,8 +1308,14 @@ func (s *VaultService) ListItems() ([]ItemSummary, error) {
 	if s.dek == nil {
 		return nil, ErrVaultLocked
 	}
+	// 未选择空间 → 返回空列表（不报错）。前端在切空间瞬间、或 spaces store
+	// hydration 尚未完成时可能短暂处于这个状态；报错会让 UI 闪烁，空列表是
+	// 更平滑的中间态。注意：绝不用 "" 去 ListItemsBySpace 匹配 orphan。
+	if s.currentSpaceID == "" {
+		return []ItemSummary{}, nil
+	}
 
-	rows, err := s.db.ListItems()
+	rows, err := s.db.ListItemsBySpace(s.currentSpaceID)
 	if err != nil {
 		return nil, fmt.Errorf("list items: %w", err)
 	}
@@ -1135,10 +1349,15 @@ func (s *VaultService) ListItems() ([]ItemSummary, error) {
 	return out, nil
 }
 
-// GetItem 按 id 读取完整 payload（解密）
+// getItemAnySpace 按 id 读取完整 payload（解密），**不做空间校验**
 //
-// 找不到返回 (nil, nil)；前端据此渲染"条目已被删除"提示。
-func (s *VaultService) GetItem(id string) (*ItemPayload, error) {
+// 与导出的 GetItem 的唯一区别：不检查条目是否属于当前激活空间。专供需要
+// 跨空间访问条目的内部调用方使用 —— 当前只有同步（syncservice）：同步必须
+// 能读到所有空间的条目才能正确构建 manifest / fetch records，若走带 space
+// 校验的 GetItem 会把非当前空间的条目误判为「不存在」而漏传（隔离漏洞）。
+//
+// 找不到 / tombstone 返回 (nil, nil)，与 GetItem 一致。自己取 RLock。
+func (s *VaultService) getItemAnySpace(id string) (*ItemPayload, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -1172,6 +1391,28 @@ func (s *VaultService) GetItem(id string) (*ItemPayload, error) {
 	return payload, nil
 }
 
+// GetItem 按 id 读取完整 payload（解密），**带空间校验**
+//
+// 跨空间访问（条目不属于当前激活空间）视作未找到，返回 (nil, nil) —— 与
+// WebAuthn 式「不泄露存在性」对齐，也防止前端通过直接传 id 越过空间隔离。
+// currentSpaceID 为空（未选择空间）时一律返回未找到，不泄露任何 orphan。
+//
+// 找不到返回 (nil, nil)；前端据此渲染"条目已被删除"提示。
+func (s *VaultService) GetItem(id string) (*ItemPayload, error) {
+	payload, err := s.getItemAnySpace(id)
+	if err != nil || payload == nil {
+		return payload, err
+	}
+	s.mu.RLock()
+	cur := s.currentSpaceID
+	s.mu.RUnlock()
+	// payload.SpaceID 已由 decryptItem 用 DB 行的 space_id 覆盖（事实来源）。
+	if cur == "" || payload.SpaceID != cur {
+		return nil, nil
+	}
+	return payload, nil
+}
+
 // CreateItem 新建条目
 //
 // 流程：
@@ -1189,6 +1430,36 @@ func (s *VaultService) CreateItem(in ItemPayload) (*ItemSummary, error) {
 	if s.dek == nil {
 		return nil, ErrVaultLocked
 	}
+	if s.currentSpaceID == "" {
+		return nil, ErrSpaceNotSelected
+	}
+	// 强制归当前激活空间，忽略前端传入的 SpaceID（防越权写进别的空间）。
+	return s.createItemLocked(in, s.currentSpaceID)
+}
+
+// createItemInSpace 在指定空间新建条目，**不做 currentSpaceID 门禁**（同步专用）
+//
+// 同步的冲突解决（duplicate）需要把对端条目以新 id 复制进**对端原本所属的
+// 空间**，而不是本端当前激活空间；走 CreateItem 会强制塞进 currentSpaceID 且
+// 在未选空间时被拒。spaceID 取对端 payload.SpaceID，为空则 fallback 当前激活
+// 空间（与 IngestForeignPayload 的兜底一致）。调用方：syncservice。自己取写锁。
+func (s *VaultService) createItemInSpace(in ItemPayload, spaceID string) (*ItemSummary, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dek == nil {
+		return nil, ErrVaultLocked
+	}
+	if spaceID == "" {
+		spaceID = s.currentSpaceID
+	}
+	return s.createItemLocked(in, spaceID)
+}
+
+// createItemLocked 是 CreateItem / createItemInSpace 共用的核心
+//
+// 调用方须已持有 s.mu 写锁 + dek != nil。spaceID 即条目归属，同时写进加密
+// payload 与 DB 明文列，保持双存一致。
+func (s *VaultService) createItemLocked(in ItemPayload, spaceID string) (*ItemSummary, error) {
 	if _, ok := validItemTypes[in.Type]; !ok {
 		return nil, fmt.Errorf("invalid item type: %q", in.Type)
 	}
@@ -1197,6 +1468,14 @@ func (s *VaultService) CreateItem(in ItemPayload) (*ItemSummary, error) {
 	}
 	if in.Fields == nil {
 		in.Fields = map[string]any{}
+	}
+	// passkey 条目可能携带导入器原始密钥材料（Bitwarden 的 PKCS#8 私钥 +
+	// GUID credentialId），在落库前补全公钥派生与字段归一化，使其与
+	// CreatePasskey 产物字节兼容，可被 ListPasskeys / SignPasskeyAssertion 使用。
+	if in.Type == ItemTypePasskey {
+		if err := completeImportedPasskey(in.Fields); err != nil {
+			return nil, fmt.Errorf("prepare passkey item: %w", err)
+		}
 	}
 
 	id, err := newItemID()
@@ -1209,6 +1488,7 @@ func (s *VaultService) CreateItem(in ItemPayload) (*ItemSummary, error) {
 	in.UpdatedAt = now
 	in.Revision = 1
 	in.DeletedAt = nil
+	in.SpaceID = spaceID
 
 	// 加密整个 payload；aad=id 绑定上下文（防止条目调换攻击）
 	plaintext, err := json.Marshal(&in)
@@ -1228,6 +1508,7 @@ func (s *VaultService) CreateItem(in ItemPayload) (*ItemSummary, error) {
 		Payload:   ciphertext,
 		CreatedAt: now,
 		UpdatedAt: now,
+		SpaceID:   spaceID,
 	}
 	if err := s.db.InsertItem(row); err != nil {
 		return nil, fmt.Errorf("insert item: %w", err)
@@ -1273,6 +1554,9 @@ func (s *VaultService) BatchCreateItems(inputs []ItemPayload) ([]ItemSummary, er
 	if s.dek == nil {
 		return nil, ErrVaultLocked
 	}
+	if s.currentSpaceID == "" {
+		return nil, ErrSpaceNotSelected
+	}
 
 	now := s.nowMs()
 	rows := make([]*VaultItemRow, 0, len(inputs))
@@ -1289,6 +1573,14 @@ func (s *VaultService) BatchCreateItems(inputs []ItemPayload) ([]ItemSummary, er
 		if in.Fields == nil {
 			in.Fields = map[string]any{}
 		}
+		// 与 CreateItem 一致：passkey 条目落库前补全公钥派生与字段归一化。
+		// 单条失败会让整批返回 error，importMany 随即降级为逐条 createItem，
+		// 仅坏条目失败，其余照常导入（见 stores/vault.ts importMany）。
+		if in.Type == ItemTypePasskey {
+			if err := completeImportedPasskey(in.Fields); err != nil {
+				return nil, fmt.Errorf("prepare passkey item[%d]: %w", i, err)
+			}
+		}
 
 		id, err := newItemID()
 		if err != nil {
@@ -1299,6 +1591,8 @@ func (s *VaultService) BatchCreateItems(inputs []ItemPayload) ([]ItemSummary, er
 		in.UpdatedAt = now
 		in.Revision = 1
 		in.DeletedAt = nil
+		// 强制归属当前激活空间（payload 内 + DB 列双存）
+		in.SpaceID = s.currentSpaceID
 
 		plaintext, err := json.Marshal(in)
 		if err != nil {
@@ -1315,6 +1609,7 @@ func (s *VaultService) BatchCreateItems(inputs []ItemPayload) ([]ItemSummary, er
 			Payload:   ciphertext,
 			CreatedAt: now,
 			UpdatedAt: now,
+			SpaceID:   s.currentSpaceID,
 		})
 		totpSecret, _ := in.Fields["totp"].(string)
 		summaries = append(summaries, ItemSummary{
@@ -1376,6 +1671,11 @@ func (s *VaultService) UpdateItem(in ItemPayload) (*ItemSummary, error) {
 	if existing.DeletedAt != nil && *existing.DeletedAt > 0 {
 		return nil, ErrItemNotFound
 	}
+	// 空间校验：跨空间更新视作未找到（防前端越权改别的空间的条目）。
+	// currentSpaceID 为空时一律拒绝。
+	if s.currentSpaceID == "" || existing.SpaceID != s.currentSpaceID {
+		return nil, ErrItemNotFound
+	}
 	// 先把单调水位线推到既有项的 UpdatedAt，再生成新时间戳。
 	//
 	// 为什么这一步必要：
@@ -1397,6 +1697,9 @@ func (s *VaultService) UpdateItem(in ItemPayload) (*ItemSummary, error) {
 	in.UpdatedAt = now
 	// 防御性：前端不应该通过 UpdateItem 设置 DeletedAt（请走 DeleteItem 路径）
 	in.DeletedAt = nil
+	// 空间归属不可变：保留原 space_id（忽略前端传入的，不支持「移动到其他空间」）。
+	// 写进加密 payload；DB 列由 db.UpdateItem 保持不动（它不改 space_id）。
+	in.SpaceID = existing.SpaceID
 	// Revision 自增；从 existing payload 读出当前值需要解密，开销可接受
 	if existingPayload, err := s.decryptItem(existing); err == nil {
 		in.Revision = existingPayload.Revision + 1
@@ -1481,6 +1784,44 @@ func (s *VaultService) DeleteItem(id string) error {
 	if existingRow == nil {
 		return ErrItemNotFound
 	}
+	// 空间校验：跨空间删除视作未找到（防前端越权删别的空间的条目）。
+	// currentSpaceID 为空时一律拒绝。同步路径走 deleteItemAnySpace 绕过。
+	if s.currentSpaceID == "" || existingRow.SpaceID != s.currentSpaceID {
+		return ErrItemNotFound
+	}
+	return s.softDeleteRowLocked(id, existingRow)
+}
+
+// deleteItemAnySpace 软删除指定条目，**不做空间校验**（同步专用）
+//
+// 同步收到对端 tombstone 时需要删除本端任意空间的对应条目；走带空间校验的
+// DeleteItem 会把非当前空间的条目误判为「不存在」而漏删，导致两端状态发散。
+// 调用方：syncservice。自己取写锁。
+func (s *VaultService) deleteItemAnySpace(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.dek == nil {
+		return ErrVaultLocked
+	}
+	if id == "" {
+		return errors.New("item id cannot be empty")
+	}
+	existingRow, err := s.db.GetItem(id)
+	if err != nil {
+		return fmt.Errorf("get existing: %w", err)
+	}
+	if existingRow == nil {
+		return ErrItemNotFound
+	}
+	return s.softDeleteRowLocked(id, existingRow)
+}
+
+// softDeleteRowLocked 把一行软删除为 tombstone（写本端 DEK 加密的墓碑）
+//
+// 调用方须已持有 s.mu 写锁 + dek != nil + 已取得 existingRow。DeleteItem /
+// deleteItemAnySpace 共用此核心，差别仅在前者多一道空间校验。
+func (s *VaultService) softDeleteRowLocked(id string, existingRow *VaultItemRow) error {
 	existing, err := s.decryptItem(existingRow)
 	if err != nil {
 		// 行密文损坏 —— 无法构造有效 tombstone，回退物理删除
@@ -1550,11 +1891,35 @@ func (s *VaultService) IngestForeignPayload(id string, payload *ItemPayload, cre
 	if id == "" || payload == nil {
 		return false, errors.New("ingest: empty id or payload")
 	}
-	// 强制 id / 时间戳与对端一致；本端不重新生成 id（保持跨端可识别）
+
+	existing, err := s.db.GetItem(id)
+	if err != nil {
+		return false, fmt.Errorf("get existing: %w", err)
+	}
+
+	// 空间归属（space_id）：
+	//   - 本端已有此条目 → 保持本端原归属（sync 不改变 item 的空间，与
+	//     UpdateItem「空间不可变」一致），即使对端 payload 声称别的空间也不动。
+	//   - 本端没有（新条目）→ 用对端 payload 的 SpaceID；对端不支持 space
+	//     （旧版本，SpaceID 为空）则 fallback 到当前激活空间（可能仍为空=orphan，
+	//     待 ClaimOrphanItems 认领）。
+	// 在 marshal 之前确定，保证密文内 SpaceID 与 DB 列一致。
+	var spaceID string
+	if existing != nil {
+		spaceID = existing.SpaceID
+	} else {
+		spaceID = payload.SpaceID
+		if spaceID == "" {
+			spaceID = s.currentSpaceID
+		}
+	}
+
+	// 强制 id / 时间戳 / 空间与权威一致；本端不重新生成 id（保持跨端可识别）
 	payload.ID = id
 	payload.CreatedAt = createdAt
 	payload.UpdatedAt = updatedAt
 	payload.DeletedAt = nil
+	payload.SpaceID = spaceID
 	if payload.Fields == nil {
 		payload.Fields = map[string]any{}
 	}
@@ -1569,16 +1934,13 @@ func (s *VaultService) IngestForeignPayload(id string, payload *ItemPayload, cre
 		return false, fmt.Errorf("seal ingest payload: %w", err)
 	}
 
-	existing, err := s.db.GetItem(id)
-	if err != nil {
-		return false, fmt.Errorf("get existing: %w", err)
-	}
 	if existing == nil {
 		row := &VaultItemRow{
 			ID:        id,
 			Payload:   ciphertext,
 			CreatedAt: createdAt,
 			UpdatedAt: updatedAt,
+			SpaceID:   spaceID,
 		}
 		if err := s.db.InsertItem(row); err != nil {
 			return false, fmt.Errorf("insert: %w", err)
@@ -1588,6 +1950,8 @@ func (s *VaultService) IngestForeignPayload(id string, payload *ItemPayload, cre
 	if existing.UpdatedAt >= updatedAt {
 		return false, nil // LWW: 本端更新或一样新，不覆盖
 	}
+	// db.RestoreItem / db.UpdateItem 都不改 space_id 列；上面已令 spaceID =
+	// existing.SpaceID，列保持不变即正确，密文内 SpaceID 也已对齐。
 	if existing.DeletedAt != nil {
 		// 本端原是 tombstone，对端是活动版本且更新 → 复活
 		if err := s.db.RestoreItem(id, ciphertext, updatedAt); err != nil {
@@ -1600,6 +1964,7 @@ func (s *VaultService) IngestForeignPayload(id string, payload *ItemPayload, cre
 		Payload:   ciphertext,
 		CreatedAt: existing.CreatedAt,
 		UpdatedAt: updatedAt,
+		SpaceID:   spaceID,
 	}
 	if err := s.db.UpdateItem(row); err != nil {
 		return false, fmt.Errorf("update: %w", err)
@@ -1676,6 +2041,12 @@ func (s *VaultService) BatchGenerateTOTP(itemIDs []string) ([]TOTPResult, error)
 			results[i].Err = err.Error()
 			continue
 		}
+		// 空间隔离：跨空间条目不计算 TOTP（防越权拿别的空间的验证码）。
+		// payload.SpaceID 已由 decryptItem 用 DB 行 space_id 覆盖。
+		if s.currentSpaceID == "" || payload.SpaceID != s.currentSpaceID {
+			results[i].Err = ErrItemNotFound.Error()
+			continue
+		}
 
 		if payload.Type != ItemTypeLogin && payload.Type != ItemTypeTOTP {
 			results[i].Err = ErrTOTPSecretMissing.Error()
@@ -1714,8 +2085,13 @@ func (s *VaultService) decryptItem(row *VaultItemRow) (*ItemPayload, error) {
 		return nil, fmt.Errorf("unmarshal payload: %w", err)
 	}
 	WipeBytes(plaintext)
-	// 兜底：DB 行的 ID 永远是事实来源
+	// 兜底：DB 行的 ID / SpaceID 永远是读路径的事实来源。
+	//   - ID：防止 payload 内 id 与行 id 不一致（历史脏数据）
+	//   - SpaceID：payload 内的是同步传播副本，可能为空（v5 前写入的老条目、
+	//     或尚未 ClaimOrphanItems 认领的 orphan）；DB 明文列才是查询/隔离依据，
+	//     用它覆盖避免归属错乱。
 	payload.ID = row.ID
+	payload.SpaceID = row.SpaceID
 	return &payload, nil
 }
 
@@ -1911,6 +2287,9 @@ func (s *VaultService) DeleteAllAuditEntries() error {
 //     类型（包括历史遗留的 wallet）让用户备份/迁移时可以看到完整数据。
 //   - 返回的 CreatedAt / UpdatedAt 以 DB 行为事实来源（覆盖 payload 内的时间戳）。
 //
+// 空间隔离：导出受隔离约束，只导**当前激活空间**的条目（用户在某空间点导出，
+// 期望导出看到的那批）。未选择空间 → 空导出。
+//
 // 单条解密失败按 ListItems 的做法 log + 跳过，不让一条损坏让整次导出失败。
 func (s *VaultService) exportAllPayloads() ([]ItemPayload, error) {
 	s.mu.RLock()
@@ -1919,8 +2298,11 @@ func (s *VaultService) exportAllPayloads() ([]ItemPayload, error) {
 	if s.dek == nil {
 		return nil, ErrVaultLocked
 	}
+	if s.currentSpaceID == "" {
+		return []ItemPayload{}, nil
+	}
 
-	rows, err := s.db.ListItems()
+	rows, err := s.db.ListItemsBySpace(s.currentSpaceID)
 	if err != nil {
 		return nil, fmt.Errorf("list items: %w", err)
 	}

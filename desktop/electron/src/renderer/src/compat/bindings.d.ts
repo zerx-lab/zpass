@@ -34,6 +34,12 @@ declare module "@/../bindings/github.com/zerx-lab/zpass/zpass-desktop/vaultservi
 	export const DeleteItem: (...args: any[]) => Promise<any>;
 	export const BatchCreateItems: (...args: any[]) => Promise<any>;
 
+	export const SetActiveSpace: (...args: any[]) => Promise<any>;
+	export const GetActiveSpace: (...args: any[]) => Promise<any>;
+	export const ClaimOrphanItems: (...args: any[]) => Promise<any>;
+	export const CountItemsInSpace: (...args: any[]) => Promise<any>;
+	export const ClearSpace: (...args: any[]) => Promise<any>;
+
 	export const CreatePasskey: (...args: any[]) => Promise<any>;
 	export const ListPasskeys: (...args: any[]) => Promise<any>;
 	export const GetPasskey: (...args: any[]) => Promise<any>;

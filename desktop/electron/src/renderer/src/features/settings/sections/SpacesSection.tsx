@@ -1,12 +1,22 @@
 import * as RadixDialog from "@radix-ui/react-dialog";
 import { clsx } from "clsx";
-import { ImagePlus, LayoutGrid, Pencil, Plus, Trash2, X } from "lucide-react";
+import {
+	Eraser,
+	ImagePlus,
+	LayoutGrid,
+	Pencil,
+	Plus,
+	Trash2,
+	X,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/Button";
 import { SpaceAvatar } from "@/components/SpaceAvatar";
 import { resizeImageToDataUrl } from "@/lib/image";
+import { vaultApi } from "@/lib/vault-api";
 import { useSpacesStore } from "@/stores/spaces";
+import { useVaultStore } from "@/stores/vault";
 import {
 	ConfirmDialog,
 	DIALOG_CONTENT_BASE_CLASS,
@@ -378,8 +388,33 @@ export function SpacesSection() {
 	const createSpace = useSpacesStore((s) => s.createSpace);
 
 	const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+	const [clearTarget, setClearTarget] = useState<string | null>(null);
 	const [renameTarget, setRenameTarget] = useState<string | null>(null);
 	const [createOpen, setCreateOpen] = useState(false);
+	// 每个空间的真实条目数 —— 用于展示 + 禁止删除非空空间（删空间只删前端
+	// UI 记录，后端 vault_items 不会被清，非空删除会留下永久不可见的孤儿）。
+	const [itemCounts, setItemCounts] = useState<Record<string, number>>({});
+
+	// countItemsInSpace 按 spaceId 查询，不切换当前激活空间，逐个统计安全。
+	// spaces 变化（增删改）时重新统计。
+	useEffect(() => {
+		let cancelled = false;
+		void (async () => {
+			const entries = await Promise.all(
+				spaces.map(async (sp) => {
+					try {
+						return [sp.id, await vaultApi.countItemsInSpace(sp.id)] as const;
+					} catch {
+						return [sp.id, 0] as const;
+					}
+				}),
+			);
+			if (!cancelled) setItemCounts(Object.fromEntries(entries));
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [spaces]);
 
 	const renameSpace = spaces.find((s) => s.id === renameTarget);
 
@@ -403,7 +438,7 @@ export function SpacesSection() {
 			>
 				{spaces.map((sp) => {
 					const isActive = sp.id === activeSpaceId;
-					const itemCount: number = 0; // TODO: 后续接入 vault store 读取真实数量
+					const itemCount = itemCounts[sp.id] ?? 0;
 					return (
 						<div
 							key={sp.id}
@@ -441,11 +476,28 @@ export function SpacesSection() {
 								>
 									<Pencil size={13} strokeWidth={1.5} />
 								</Button>
+								{/* 清空账户 —— 仅在非空时可见（空空间无需清空）。可作用于
+								    任意空间，包括当前激活空间。 */}
+								{itemCount > 0 && (
+									<Button
+										variant="ghost"
+										size="icon"
+										title={t("settings_space_clear")}
+										onClick={() => setClearTarget(sp.id)}
+									>
+										<Eraser size={13} strokeWidth={1.5} />
+									</Button>
+								)}
 								{!isActive && spaces.length > 1 && (
 									<Button
 										variant="ghost"
 										size="icon"
-										title={t("settings_space_delete")}
+										title={
+											itemCount > 0
+												? t("settings_space_delete_nonempty")
+												: t("settings_space_delete")
+										}
+										disabled={itemCount > 0}
 										onClick={() => setDeleteTarget(sp.id)}
 									>
 										<Trash2 size={13} strokeWidth={1.5} />
@@ -466,7 +518,41 @@ export function SpacesSection() {
 				confirmLabel={t("settings_space_delete_confirm")}
 				cancelLabel={t("settings_space_cancel")}
 				onConfirm={() => {
-					if (deleteTarget) removeSpace(deleteTarget);
+					if (!deleteTarget) return;
+					// 兜底：非空空间不删（防 count 在打开弹窗后变化的 TOCTOU）
+					if ((itemCounts[deleteTarget] ?? 0) > 0) return;
+					removeSpace(deleteTarget);
+				}}
+			/>
+
+			{/* 清空空间确认弹窗 */}
+			<ConfirmDialog
+				open={!!clearTarget}
+				onClose={() => setClearTarget(null)}
+				title={t("settings_space_clear_title")}
+				message={t("settings_space_clear_msg", {
+					name: spaces.find((s) => s.id === clearTarget)?.name ?? "",
+					count: clearTarget ? (itemCounts[clearTarget] ?? 0) : 0,
+				})}
+				warning={t("settings_space_clear_warning")}
+				confirmLabel={t("settings_space_clear_confirm")}
+				cancelLabel={t("settings_space_cancel")}
+				onConfirm={() => {
+					const target = clearTarget;
+					if (!target) return;
+					void (async () => {
+						try {
+							await vaultApi.clearSpace(target);
+							// 乐观把该空间计数清零 —— 删除按钮随即从禁用变可用
+							setItemCounts((prev) => ({ ...prev, [target]: 0 }));
+							// 清空的是当前激活空间 → 列表视图需重载（已变空）
+							if (target === activeSpaceId) {
+								await useVaultStore.getState().reloadForSpace();
+							}
+						} catch (err) {
+							console.error("[SpacesSection] clearSpace failed:", err);
+						}
+					})();
 				}}
 			/>
 

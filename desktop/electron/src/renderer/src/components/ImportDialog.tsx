@@ -5,6 +5,7 @@ import {
 	CreditCard,
 	Download,
 	IdCard,
+	KeyRound,
 	LogIn,
 	StickyNote,
 	TerminalSquare,
@@ -341,6 +342,9 @@ export function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
 										)}
 										{stats && stats.ssh > 0 && (
 											<StatChip icon={TerminalSquare} label={t("import_count_ssh")} value={stats.ssh} />
+										)}
+										{stats && stats.passkey > 0 && (
+											<StatChip icon={KeyRound} label={t("import_count_passkey")} value={stats.passkey} />
 										)}
 										{skippedN > 0 && (
 											<StatChip

@@ -5,6 +5,7 @@ import { ThemeSync } from "@/app/ThemeSync";
 import { Shortcuts } from "@/app/Shortcuts";
 import { AutoLock } from "@/app/AutoLock";
 import { VaultEventSync } from "@/app/VaultEventSync";
+import { SpaceSync } from "@/app/SpaceSync";
 import { ApprovalToast } from "@/features/sshagent/ApprovalToast";
 
 /**
@@ -54,6 +55,11 @@ export function App() {
 			 */}
 			<LockSync />
 			<VaultEventSync />
+			{/*
+			 * 空间隔离同步 —— 把前端 activeSpaceId 推给后端 currentSpaceID，
+			 * 并在切空间 / 解锁时认领历史数据 + 重载列表。详见 SpaceSync.tsx。
+			 */}
+			<SpaceSync />
 			{/*
 			 * 自动锁定触发器 —— 监听窗口失焦（lockOnSwitch）和系统休眠
 			 * （lockOnSleep）事件，在偏好开关打开时自动调用 useLockStore.lock()。

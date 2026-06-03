@@ -23,12 +23,14 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"math/big"
 	"net"
+	"strconv"
 	"strings"
 )
 
@@ -246,8 +248,13 @@ func (s *VaultService) ListPasskeys(rpID string) ([]PasskeyCredentialDescriptor,
 	if s.dek == nil {
 		return nil, ErrVaultLocked
 	}
+	// 空间隔离：只枚举当前激活空间的 passkey（与 WebAuthn authenticator 的
+	// 枚举边界对齐）。未选择空间 → 空结果，不泄露任何 orphan。
+	if s.currentSpaceID == "" {
+		return []PasskeyCredentialDescriptor{}, nil
+	}
 
-	rows, err := s.db.ListItems()
+	rows, err := s.db.ListItemsBySpace(s.currentSpaceID)
 	if err != nil {
 		return nil, fmt.Errorf("list items: %w", err)
 	}
@@ -295,6 +302,10 @@ func (s *VaultService) GetPasskey(itemID string) (*PasskeyCredential, error) {
 		return nil, fmt.Errorf("get passkey item: %w", err)
 	}
 	if row == nil {
+		return nil, ErrPasskeyNotFound
+	}
+	// 空间隔离：跨空间的 passkey 视作未找到。
+	if s.currentSpaceID == "" || row.SpaceID != s.currentSpaceID {
 		return nil, ErrPasskeyNotFound
 	}
 	payload, err := s.decryptItem(row)
@@ -384,7 +395,16 @@ func (s *VaultService) SignPasskeyAssertion(req PasskeyAssertionRequest) (*Passk
 	}, nil
 }
 
+// insertEncryptedItemLocked 加密并插入一个新条目（passkey 注册经此创建）。
+//
+// 空间归属：忽略 payload 传入的 SpaceID，强制归当前激活空间（与 CreateItem
+// 一致）。currentSpaceID 为空时拒绝。payload 内与 DB 列同时写，保持双存一致。
+// 调用方须已持有 s.mu 写锁且 s.dek != nil。
 func (s *VaultService) insertEncryptedItemLocked(payload *ItemPayload) error {
+	if s.currentSpaceID == "" {
+		return ErrSpaceNotSelected
+	}
+	payload.SpaceID = s.currentSpaceID
 	plaintext, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal payload: %w", err)
@@ -399,6 +419,7 @@ func (s *VaultService) insertEncryptedItemLocked(payload *ItemPayload) error {
 		Payload:   ciphertext,
 		CreatedAt: payload.CreatedAt,
 		UpdatedAt: payload.UpdatedAt,
+		SpaceID:   s.currentSpaceID,
 	}
 	if err := s.db.InsertItem(row); err != nil {
 		return fmt.Errorf("insert item: %w", err)
@@ -406,6 +427,12 @@ func (s *VaultService) insertEncryptedItemLocked(payload *ItemPayload) error {
 	return nil
 }
 
+// updateEncryptedItemLocked 加密并整体覆盖现有条目（passkey signCount 更新经此）。
+//
+// 空间归属：**保留** payload 既有的 SpaceID（它在 findPasskeyLocked 的 decryptItem
+// 里已被设为 DB 行的 space_id），绝不用 currentSpaceID 覆盖 —— 否则跨空间认证
+// 会把 passkey「搬」到当前空间。db.UpdateItem 本就不改 space_id 列，row.SpaceID
+// 仅作表意。调用方须已持有 s.mu 写锁且 s.dek != nil。
 func (s *VaultService) updateEncryptedItemLocked(payload *ItemPayload) error {
 	plaintext, err := json.Marshal(payload)
 	if err != nil {
@@ -421,6 +448,7 @@ func (s *VaultService) updateEncryptedItemLocked(payload *ItemPayload) error {
 		Payload:   ciphertext,
 		CreatedAt: payload.CreatedAt,
 		UpdatedAt: payload.UpdatedAt,
+		SpaceID:   payload.SpaceID,
 	}
 	if err := s.db.UpdateItem(row); err != nil {
 		return fmt.Errorf("update item: %w", err)
@@ -429,7 +457,12 @@ func (s *VaultService) updateEncryptedItemLocked(payload *ItemPayload) error {
 }
 
 func (s *VaultService) findPasskeyLocked(rpID, credentialID string) (*VaultItemRow, *ItemPayload, error) {
-	rows, err := s.db.ListItems()
+	// 空间隔离：只在当前激活空间内查找 passkey 凭据（认证也受隔离约束）。
+	// 未选择空间 → 找不到。
+	if s.currentSpaceID == "" {
+		return nil, nil, ErrPasskeyNotFound
+	}
+	rows, err := s.db.ListItemsBySpace(s.currentSpaceID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("list items: %w", err)
 	}
@@ -837,4 +870,219 @@ func fieldUint32(fields map[string]any, key string) (uint32, error) {
 	default:
 		return 0, fmt.Errorf("%s has unsupported type %T", key, raw)
 	}
+}
+
+// ── Imported passkey completion ─────────────────────────────────
+//
+// completeImportedPasskey normalizes a passkey item that arrives through the
+// generic CreateItem / BatchCreateItems path carrying only raw key material —
+// typically the Bitwarden importer's output: a PKCS#8 private key plus a
+// GUID-form credentialId, with no public key. It derives the COSE / SPKI public
+// keys from the private key, converts the credentialId to raw-bytes base64url,
+// normalizes rpId / userId / signCount, and fills schema/algorithm defaults so
+// the stored item is byte-compatible with what CreatePasskey would have
+// produced — and therefore usable by ListPasskeys / SignPasskeyAssertion and the
+// browser bridge.
+//
+// It is idempotent: an already-complete passkey (both public-key fields present,
+// e.g. one created by CreatePasskey) is returned untouched. A passkey item with
+// no usable private key and no public keys is rejected.
+func completeImportedPasskey(fields map[string]any) error {
+	if fields == nil {
+		return errors.New("passkey item has no fields")
+	}
+
+	// Already-complete passkey (public material present) — leave key bytes as-is.
+	if fieldString(fields, "publicKeyCose") != "" && fieldString(fields, "publicKeySpki") != "" {
+		return nil
+	}
+
+	priv, privDER, err := decodePasskeyPrivateKeyFlexible(fieldString(fields, "privateKeyPkcs8"))
+	if err != nil {
+		return err
+	}
+	defer WipeBytes(privDER)
+
+	publicDER, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
+	if err != nil {
+		return fmt.Errorf("marshal imported passkey public key: %w", err)
+	}
+	publicCOSE, err := coseKeyES256(&priv.PublicKey)
+	if err != nil {
+		return err
+	}
+
+	credentialID, err := normalizeImportedCredentialID(fieldString(fields, "credentialId"))
+	if err != nil {
+		return err
+	}
+	rpID, err := normalizeRPID(fieldString(fields, "rpId"))
+	if err != nil {
+		return err
+	}
+	userIDBytes, err := decodeOrCreateUserID(fieldString(fields, "userId"))
+	if err != nil {
+		return err
+	}
+	signCount, err := importedSignCount(fields["signCount"])
+	if err != nil {
+		return err
+	}
+
+	fields["rpId"] = rpID
+	fields["credentialId"] = credentialID
+	fields["userId"] = b64url(userIDBytes)
+	fields["publicKeySpki"] = b64url(publicDER)
+	fields["publicKeyCose"] = b64url(publicCOSE)
+	fields["privateKeyPkcs8"] = b64url(privDER) // canonical base64url, no padding
+	fields["algorithm"] = passkeyAlgES256
+	fields["coseAlgorithm"] = passkeyCOSEAlgES256
+	fields["signCount"] = int64(signCount)
+	fields["schema"] = passkeySchemaVersion
+	fields["attestationFormat"] = "none"
+	fields["userVerification"] = true
+	if _, ok := fields["residentKey"]; !ok {
+		fields["residentKey"] = true
+	}
+	if !hasNonEmptyStringSlice(fields["transports"]) {
+		fields["transports"] = []string{"internal"}
+	}
+	if fieldString(fields, "createdBy") == "" {
+		fields["createdBy"] = "zpass-import"
+	}
+	return nil
+}
+
+// decodePasskeyPrivateKeyFlexible decodes a PKCS#8 ES256 (P-256) private key
+// that may be encoded in any base64/base64url variant (Bitwarden exports use
+// base64url without padding). The caller owns the returned DER bytes and must
+// wipe them.
+func decodePasskeyPrivateKeyFlexible(encoded string) (*ecdsa.PrivateKey, []byte, error) {
+	if strings.TrimSpace(encoded) == "" {
+		return nil, nil, errors.New("passkey item missing key material")
+	}
+	der, err := decodeBase64Flexible(encoded)
+	if err != nil {
+		return nil, nil, fmt.Errorf("decode passkey private key: %w", err)
+	}
+	key, err := x509.ParsePKCS8PrivateKey(der)
+	if err != nil {
+		WipeBytes(der)
+		return nil, nil, fmt.Errorf("parse passkey private key: %w", err)
+	}
+	priv, ok := key.(*ecdsa.PrivateKey)
+	if !ok || priv.Curve != elliptic.P256() {
+		WipeBytes(der)
+		return nil, nil, errors.New("imported passkey private key is not ES256 (P-256)")
+	}
+	return priv, der, nil
+}
+
+// normalizeImportedCredentialID accepts either a hyphenated GUID (Bitwarden's
+// credentialId form, whose 16 raw bytes are the WebAuthn rawId) or any base64
+// variant, and returns the canonical base64url (no padding) used everywhere
+// else in the passkey path.
+func normalizeImportedCredentialID(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", errors.New("passkey credentialId cannot be empty")
+	}
+	if looksLikeGUID(raw) {
+		b, err := guidToRawBytes(raw)
+		if err != nil {
+			return "", err
+		}
+		return b64url(b), nil
+	}
+	b, err := decodeBase64Flexible(raw)
+	if err != nil || len(b) == 0 {
+		return "", errors.New("passkey credentialId is neither a GUID nor base64url")
+	}
+	return b64url(b), nil
+}
+
+// decodeBase64Flexible tries the four base64 alphabets/padding combinations so
+// importers can hand us whatever variant their source produced.
+func decodeBase64Flexible(s string) ([]byte, error) {
+	s = strings.TrimSpace(s)
+	for _, enc := range []*base64.Encoding{
+		base64.RawURLEncoding,
+		base64.URLEncoding,
+		base64.RawStdEncoding,
+		base64.StdEncoding,
+	} {
+		if b, err := enc.DecodeString(s); err == nil {
+			return b, nil
+		}
+	}
+	return nil, errors.New("value is not valid base64 / base64url")
+}
+
+// looksLikeGUID reports whether s is a canonical 8-4-4-4-12 hex GUID.
+func looksLikeGUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, r := range s {
+		switch i {
+		case 8, 13, 18, 23:
+			if r != '-' {
+				return false
+			}
+		default:
+			if !isHexDigit(r) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// guidToRawBytes decodes a hyphenated GUID into its 16 raw bytes in RFC 4122
+// big-endian (string) order — the same order WebAuthn relying parties store as
+// the credential rawId.
+func guidToRawBytes(s string) ([]byte, error) {
+	b, err := hex.DecodeString(strings.ReplaceAll(s, "-", ""))
+	if err != nil {
+		return nil, fmt.Errorf("invalid GUID credentialId: %w", err)
+	}
+	if len(b) != 16 {
+		return nil, fmt.Errorf("GUID credentialId must be 16 bytes, got %d", len(b))
+	}
+	return b, nil
+}
+
+func isHexDigit(r rune) bool {
+	return (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')
+}
+
+// importedSignCount coerces a signCount that may arrive as a JSON number or a
+// string (Bitwarden stores counter as a string like "0").
+func importedSignCount(raw any) (uint32, error) {
+	if s, ok := raw.(string); ok {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return 0, nil
+		}
+		n, err := strconv.ParseUint(s, 10, 32)
+		if err != nil {
+			return 0, fmt.Errorf("invalid signCount %q", s)
+		}
+		return uint32(n), nil
+	}
+	return fieldUint32(map[string]any{"signCount": raw}, "signCount")
+}
+
+func hasNonEmptyStringSlice(raw any) bool {
+	switch xs := raw.(type) {
+	case []string:
+		return len(xs) > 0
+	case []any:
+		for _, x := range xs {
+			if s, ok := x.(string); ok && strings.TrimSpace(s) != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
