@@ -1,32 +1,24 @@
-import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { clsx } from "clsx";
 import {
 	ChevronsLeft,
 	ChevronsRight,
 	CreditCard,
-	Download,
 	IdCard,
 	KeyRound,
-	Lock,
 	LogIn,
-	LogOut,
 	ShieldCheck,
 	Smartphone,
 	StickyNote,
 	TerminalSquare,
-	Upload,
 	Vault as VaultIcon,
 } from "lucide-react";
-import { type ComponentType, type SVGProps, useState } from "react";
+import type { ComponentType, SVGProps } from "react";
 import { useTranslation } from "react-i18next";
-import { NavLink, useLocation, useNavigate } from "react-router-dom";
-import { ExportDialog } from "@/components/ExportDialog";
-import { ImportDialog } from "@/components/ImportDialog";
+import { NavLink, useLocation } from "react-router-dom";
 import { SpaceAvatar } from "@/components/SpaceAvatar";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
 import type { useSidebar } from "@/lib/useSidebar";
 import { useAccountStore } from "@/stores/account";
-import { useLockStore } from "@/stores/lock";
 import { useActiveSpace } from "@/stores/spaces";
 import { useVaultStore } from "@/stores/vault";
 
@@ -159,20 +151,11 @@ interface SidebarProps {
 
 export function Sidebar({ sidebarState }: SidebarProps) {
 	const { t } = useTranslation();
-	const navigate = useNavigate();
 
 	const { collapsed, toggle, resizeHandleRef, isDragging } = sidebarState;
 
-	const lock = useLockStore((s) => s.lock);
-
-	// 导入对话框开关 —— 由账户菜单的"导入数据"项触发
-	const [importOpen, setImportOpen] = useState(false);
-	// 导出对话框开关 —— 由账户菜单的"导出保险库"项触发
-	const [exportOpen, setExportOpen] = useState(false);
-
 	const accountMode = useAccountStore((s) => s.mode);
 	const accountUser = useAccountStore((s) => s.user);
-	const signOut = useAccountStore((s) => s.signOut);
 
 	// 当前激活空间 —— 底部头像与顶部 WorkspaceSwitcher 共用同一数据源，
 	// 确保切换/重命名/换图后侧边栏上下两处头像始终同步。
@@ -310,166 +293,57 @@ export function Sidebar({ sidebarState }: SidebarProps) {
 					/>
 				</nav>
 
-				{/* ── 账户头像菜单（底部）
-				 * border-top 改用 line-soft —— 实色 --line 在桌面 app 下显得"线太粗",
-				 * 软线只勾出层级而不抢视觉。
+				{/* ── 底部账户区 ──
+				 * 仅承担"收起/展开侧边栏"交互；账户与保险库相关操作已上移到顶部
+				 * WorkspaceSwitcher 的下拉菜单。
+				 * border-top 改用 line-soft —— 软线只勾出层级而不抢视觉。
 				 */}
 				<div className="shrink-0 border-t border-(--line-soft) bg-(--bg-elev) flex items-center gap-1.5 px-2.5 py-2">
-					{/* 头像按钮 + Dropdown 菜单
-					 *   收起态：
-					 *     - 左键 → 展开侧边栏
-					 *     - 右键 → 打开账户菜单
-					 *     - hover → 头像上叠加展开箭头提示
-					 *   展开态：
-					 *     - 左键/右键 → 打开账户菜单
+					{/* 头像按钮 —— 点击切换侧边栏收起/展开
+					 *   收起态：hover 时头像淡出、叠加展开箭头
+					 *   展开态：与右侧 ChevronsLeft 等效，点击收起
 					 */}
-					<DropdownMenu.Root modal={false}>
-						<DropdownMenu.Trigger asChild>
-							{/* 收起态：relative 容器，hover 时箭头叠层淡入
-							 * 头像内容统一走 <SpaceAvatar>，与顶部 WorkspaceSwitcher
-							 * 完全同步；按钮本身负责交互（点击/右键/dropdown trigger）。 */}
-							<button
-								type="button"
-								aria-label={
-									accountMode === "signed-in" && accountUser
-										? (accountUser.displayName ??
-											accountUser.email ??
-											activeSpace?.name ??
-											t("sidebar_local_mode"))
-										: (activeSpace?.name ?? t("sidebar_local_mode"))
-								}
-								onClick={(e) => {
-									if (collapsed) {
-										e.preventDefault();
-										toggle();
-									}
-								}}
-								onContextMenu={(e) => {
-									e.preventDefault();
-									e.currentTarget.click();
-								}}
-								className={clsx(
-									"relative flex shrink-0 items-center justify-center rounded-(--radius)",
-									"h-5 w-5",
-									"outline-none transition-colors overflow-hidden",
-									"focus:outline-none focus-visible:outline-none",
-									"data-[state=open]:ring-1 data-[state=open]:ring-(--text-4)",
-									collapsed ? "hover:ring-1 hover:ring-(--text-4) group" : "hover:opacity-80",
-								)}
-							>
-								{/* 空间头像 —— 收起态 hover 时淡出，让位给展开箭头 */}
-								<span
-									className={clsx(
-										"absolute inset-0 flex items-center justify-center transition-opacity duration-150",
-										collapsed && "group-hover:opacity-0",
-									)}
-								>
-									{activeSpace ? (
-										<SpaceAvatar
-											space={activeSpace}
-											className="h-full w-full rounded-(--radius) text-[9px]"
-										/>
-									) : (
-										// 兜底：spaces 还没初始化（首启 onboarding 前）
-										<span className="flex h-full w-full items-center justify-center rounded-(--radius) border border-(--line) bg-(--bg-active) font-mono text-[9px] text-(--text-2)">
-											·
-										</span>
-									)}
-								</span>
-								{/* 收起态 hover 时叠加展开箭头 */}
-								{collapsed && (
-									<ChevronsRight
-										size={10}
-										strokeWidth={2}
-										className="absolute inset-0 m-auto opacity-0 transition-opacity duration-150 group-hover:opacity-100 text-(--text-2)"
-									/>
-								)}
-							</button>
-						</DropdownMenu.Trigger>
-
-						<DropdownMenu.Portal
-							container={typeof document !== "undefined" ? document.getElementById("portal-root") : null}
+					<button
+						type="button"
+						onClick={toggle}
+						title={(collapsed ? t("sidebar_expand") : t("sidebar_collapse")) ?? ""}
+						aria-label={(collapsed ? t("sidebar_expand") : t("sidebar_collapse")) ?? ""}
+						className={clsx(
+							"relative flex shrink-0 items-center justify-center rounded-(--radius)",
+							"h-5 w-5",
+							"outline-none transition-colors overflow-hidden",
+							"focus:outline-none focus-visible:outline-none",
+							collapsed ? "hover:ring-1 hover:ring-(--text-4) group" : "hover:opacity-80",
+						)}
+					>
+						{/* 空间头像 —— 收起态 hover 时淡出，让位给展开箭头 */}
+						<span
+							className={clsx(
+								"absolute inset-0 flex items-center justify-center transition-opacity duration-150",
+								collapsed && "group-hover:opacity-0",
+							)}
 						>
-							<DropdownMenu.Content
-								side="top"
-								align="start"
-								sideOffset={8}
-								collisionPadding={8}
-								className={clsx(
-									"z-50 min-w-45 zpass-glass rounded-(--radius)",
-									"outline-none",
-									"origin-(--radix-dropdown-menu-content-transform-origin)",
-									"transition-[opacity,transform] duration-100 ease-out",
-									"data-[state=open]:scale-100 data-[state=open]:opacity-100",
-									"data-[state=closed]:scale-95 data-[state=closed]:opacity-0",
-								)}
-							>
-								{/* 账户信息头部 */}
-								<div className="px-3 py-2.5 border-b border-(--line)">
-									<p className="truncate text-[12px] font-medium text-(--text)">
-										{accountMode === "signed-in" && accountUser
-											? accountUser.displayName
-											: t("sidebar_local_mode")}
-									</p>
-									<p className="truncate text-[10.5px] text-(--text-3)">
-										{accountMode === "signed-in" && accountUser
-											? accountUser.email
-											: t("sidebar_local_mode_sub")}
-									</p>
-								</div>
-
-								<div className="p-1">
-									{/* 导入数据 */}
-									<DropdownMenu.Item
-										onSelect={() => setImportOpen(true)}
-										className="flex h-8 cursor-pointer items-center gap-2.5 rounded-sm px-2.5 text-[13px] text-(--text-2) outline-none transition-colors hover:bg-(--bg-hover) hover:text-(--text) focus:bg-(--bg-hover) focus:text-(--text)"
-									>
-										<Upload size={13} strokeWidth={1.5} className="shrink-0 text-(--text-3)" />
-										{t("menu_import")}
-									</DropdownMenu.Item>
-
-									{/* 导出明文备份 —— 二次主密码确认 + 系统 SaveFile dialog */}
-									<DropdownMenu.Item
-										onSelect={() => setExportOpen(true)}
-										className="flex h-8 cursor-pointer items-center gap-2.5 rounded-sm px-2.5 text-[13px] text-(--text-2) outline-none transition-colors hover:bg-(--bg-hover) hover:text-(--text) focus:bg-(--bg-hover) focus:text-(--text)"
-									>
-										<Download size={13} strokeWidth={1.5} className="shrink-0 text-(--text-3)" />
-										{t("menu_export")}
-									</DropdownMenu.Item>
-
-									<DropdownMenu.Separator className="my-1 h-px bg-(--line-soft)" />
-
-									{/* 锁定 */}
-									<DropdownMenu.Item
-										onSelect={lock}
-										className="flex h-8 cursor-pointer items-center gap-2.5 rounded-sm px-2.5 text-[13px] text-(--text-2) outline-none transition-colors hover:bg-(--bg-hover) hover:text-(--text) focus:bg-(--bg-hover) focus:text-(--text)"
-									>
-										<Lock size={13} strokeWidth={1.5} className="shrink-0 text-(--text-3)" />
-										{t("nav_lock_title")}
-									</DropdownMenu.Item>
-
-									{/* 退出/登录 */}
-									{accountMode === "signed-in" ? (
-										<DropdownMenu.Item
-											onSelect={signOut}
-											className="flex h-8 cursor-pointer items-center gap-2.5 rounded-sm px-2.5 text-[13px] text-(--text-2) outline-none transition-colors hover:bg-(--bg-hover) hover:text-(--danger) focus:bg-(--bg-hover) focus:text-(--danger)"
-										>
-											<LogOut size={13} strokeWidth={1.5} className="shrink-0 text-(--text-3)" />
-											{t("nav_sign_out")}
-										</DropdownMenu.Item>
-									) : (
-										<DropdownMenu.Item
-											onSelect={() => navigate("/signin")}
-											className="flex h-8 cursor-pointer items-center gap-2.5 rounded-sm px-2.5 text-[13px] text-(--text-2) outline-none transition-colors hover:bg-(--bg-hover) hover:text-(--text) focus:bg-(--bg-hover) focus:text-(--text)"
-										>
-											<LogIn size={13} strokeWidth={1.5} className="shrink-0 text-(--text-3)" />
-											{t("sidebar_signin")}
-										</DropdownMenu.Item>
-									)}
-								</div>
-							</DropdownMenu.Content>
-						</DropdownMenu.Portal>
-					</DropdownMenu.Root>
+							{activeSpace ? (
+								<SpaceAvatar
+									space={activeSpace}
+									className="h-full w-full rounded-(--radius) text-[9px]"
+								/>
+							) : (
+								// 兜底：spaces 还没初始化（首启 onboarding 前）
+								<span className="flex h-full w-full items-center justify-center rounded-(--radius) border border-(--line) bg-(--bg-active) font-mono text-[9px] text-(--text-2)">
+									·
+								</span>
+							)}
+						</span>
+						{/* 收起态 hover 时叠加展开箭头 */}
+						{collapsed && (
+							<ChevronsRight
+								size={10}
+								strokeWidth={2}
+								className="absolute inset-0 m-auto opacity-0 transition-opacity duration-150 group-hover:opacity-100 text-(--text-2)"
+							/>
+						)}
+					</button>
 
 					{/* 展开态のみ：账户名 + 收起按钮 */}
 					{!collapsed && (
@@ -516,11 +390,6 @@ export function Sidebar({ sidebarState }: SidebarProps) {
 					)}
 				/>
 			</div>
-
-			{/* 导入数据对话框 —— 挂在 Sidebar 根上，让 dropdown 关闭后 dialog 仍持续显示 */}
-			<ImportDialog open={importOpen} onOpenChange={setImportOpen} />
-			{/* 导出保险库对话框 —— 同上，独立于 dropdown 生命周期 */}
-			<ExportDialog open={exportOpen} onOpenChange={setExportOpen} />
 		</div>
 	);
 }

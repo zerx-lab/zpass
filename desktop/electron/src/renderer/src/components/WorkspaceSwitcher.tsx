@@ -3,14 +3,23 @@ import { clsx } from "clsx";
 import {
 	Check,
 	ChevronsUpDown,
+	Download,
+	Lock,
+	LogIn,
+	LogOut,
 	Plus,
 	Settings as SettingsIcon,
+	Upload,
 } from "lucide-react";
 import { forwardRef, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { ExportDialog } from "@/components/ExportDialog";
+import { ImportDialog } from "@/components/ImportDialog";
 import { SpaceAvatar } from "@/components/SpaceAvatar";
 import { SHORTCUTS, formatShortcut } from "@/lib/keys";
+import { useAccountStore } from "@/stores/account";
+import { useLockStore } from "@/stores/lock";
 import { type Space, useActiveSpace, useSpacesStore } from "@/stores/spaces";
 
 /**
@@ -226,6 +235,14 @@ function WorkspaceSwitcherMain({
 	const spaces = useSpacesStore((s) => s.spaces);
 	const switchSpace = useSpacesStore((s) => s.switchSpace);
 	const createSpace = useSpacesStore((s) => s.createSpace);
+
+	const lock = useLockStore((s) => s.lock);
+	const accountMode = useAccountStore((s) => s.mode);
+	const signOut = useAccountStore((s) => s.signOut);
+
+	// 导入 / 导出对话框开关 —— 由下方菜单项触发，渲染在 Root 子节点（独立于 Content 生命周期）
+	const [importOpen, setImportOpen] = useState(false);
+	const [exportOpen, setExportOpen] = useState(false);
 
 	// Radix 受控 open —— 需要能从"新建提交成功"后主动关闭菜单
 	const [open, setOpen] = useState(false);
@@ -507,11 +524,55 @@ function WorkspaceSwitcherMain({
 
 					<DropdownMenu.Separator className="mt-1 h-px bg-(--line-soft)" />
 
+					{/* 导入数据 —— 打开 ImportDialog */}
+					<DropdownMenu.Item
+						onSelect={() => setImportOpen(true)}
+						className={clsx(
+							"mx-1 mt-1 flex h-9 cursor-default items-center gap-2 rounded-sm px-2 text-[12.5px]",
+							"text-(--text-2) transition-colors select-none",
+							"outline-none focus:outline-none focus-visible:outline-none",
+							"data-highlighted:bg-(--bg-hover) data-highlighted:text-(--text)",
+						)}
+					>
+						<Upload size={13} strokeWidth={1.5} />
+						<span className="flex-1 text-left">{t("menu_import")}</span>
+					</DropdownMenu.Item>
+
+					{/* 导出保险库 —— 打开 ExportDialog（二次主密码确认 + 系统 SaveFile） */}
+					<DropdownMenu.Item
+						onSelect={() => setExportOpen(true)}
+						className={clsx(
+							"mx-1 mt-1 flex h-9 cursor-default items-center gap-2 rounded-sm px-2 text-[12.5px]",
+							"text-(--text-2) transition-colors select-none",
+							"outline-none focus:outline-none focus-visible:outline-none",
+							"data-highlighted:bg-(--bg-hover) data-highlighted:text-(--text)",
+						)}
+					>
+						<Download size={13} strokeWidth={1.5} />
+						<span className="flex-1 text-left">{t("menu_export")}</span>
+					</DropdownMenu.Item>
+
+					<DropdownMenu.Separator className="mt-1 h-px bg-(--line-soft)" />
+
+					{/* 锁定保险库 */}
+					<DropdownMenu.Item
+						onSelect={lock}
+						className={clsx(
+							"mx-1 mt-1 flex h-9 cursor-default items-center gap-2 rounded-sm px-2 text-[12.5px]",
+							"text-(--text-2) transition-colors select-none",
+							"outline-none focus:outline-none focus-visible:outline-none",
+							"data-highlighted:bg-(--bg-hover) data-highlighted:text-(--text)",
+						)}
+					>
+						<Lock size={13} strokeWidth={1.5} />
+						<span className="flex-1 text-left">{t("nav_lock_title")}</span>
+					</DropdownMenu.Item>
+
 					{/* 全局设置入口 —— 替代原左下角齿轮 */}
 					<DropdownMenu.Item
 						onSelect={openSettings}
 						className={clsx(
-							"mx-1 mt-1 mb-1 flex h-9 cursor-default items-center gap-2 rounded-sm px-2 text-[12.5px]",
+							"mx-1 mt-1 flex h-9 cursor-default items-center gap-2 rounded-sm px-2 text-[12.5px]",
 							"text-(--text-2) transition-colors select-none",
 							// 冗余保护：关闭 focus outline
 							"outline-none focus:outline-none focus-visible:outline-none",
@@ -528,8 +589,46 @@ function WorkspaceSwitcherMain({
 							{formatShortcut(SHORTCUTS.SETTINGS)}
 						</span>
 					</DropdownMenu.Item>
+
+					<DropdownMenu.Separator className="mt-1 h-px bg-(--line-soft)" />
+
+					{/* 登录 / 退出 —— 跟随账户状态切换 */}
+					{accountMode === "signed-in" ? (
+						<DropdownMenu.Item
+							onSelect={signOut}
+							className={clsx(
+								"mx-1 mt-1 mb-1 flex h-9 cursor-default items-center gap-2 rounded-sm px-2 text-[12.5px]",
+								"text-(--text-2) transition-colors select-none",
+								"outline-none focus:outline-none focus-visible:outline-none",
+								"data-highlighted:bg-(--bg-hover) data-highlighted:text-(--danger)",
+							)}
+						>
+							<LogOut size={13} strokeWidth={1.5} />
+							<span className="flex-1 text-left">{t("nav_sign_out")}</span>
+						</DropdownMenu.Item>
+					) : (
+						<DropdownMenu.Item
+							onSelect={() => {
+								setOpen(false);
+								navigate("/signin");
+							}}
+							className={clsx(
+								"mx-1 mt-1 mb-1 flex h-9 cursor-default items-center gap-2 rounded-sm px-2 text-[12.5px]",
+								"text-(--text-2) transition-colors select-none",
+								"outline-none focus:outline-none focus-visible:outline-none",
+								"data-highlighted:bg-(--bg-hover) data-highlighted:text-(--text)",
+							)}
+						>
+							<LogIn size={13} strokeWidth={1.5} />
+							<span className="flex-1 text-left">{t("sidebar_signin")}</span>
+						</DropdownMenu.Item>
+					)}
 				</DropdownMenu.Content>
 			</DropdownMenu.Portal>
+
+			{/* 导入 / 导出对话框 —— Root 子节点，菜单关闭后对话框仍持续显示；各自有独立 Portal */}
+			<ImportDialog open={importOpen} onOpenChange={setImportOpen} />
+			<ExportDialog open={exportOpen} onOpenChange={setExportOpen} />
 		</DropdownMenu.Root>
 	);
 }
