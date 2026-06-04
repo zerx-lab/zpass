@@ -205,7 +205,7 @@ export function OnboardingPage() {
 								strokeWidth={1.5}
 								className="text-(--text-4)"
 							/>
-							<div className="flex h-8 w-8 items-center justify-center rounded-(--radius) border border-(--line) bg-(--bg-elev-2) font-mono text-[13px] font-semibold text-(--text)">
+							<div className="flex h-8 w-8 items-center justify-center rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) font-mono text-[13px] font-semibold text-(--text)">
 								Z
 							</div>
 						</div>

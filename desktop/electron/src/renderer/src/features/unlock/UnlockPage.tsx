@@ -356,7 +356,7 @@ export function UnlockPage() {
 					 *     ring，避免网页味）
 					 * 聚焦反馈由 CSS :focus-within 驱动，不再需要 React focused state
 					 */}
-					<label className="zpass-search-focus flex items-center gap-2 rounded-(--radius) border border-(--line) bg-(--bg-elev-2) px-2.5 py-2 transition-[box-shadow,border-color] duration-150">
+					<label className="zpass-search-focus flex items-center gap-2 rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) px-2.5 py-2 transition-[box-shadow,border-color] duration-150">
 						<Lock size={13} className="text-(--text-3)" />
 						<input
 							ref={inputRef}
@@ -396,7 +396,7 @@ export function UnlockPage() {
 					 * 会在错误区显示提示，用户能理解差异。
 					 */}
 					{isCreate && (
-						<label className="zpass-search-focus flex items-center gap-2 rounded-(--radius) border border-(--line) bg-(--bg-elev-2) px-2.5 py-2 transition-[box-shadow,border-color] duration-150">
+						<label className="zpass-search-focus flex items-center gap-2 rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) px-2.5 py-2 transition-[box-shadow,border-color] duration-150">
 							<Lock size={13} className="text-(--text-3)" />
 							<input
 								type={reveal ? "text" : "password"}

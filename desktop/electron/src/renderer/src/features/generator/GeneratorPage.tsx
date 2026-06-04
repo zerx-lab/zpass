@@ -207,7 +207,7 @@ function Slider({
 							if (!Number.isNaN(n)) onChange(clampInput(n));
 						}}
 						onBlur={commitDraft}
-						className="w-20 rounded-(--radius) border border-(--line) bg-(--bg-elev-2) px-2 py-0.5 text-right font-mono text-[14px] tabular-nums text-(--text) outline-none focus:border-(--text-3)"
+						className="w-20 rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) px-2 py-0.5 text-right font-mono text-[14px] tabular-nums text-(--text) outline-none focus:border-(--text-3)"
 						aria-label={label}
 					/>
 				) : (
@@ -282,9 +282,9 @@ function Toggle({
 			onClick={() => onChange(!on)}
 			className="
 				group flex w-full items-center justify-between gap-3
-				rounded-(--radius) border border-(--line) bg-(--bg-elev-2)
+				rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2)
 				px-3 py-2.5 text-left transition-colors
-				hover:border-(--text-3)
+				hover:bg-(--bg-hover)
 			"
 			role="switch"
 			aria-checked={on}
@@ -307,8 +307,8 @@ function Toggle({
 				<span
 					className={
 						on
-							? "absolute left-3.5 h-3 w-3 rounded-full bg-(--bg) transition-all"
-							: "absolute left-0.5 h-3 w-3 rounded-full bg-(--text-3) transition-all"
+							? "absolute left-3.5 h-3 w-3 rounded-full bg-(--bg) transition-[left,background-color] duration-150"
+							: "absolute left-0.5 h-3 w-3 rounded-full bg-(--text-3) transition-[left,background-color] duration-150"
 					}
 				/>
 			</span>
@@ -344,7 +344,7 @@ function ModeSegment({
 		<div
 			className="
 				inline-flex items-center gap-1
-				rounded-(--radius) border border-(--line) bg-(--bg-elev-2) p-1
+				rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) p-1
 			"
 		>
 			{modes.map((m) => {
@@ -556,7 +556,7 @@ export function GeneratorPage() {
 							<h1 className="text-[22px] font-semibold tracking-tight text-(--text)">
 								{t("gen_title")}
 							</h1>
-							<span className="inline-flex items-center gap-1.5 rounded-full border border-(--line) bg-(--bg-elev-2) px-2.5 py-0.5 font-mono text-[10.5px] tracking-wider text-(--text-3) uppercase">
+							<span className="inline-flex items-center gap-1.5 rounded-full border border-(--line-soft) bg-(--bg-elev-2) px-2.5 py-0.5 font-mono text-[10.5px] tracking-wider text-(--text-3) uppercase">
 								<Sparkles size={10} strokeWidth={1.5} />
 								{t("gen_badge")}
 							</span>
@@ -599,7 +599,7 @@ export function GeneratorPage() {
 						<button
 							type="button"
 							onClick={regen}
-							className="inline-flex items-center gap-1.5 rounded-(--radius) border border-(--line) bg-(--bg-elev) px-3 py-2 text-[12.5px] text-(--text-2) transition-colors hover:border-(--text-3) hover:text-(--text)"
+							className="inline-flex items-center gap-1.5 rounded-(--radius) border border-(--line) bg-(--bg-elev) px-3 py-2 text-[12.5px] text-(--text-2) transition-colors hover:bg-(--bg-hover) hover:text-(--text)"
 						>
 							<RefreshCw size={13} strokeWidth={1.5} />
 							<span>{t("gen_regen")}</span>
@@ -632,7 +632,7 @@ export function GeneratorPage() {
 							<button
 								type="button"
 								onClick={onSaveToVault}
-								className="inline-flex items-center gap-1.5 rounded-(--radius) border border-(--line) bg-(--bg-elev) px-3 py-2 text-[12.5px] text-(--text-2) transition-colors hover:border-(--text-3) hover:text-(--text)"
+								className="inline-flex items-center gap-1.5 rounded-(--radius) border border-(--line) bg-(--bg-elev) px-3 py-2 text-[12.5px] text-(--text-2) transition-colors hover:bg-(--bg-hover) hover:text-(--text)"
 							>
 								<Save size={13} strokeWidth={1.5} />
 								<span>{t("gen_save")}</span>
@@ -752,7 +752,7 @@ export function GeneratorPage() {
 													className={
 														active
 															? "h-7 w-9 rounded-(--radius) border border-(--text) bg-(--text) font-mono text-[12px] text-(--bg)"
-															: "h-7 w-9 rounded-(--radius) border border-(--line) bg-(--bg-elev-2) font-mono text-[12px] text-(--text-2) hover:border-(--text-3) hover:text-(--text)"
+															: "h-7 w-9 rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) font-mono text-[12px] text-(--text-2) transition-colors hover:bg-(--bg-hover) hover:text-(--text)"
 													}
 												>
 													{label}

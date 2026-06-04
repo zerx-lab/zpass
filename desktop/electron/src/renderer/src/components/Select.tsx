@@ -167,12 +167,18 @@ state=open]`，Radix 自动加）—— border-(--text-2)
 				className={clsx(
 					"group inline-flex items-center gap-1.5 rounded-(--radius) border bg-(--bg-elev-2)",
 					"px-2.5 transition-[background-color,border-color,box-shadow,color] duration-150",
-					size === "sm" ? "h-8 min-w-40" : "h-9 min-w-40",
+					size === "sm" ? "h-8" : "h-9",
+					// 默认 min-w-40 仅在调用方未自带 min-w 时生效 —— 避免与传入的
+					// `min-w-0` / `min-w-[…]` 在同一 utilities layer 里靠源序决胜（不可控）。
+					// 紧凑/流式场景由调用方用自己的 min-w 覆盖。
+					!className?.includes("min-w") && "min-w-40",
 					"border-(--line) text-(--text)",
 					// 冗余保护：显式关闭 focus outline —— 即便 globals.css 未来被改，
 					// Select 触发按钮也不会出现双层描边（border + outline）
 					"outline-none focus:outline-none focus-visible:outline-none",
-					"hover:border-(--text-3) hover:bg-(--bg-hover) hover:shadow-sm",
+					// hover 仅换底色 + 微阴影，不动 border 色（桌面 app 不做边框色 hover 反馈）；
+					// 仅 open（committed 态）才允许 border 变化
+					"hover:bg-(--bg-hover) hover:shadow-sm",
 					"data-[state=open]:border-(--text-2) data-[state=open]:bg-(--bg-active) data-[state=open]:shadow-sm",
 					"data-disabled:cursor-not-allowed data-disabled:opacity-60 data-disabled:hover:border-(--line) data-disabled:hover:bg-(--bg-elev-2) data-disabled:hover:shadow-none",
 					className,

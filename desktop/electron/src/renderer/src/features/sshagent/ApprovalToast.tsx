@@ -23,6 +23,7 @@ import {
 	X as XIcon,
 } from "lucide-react";
 import { Button } from "@/components/Button";
+import { Select } from "@/components/Select";
 import {
 	approveSignRequest,
 	declineSignRequest,
@@ -162,7 +163,7 @@ function ApprovalCard({
 	);
 
 	return (
-		<div className="overflow-hidden rounded-xl border border-(--line) bg-(--bg-elev) shadow-2xl">
+		<div className="zpass-toast overflow-hidden rounded-xl">
 			<div className="flex items-center gap-2 border-b border-(--line-soft) px-4 py-2.5">
 				<AlertTriangle
 					size={14}
@@ -232,24 +233,21 @@ function ApprovalCard({
 
 				{/* 信任选项 */}
 				<div className="flex flex-col gap-1.5">
-					<label
-						htmlFor={`trust-${request.id}`}
-						className="text-[11.5px] text-(--text-3)"
-					>
+					<span className="text-[11.5px] text-(--text-3)">
 						{t("approval_trust_label")}
-					</label>
-					<select
-						id={`trust-${request.id}`}
-						value={trustSeconds}
-						onChange={(e) => setTrustSeconds(Number(e.target.value))}
-						className="rounded-md border border-(--line) bg-(--bg) px-2.5 py-1.5 text-[12px] text-(--text) outline-none transition-colors focus:border-(--text-3)"
-					>
-						{trustOptions.map((opt) => (
-							<option key={opt.value} value={opt.value}>
-								{opt.label}
-							</option>
-						))}
-					</select>
+					</span>
+					{/* Radix Select（替换原生 <select>，三端外观一致）。值是秒数（number），
+					    与 Select 的 string value 做 String↔Number 映射。 */}
+					<Select
+						ariaLabel={t("approval_trust_label")}
+						value={String(trustSeconds)}
+						onChange={(v) => setTrustSeconds(Number(v))}
+						options={trustOptions.map((opt) => ({
+							value: String(opt.value),
+							label: opt.label,
+						}))}
+						className="min-w-0 w-full"
+					/>
 				</div>
 
 				{/* 按钮 */}

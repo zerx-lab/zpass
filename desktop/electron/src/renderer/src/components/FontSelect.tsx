@@ -73,7 +73,8 @@ export function FontSelect({
 						"transition-[background-color,border-color,box-shadow,color] duration-150",
 						"border-(--line) text-(--text)",
 						"outline-none focus:outline-none focus-visible:outline-none",
-						"hover:border-(--text-3) hover:bg-(--bg-hover) hover:shadow-sm",
+						// hover 仅换底色 + 微阴影，不动 border 色；open 才允许 border 变化
+						"hover:bg-(--bg-hover) hover:shadow-sm",
 						// open 态复用 data-[state=open] 等价：通过 aria-expanded 驱动
 						open && "border-(--text-2) bg-(--bg-active) shadow-sm",
 						"disabled:cursor-not-allowed disabled:opacity-60",

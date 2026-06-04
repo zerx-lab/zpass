@@ -52,7 +52,7 @@ export function SpaceAvatar({
 			<div
 				className={clsx(
 					"flex shrink-0 items-center justify-center overflow-hidden",
-					"border border-(--line) bg-(--bg-elev-2)",
+					"border border-(--line-soft) bg-(--bg-elev-2)",
 					className,
 				)}
 			>

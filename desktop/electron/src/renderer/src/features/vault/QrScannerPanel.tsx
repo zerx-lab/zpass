@@ -232,7 +232,7 @@ export function QrScannerPanel({ onClose, onApply }: QrScannerPanelProps) {
 
 	return (
 		<section
-			className="flex flex-col gap-3 rounded-(--radius) border border-(--line) bg-(--bg-elev-2) p-4"
+			className="flex flex-col gap-3 rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) p-4"
 			aria-label={t("qr_panel_title")}
 		>
 			{/* 顶部标题 + 关闭 */}
@@ -420,7 +420,7 @@ function ResultOk({
 						onClick={onToggleReveal}
 						className="shrink-0 text-(--text-3) hover:text-(--text) focus:outline-none"
 					>
-						<span className="text-[11px] underline-offset-2 hover:underline">
+						<span className="text-[11px]">
 							{revealSecret ? t("detail_hide") : t("detail_reveal")}
 						</span>
 					</button>

@@ -49,6 +49,7 @@ import * as RadixDialog from "@radix-ui/react-dialog";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { clsx } from "clsx";
 import {
+	Check,
 	ChevronDown,
 	ChevronRight,
 	Copy,
@@ -88,6 +89,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/Button";
 import { ItemIcon } from "@/components/ItemIcon";
 import { PasswordStrength } from "@/components/PasswordStrength";
+import { Select } from "@/components/Select";
 import { TotpField } from "@/features/vault/TotpField";
 import { writeClipboard, writeClipboardEphemeral } from "@/lib/clipboard";
 import { formatShortcut, KEY_SYMBOL, SHORTCUTS } from "@/lib/keys";
@@ -1219,7 +1221,7 @@ export function VaultPage() {
 					 */}
 					<div className="relative min-w-0 flex-1">
 						<label
-							className="flex h-8 w-full items-center gap-2 rounded-(--radius) border border-(--line) bg-(--bg-elev-2) pl-2.5 text-(--text-3) outline-none focus-within:outline-none"
+							className="flex h-8 w-full items-center gap-2 rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) pl-2.5 text-(--text-3) outline-none focus-within:outline-none"
 							style={{ paddingRight: query ? "1.75rem" : "0.625rem" }}
 							htmlFor="vault-search-input"
 						>
@@ -1765,7 +1767,7 @@ function EmptyDetail() {
 //   - 与底部状态栏（条数 / 锁定）、详情顶部元数据档位一致，全站节奏统一。
 function KbdChip({ keys }: { keys: string }) {
 	return (
-		<kbd className="inline-flex h-4.5 items-center rounded-sm border border-(--line) bg-(--bg-elev-2) px-1.5 font-mono text-[10.5px] leading-none tracking-wider text-(--text-2)">
+		<kbd className="inline-flex h-4.5 items-center rounded-sm border border-(--line-soft) bg-(--bg-elev-2) px-1.5 font-mono text-[10.5px] leading-none tracking-wider text-(--text-2)">
 			{keys}
 		</kbd>
 	);
@@ -1900,7 +1902,7 @@ function VaultDetail({
 							<span className="font-mono text-[10.5px] tracking-wider text-(--text-3) uppercase">
 								{t("detail_password")}
 							</span>
-							<div className="flex items-center gap-2 rounded-(--radius) border border-(--line) bg-(--bg-elev-2) px-3 py-2.5">
+							<div className="flex items-center gap-2 rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) px-3 py-2.5">
 								<KeyRound
 									size={13}
 									strokeWidth={1.5}
@@ -1976,7 +1978,7 @@ function VaultDetail({
 							<span className="font-mono text-[10.5px] tracking-wider text-(--text-3) uppercase">
 								{t("detail_notes")}
 							</span>
-							<div className="zpass-selectable rounded-(--radius) border border-(--line) bg-(--bg-elev-2) p-3 text-sm whitespace-pre-wrap text-(--text-2)">
+							<div className="zpass-selectable rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) p-3 text-sm whitespace-pre-wrap text-(--text-2)">
 								{notes}
 							</div>
 						</div>
@@ -2088,7 +2090,7 @@ function DetailField({
 			<span className="font-mono text-[10.5px] tracking-wider text-(--text-3) uppercase">
 				{label}
 			</span>
-			<div className="flex items-center gap-2 rounded-(--radius) border border-(--line) bg-(--bg-elev-2) px-3 py-2.5">
+			<div className="flex items-center gap-2 rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) px-3 py-2.5">
 				<span
 					className={
 						mono
@@ -2171,7 +2173,7 @@ function CustomFieldRow({
 				<span className="font-mono text-[10.5px] tracking-wider text-(--text-3) uppercase">
 					{label}
 				</span>
-				<div className="flex items-center gap-2 rounded-(--radius) border border-(--line) bg-(--bg-elev-2) px-3 py-2.5">
+				<div className="flex items-center gap-2 rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) px-3 py-2.5">
 					<span
 						className={clsx(
 							"inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border",
@@ -2201,7 +2203,7 @@ function CustomFieldRow({
 				<span className="font-mono text-[10.5px] tracking-wider text-(--text-3) uppercase">
 					{label}
 				</span>
-				<div className="flex items-center gap-2 rounded-(--radius) border border-(--line) bg-(--bg-elev-2) px-3 py-2.5">
+				<div className="flex items-center gap-2 rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) px-3 py-2.5">
 					<KeyRound
 						size={13}
 						strokeWidth={1.5}
@@ -2225,7 +2227,7 @@ function CustomFieldRow({
 			<span className="font-mono text-[10.5px] tracking-wider text-(--text-3) uppercase">
 				{label}
 			</span>
-			<div className="flex items-center gap-2 rounded-(--radius) border border-(--line) bg-(--bg-elev-2) px-3 py-2.5">
+			<div className="flex items-center gap-2 rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) px-3 py-2.5">
 				<span className="zpass-selectable flex-1 truncate font-mono text-sm text-(--text)">
 					{display}
 				</span>
@@ -2814,7 +2816,7 @@ function ItemDialog({
 														onChange={(e) => setField(def.key, e.target.value)}
 														placeholder={placeholder}
 														rows={5}
-														className="w-full resize-y rounded-(--radius) border border-(--line) bg-(--bg-elev-2) px-3 py-2 font-mono text-sm text-(--text) outline-none placeholder:text-(--text-4) focus:border-(--text-3)"
+														className="w-full resize-y rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) px-3 py-2 font-mono text-sm text-(--text) outline-none placeholder:text-(--text-4) focus:border-(--text-3)"
 													/>
 												) : (
 													<button
@@ -2845,8 +2847,8 @@ function ItemDialog({
 												}
 												className={
 													def.mono
-														? "w-full resize-y rounded-(--radius) border border-(--line) bg-(--bg-elev-2) px-3 py-2 font-mono text-sm text-(--text) outline-none placeholder:text-(--text-4) focus:border-(--text-3)"
-														: "w-full resize-y rounded-(--radius) border border-(--line) bg-(--bg-elev-2) px-3 py-2 text-sm text-(--text) outline-none placeholder:text-(--text-4) focus:border-(--text-3)"
+														? "w-full resize-y rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) px-3 py-2 font-mono text-sm text-(--text) outline-none placeholder:text-(--text-4) focus:border-(--text-3)"
+														: "w-full resize-y rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) px-3 py-2 text-sm text-(--text) outline-none placeholder:text-(--text-4) focus:border-(--text-3)"
 												}
 											/>
 										</div>
@@ -3060,7 +3062,7 @@ function DialogField({
 			</span>
 			{/* 聚焦色用 --text-3 而不是 --text：light 下 --text 接近纯黑
 			 * 会产生"贴脸黑框"，与 VaultPage 搜索框统一为中性灰反馈。 */}
-			<div className="flex items-center gap-2 rounded-(--radius) border border-(--line) bg-(--bg-elev-2) px-3 py-2.5 transition-colors focus-within:border-(--text-3)">
+			<div className="flex items-center gap-2 rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) px-3 py-2.5 transition-colors focus-within:border-(--text-3)">
 				{children}
 			</div>
 		</div>
@@ -3235,21 +3237,19 @@ function CustomFieldEditorRow({
 		"flex-1 border-0 bg-transparent text-sm text-(--text) outline-none placeholder:text-(--text-4)";
 
 	return (
-		<div className="flex flex-col gap-1.5 rounded-(--radius) border border-(--line) bg-(--bg-elev-2) p-2.5">
+		<div className="flex flex-col gap-1.5 rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) p-2.5">
 			{/* 顶部：类型选择 + 名称 + 删除 */}
 			<div className="flex items-center gap-2">
-				<select
+				<Select<CustomFieldType>
+					ariaLabel={t(`custom_fields_type_${field.type}`)}
 					value={field.type}
-					onChange={(e) => onChangeType(e.target.value as CustomFieldType)}
-					className="rounded-(--radius) border border-(--line) bg-(--bg) px-2 py-1 font-mono text-[11px] text-(--text-2) outline-none focus:border-(--text-3)"
-					title={t(`custom_fields_type_${field.type}`)}
-				>
-					{CUSTOM_FIELD_TYPES.map((tp) => (
-						<option key={tp} value={tp}>
-							{t(`custom_fields_type_${tp}`)}
-						</option>
-					))}
-				</select>
+					onChange={onChangeType}
+					options={CUSTOM_FIELD_TYPES.map((tp) => ({
+						value: tp,
+						label: t(`custom_fields_type_${tp}`),
+					}))}
+					className="min-w-[6.5rem] shrink-0"
+				/>
 				<input
 					type="text"
 					value={field.name}
@@ -3308,19 +3308,30 @@ function CustomFieldEditorRow({
 					</>
 				)}
 				{field.type === "boolean" && (
-					<label className="flex cursor-pointer items-center gap-2 text-sm text-(--text-2)">
-						<input
-							type="checkbox"
-							checked={Boolean(field.value)}
-							onChange={(e) => onUpdate({ value: e.target.checked })}
-							className="h-4 w-4 cursor-pointer accent-(--text)"
-						/>
+					// 自绘复选框（替换原生 checkbox，三端一致 + 命中黑白主色）
+					<button
+						type="button"
+						role="checkbox"
+						aria-checked={Boolean(field.value)}
+						onClick={() => onUpdate({ value: !field.value })}
+						className="flex items-center gap-2 text-sm text-(--text-2)"
+					>
+						<span
+							className={clsx(
+								"flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border transition-colors",
+								field.value
+									? "border-(--text) bg-(--text) text-(--bg)"
+									: "border-(--line) bg-(--bg)",
+							)}
+						>
+							{field.value && <Check size={11} strokeWidth={2.5} />}
+						</span>
 						<span>
 							{field.value
 								? t("custom_fields_bool_on")
 								: t("custom_fields_bool_off")}
 						</span>
-					</label>
+					</button>
 				)}
 				{field.type === "linked" &&
 					(linkable.length === 0 ? (
@@ -3328,17 +3339,13 @@ function CustomFieldEditorRow({
 							{t("custom_fields_link_unavailable")}
 						</span>
 					) : (
-						<select
+						<Select
+							ariaLabel={t("custom_fields_type_linked")}
 							value={typeof field.value === "string" ? field.value : ""}
-							onChange={(e) => onUpdate({ value: e.target.value })}
-							className="flex-1 rounded-(--radius) border border-(--line) bg-(--bg) px-2 py-1 font-mono text-[12px] text-(--text-2) outline-none focus:border-(--text-3)"
-						>
-							{linkable.map((k) => (
-								<option key={k} value={k}>
-									{k}
-								</option>
-							))}
-						</select>
+							onChange={(v) => onUpdate({ value: v })}
+							options={linkable.map((k) => ({ value: k, label: k }))}
+							className="min-w-0 flex-1"
+						/>
 					))}
 			</div>
 		</div>

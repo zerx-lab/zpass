@@ -235,6 +235,16 @@ textarea,
 	cursor: auto;
 }
 
+/* 可点击元素同时挂 .zpass-selectable（如 TOTP 大数字按钮：既要可复制选中、
+ * 又是点击复制的按钮）时，上面的 `cursor: auto` 会让其渲染成 I-beam 文字光标。
+ * 这条更高特异性的规则把光标拉回手型，保住"这是个按钮"的语义。
+ * 注：本块整体在 unlayered 区，优先级高于 Tailwind @layer utilities 的 cursor-*，
+ * 因此必须在 CSS 里显式覆盖而非靠 className。 */
+button.zpass-selectable,
+.zpass-selectable button {
+	cursor: pointer;
+}
+
 /* 选区 —— 半透明叠加，2026 主流做法（Linear/Raycast/Notion 同款）
  * 不再用 accent 实色压底，避免 dark 主题下选中文字像探照灯一样刺眼
  */
@@ -377,14 +387,39 @@ select:focus-visible,
 	background: transparent;
 }
 
+/* 关掉增减箭头按钮（轨道两端的小三角）—— Linux / Windows 的 Chromium 默认会
+ * 渲染它们，是最显眼的 web/系统滚动条破绽。macOS overlay 本就没有。
+ * display:none 仍可能保留占位，叠加 0 尺寸彻底抹掉。 */
+*::-webkit-scrollbar-button {
+	display: none;
+	width: 0;
+	height: 0;
+}
+
+/* 纵横滚动条交角的灰块是典型 web tell —— 透明化 */
+*::-webkit-scrollbar-corner {
+	background: transparent;
+}
+
+/* thumb 用 2px 透明边 + background-clip:padding-box 做内缩。
+ * 旧版用 `border: 2px solid var(--bg)`，但 sidebar / 对话框 / 设置面板底色是
+ * --bg-elev(-2)，那圈 --bg 边会露出色差（web 破绽）。透明边 + padding-box 让
+ * 可见 thumb 收到 ~6px 且与任何宿主底色无关，观感更原生。
+ * pill 圆角 + 三段色（静默 line / hover text-4 / 拖拽 text-3）。 */
 *::-webkit-scrollbar-thumb {
-	background: var(--line);
-	border: 2px solid var(--bg);
-	border-radius: 10px;
+	background-color: var(--line);
+	border: 2px solid transparent;
+	background-clip: padding-box;
+	border-radius: 999px;
+	transition: background-color 150ms ease;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-	background: var(--text-4);
+	background-color: var(--text-4);
+}
+
+*::-webkit-scrollbar-thumb:active {
+	background-color: var(--text-3);
 }
 
 /* macOS overlay scrollbar — 静默宽度 0，悬停回到 8px */

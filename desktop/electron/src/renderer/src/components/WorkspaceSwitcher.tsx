@@ -467,7 +467,7 @@ function WorkspaceSwitcherMain({
 								placeholder={t("workspace_new_placeholder")}
 								maxLength={32}
 								className={clsx(
-									"h-8 rounded-sm border border-(--line) bg-(--bg-elev-2) px-2",
+									"h-8 rounded-sm border border-(--line-soft) bg-(--bg-elev-2) px-2",
 									"text-[12.5px] text-(--text) placeholder:text-(--text-4)",
 									"focus:border-(--text-3) focus:outline-none",
 								)}

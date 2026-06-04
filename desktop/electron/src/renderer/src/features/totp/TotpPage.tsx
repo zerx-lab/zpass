@@ -333,7 +333,7 @@ function TotpRow({
 		return (
 			<li>
 				<div className="flex items-center gap-3 rounded-lg border border-dashed border-(--line) bg-(--bg-elev) px-3 py-2.5">
-					<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-(--radius) border border-(--line) bg-(--bg-elev-2) font-mono text-[13px] font-semibold text-(--text-3)">
+					<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) font-mono text-[13px] font-semibold text-(--text-3)">
 						{glyph}
 					</div>
 					<div className="min-w-0 flex-1">
@@ -389,7 +389,7 @@ function TotpRow({
 				}
 			>
 				{/* 字形方块 */}
-				<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-(--radius) border border-(--line) bg-(--bg-elev-2) font-mono text-[13px] font-semibold text-(--text)">
+				<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) font-mono text-[13px] font-semibold text-(--text)">
 					{glyph}
 				</div>
 
@@ -435,7 +435,7 @@ function TotpRow({
 					tabIndex={-1}
 					disabled={rowDisabled}
 					title={t("detail_copy")}
-					className="ml-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-(--text-3) opacity-0 transition-all hover:bg-(--bg-active) hover:text-(--text) focus:outline-none focus-visible:outline-none disabled:cursor-default group-hover:opacity-100"
+					className="ml-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-(--text-3) opacity-0 transition-[opacity,background-color,color] hover:bg-(--bg-active) hover:text-(--text) focus:outline-none focus-visible:outline-none disabled:cursor-default group-hover:opacity-100"
 				>
 					<Copy size={12} strokeWidth={1.5} />
 				</button>
@@ -450,7 +450,7 @@ function TotpRow({
 					onMouseDown={(e) => e.preventDefault()}
 					tabIndex={-1}
 					title={t("totp_edit_in_vault")}
-					className="flex h-7 w-7 shrink-0 items-center justify-center rounded-(--radius) text-(--text-3) opacity-0 transition-all hover:bg-(--bg-active) hover:text-(--text) focus:outline-none focus-visible:outline-none group-hover:opacity-100"
+					className="flex h-7 w-7 shrink-0 items-center justify-center rounded-(--radius) text-(--text-3) opacity-0 transition-[opacity,background-color,color] hover:bg-(--bg-active) hover:text-(--text) focus:outline-none focus-visible:outline-none group-hover:opacity-100"
 				>
 					<Pencil size={12} strokeWidth={1.5} />
 				</button>

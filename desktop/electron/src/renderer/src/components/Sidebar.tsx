@@ -130,7 +130,7 @@ function NavRow({
 						</span>
 					)}
 					{badge && (
-						<span className="ml-auto rounded-full border border-(--line) bg-(--bg-elev-2) px-1.5 py-px font-mono text-[10px] text-(--text-2)">
+						<span className="ml-auto rounded-full border border-(--line-soft) bg-(--bg-elev-2) px-1.5 py-px font-mono text-[10px] text-(--text-2)">
 							{badge}
 						</span>
 					)}

@@ -422,7 +422,7 @@ export function CmdK() {
 						onKeyDown={onInputKeyDown}
 						className="flex-1 border-0 bg-transparent text-[14px] text-(--text) outline-none placeholder:text-(--text-4)"
 					/>
-					<kbd className="rounded-sm border border-(--line) bg-(--bg-elev-2) px-1.5 py-0.5 font-mono text-[10px] text-(--text-3)">
+					<kbd className="rounded-sm border border-(--line-soft) bg-(--bg-elev-2) px-1.5 py-0.5 font-mono text-[10px] text-(--text-3)">
 						ESC
 					</kbd>
 				</div>
@@ -453,7 +453,7 @@ export function CmdK() {
 								icon={cmd.icon}
 								label={cmd.title}
 								right={
-									<kbd className="rounded-sm border border-(--line) bg-(--bg-elev-2) px-1.5 py-0.5 font-mono text-[10px] text-(--text-3)">
+									<kbd className="rounded-sm border border-(--line-soft) bg-(--bg-elev-2) px-1.5 py-0.5 font-mono text-[10px] text-(--text-3)">
 										{cmd.hint}
 									</kbd>
 								}
@@ -493,7 +493,7 @@ export function CmdK() {
 									sublabel={item.type.toUpperCase()}
 									badge={item.type.toUpperCase()}
 									iconSlot={
-										<div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-sm border border-(--line) bg-(--bg-elev-2) font-mono text-[10px] text-(--text-2)">
+										<div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-sm border border-(--line-soft) bg-(--bg-elev-2) font-mono text-[10px] text-(--text-2)">
 											{item.name.slice(0, 2).toUpperCase()}
 										</div>
 									}
@@ -512,25 +512,25 @@ export function CmdK() {
 						 *   - win/linux: Ctrl+N
 						 * 由 formatShortcut(SHORTCUTS.CMDK_NAV_NEXT) 跨平台渲染
 						 */}
-						<kbd className="rounded-sm border border-(--line) bg-(--bg-elev-2) px-1 py-0.5 text-[9px]">
+						<kbd className="rounded-sm border border-(--line-soft) bg-(--bg-elev-2) px-1 py-0.5 text-[9px]">
 							{KEY_SYMBOL.up}
 							{KEY_SYMBOL.down}
 						</kbd>
 						<span className="text-(--text-4)">/</span>
-						<kbd className="rounded-sm border border-(--line) bg-(--bg-elev-2) px-1 py-0.5 text-[9px]">
+						<kbd className="rounded-sm border border-(--line-soft) bg-(--bg-elev-2) px-1 py-0.5 text-[9px]">
 							{formatShortcut(SHORTCUTS.CMDK_NAV_NEXT)}
 						</kbd>
 						{t("cmdk_navigate")}
 					</span>
 					<span className="flex items-center gap-1.5">
-						<kbd className="rounded-sm border border-(--line) bg-(--bg-elev-2) px-1 py-0.5 text-[9px]">
+						<kbd className="rounded-sm border border-(--line-soft) bg-(--bg-elev-2) px-1 py-0.5 text-[9px]">
 							{KEY_SYMBOL.enter}
 						</kbd>
 						{t("cmdk_select")}
 					</span>
 					<span className="flex items-center gap-1.5">
 						{/* 关闭/切换面板：mac → ⌘K，win/linux → Ctrl+K */}
-						<kbd className="rounded-sm border border-(--line) bg-(--bg-elev-2) px-1 py-0.5 text-[9px]">
+						<kbd className="rounded-sm border border-(--line-soft) bg-(--bg-elev-2) px-1 py-0.5 text-[9px]">
 							{formatShortcut(SHORTCUTS.CMDK_OPEN)}
 						</kbd>
 						{t("cmdk_toggle")}

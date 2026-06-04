@@ -271,7 +271,7 @@ export function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
 								onDragLeave={() => setDragOver(false)}
 								onDrop={onDrop}
 							>
-								<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-(--radius-sm) border border-(--line) bg-(--bg-elev-2) text-(--text-2)">
+								<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-(--radius-sm) border border-(--line-soft) bg-(--bg-elev-2) text-(--text-2)">
 									<Upload size={18} strokeWidth={1.5} />
 								</div>
 								<div className="flex min-w-0 items-center gap-2.5">

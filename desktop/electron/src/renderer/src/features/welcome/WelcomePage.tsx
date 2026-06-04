@@ -105,7 +105,7 @@ export function WelcomePage() {
 				<div className="welcome-card flex w-full max-w-md flex-col gap-8">
 					{/* Brand —— 纯黑白方块（与 UnlockPage 同款，强化品牌一致性） */}
 					<div className="flex items-center gap-3">
-						<div className="flex h-10 w-10 items-center justify-center rounded-(--radius) border border-(--line) bg-(--bg-elev-2) font-mono text-[17px] font-semibold text-(--text)">
+						<div className="flex h-10 w-10 items-center justify-center rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) font-mono text-[17px] font-semibold text-(--text)">
 							Z
 						</div>
 						<div className="flex flex-col leading-tight">
@@ -177,7 +177,7 @@ export function WelcomePage() {
 							disabled
 							aria-disabled="true"
 							title={t("welcome_signin_coming_soon")}
-							className="group flex cursor-not-allowed items-center gap-4 rounded-xl border border-(--line) bg-(--bg-elev-2) px-5 py-3 text-left opacity-60 transition-colors"
+							className="group flex cursor-not-allowed items-center gap-4 rounded-xl border border-(--line-soft) bg-(--bg-elev-2) px-5 py-3 text-left opacity-60 transition-colors"
 						>
 							<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-(--line) bg-(--bg-elev) transition-colors">
 								<Cloud
@@ -207,9 +207,9 @@ export function WelcomePage() {
 						<button
 							type="button"
 							onClick={onSkip}
-							className="group flex items-center gap-4 rounded-xl border border-(--line) bg-(--bg-elev-2) px-5 py-3 text-left transition-colors hover:border-(--text-3) hover:bg-(--bg-active)"
+							className="group flex items-center gap-4 rounded-xl border border-(--line-soft) bg-(--bg-elev-2) px-5 py-3 text-left transition-colors hover:bg-(--bg-active)"
 						>
-							<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-(--line) bg-(--bg-elev) transition-colors group-hover:border-(--text-3)">
+							<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-(--line) bg-(--bg-elev) transition-colors">
 								<UserRound
 									size={18}
 									strokeWidth={1.5}
@@ -224,7 +224,7 @@ export function WelcomePage() {
 									{t("welcome_skip_desc")}
 								</span>
 							</div>
-							<span className="shrink-0 rounded-sm border border-(--line) bg-(--bg-elev) px-1.5 py-0.5 font-mono text-[10px] tracking-wider text-(--text-3) uppercase transition-colors group-hover:border-(--text-3) group-hover:text-(--text-2)">
+							<span className="shrink-0 rounded-sm border border-(--line) bg-(--bg-elev) px-1.5 py-0.5 font-mono text-[10px] tracking-wider text-(--text-3) uppercase transition-colors group-hover:text-(--text-2)">
 								{t("welcome_skip_badge")}
 							</span>
 						</button>

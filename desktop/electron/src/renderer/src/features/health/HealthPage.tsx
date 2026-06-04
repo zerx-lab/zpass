@@ -199,7 +199,7 @@ function StatTile({
 
 	return (
 		<div className="flex items-center gap-3 rounded-xl border border-(--line) bg-(--bg-elev) p-4">
-			<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-(--line) bg-(--bg-elev-2) text-(--text-2)">
+			<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-(--line-soft) bg-(--bg-elev-2) text-(--text-2)">
 				<Icon size={15} strokeWidth={1.5} />
 			</div>
 			<div className="flex min-w-0 flex-1 flex-col leading-tight">
@@ -242,7 +242,7 @@ function IssueRow({
 				onClick={onOpen}
 				className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-(--bg-hover)"
 			>
-				<div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-(--radius) border border-(--line) bg-(--bg-elev-2) font-mono text-[11px] font-semibold text-(--text)">
+				<div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) font-mono text-[11px] font-semibold text-(--text)">
 					{glyph}
 				</div>
 
@@ -722,7 +722,7 @@ export function HealthPage() {
 														}}
 														className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-(--bg-hover)"
 													>
-														<div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-(--radius) border border-(--line) bg-(--bg-elev-2) font-mono text-[11px] font-semibold text-(--text)">
+														<div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) font-mono text-[11px] font-semibold text-(--text)">
 															{(Array.from(r.itemName)[0] ?? "·").toUpperCase()}
 														</div>
 														<div className="min-w-0 flex-1">

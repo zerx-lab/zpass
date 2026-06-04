@@ -36,7 +36,9 @@ export const DIALOG_OVERLAY_CLASS = clsx(
 );
 export const DIALOG_CONTENT_BASE_CLASS = clsx(
 	"fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2",
-	"flex flex-col gap-4 rounded-xl shadow-lg p-6",
+	// 阴影/边框/玻璃底全由 .zpass-glass 提供（多层 token 阴影）；不要再叠 shadow-lg ——
+	// .zpass-glass 在 unlayered 区会覆盖 Tailwind shadow-lg，那只是死样式。
+	"flex flex-col gap-4 rounded-xl p-6",
 	"zpass-glass focus:outline-none",
 	"data-[state=open]:animate-[zpass-dialog-in_180ms_ease-out]",
 );

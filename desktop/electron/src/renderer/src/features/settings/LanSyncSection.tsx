@@ -10,7 +10,15 @@
 // 不在此文件实现 QR 扫码（桌面端用户输 IP+PIN 即可；扫码留给 phone 端实现）。
 
 import * as RadixDialog from "@radix-ui/react-dialog";
-import { AlertTriangle, ArrowRightLeft, X } from "lucide-react";
+import {
+	AlertTriangle,
+	ArrowRightLeft,
+	ChevronLeft,
+	ChevronRight,
+	Circle,
+	CircleDot,
+	X,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/Button";
@@ -193,7 +201,7 @@ export function LanSyncSection() {
             {status.progress.total > 0 && (
               <div className="h-1.5 overflow-hidden rounded-full bg-(--bg)">
                 <div
-                  className="h-full rounded-full bg-(--accent) transition-all"
+                  className="h-full rounded-full bg-(--accent) transition-[width] duration-300"
                   style={{
                     width: `${Math.min(
                       100,
@@ -315,14 +323,17 @@ function ConnectDialog({
   return (
     <RadixDialog.Root open onOpenChange={(o) => !o && onClose()}>
       <RadixDialog.Portal>
-        <RadixDialog.Overlay className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm" />
-        <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-(--line) bg-(--bg-elev) p-5 shadow-xl">
+        <RadixDialog.Overlay className="zpass-backdrop fixed inset-0 z-40" />
+        <RadixDialog.Content className="zpass-glass fixed left-1/2 top-1/2 z-50 w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-xl p-5">
           <div className="flex items-center justify-between gap-2">
             <RadixDialog.Title className="text-[14px] font-semibold">
               连接到 LAN 同步服务端
             </RadixDialog.Title>
             <RadixDialog.Close asChild>
-              <button className="text-(--text-4) hover:text-(--text-2)">
+              <button
+                type="button"
+                className="text-(--text-4) hover:text-(--text-2)"
+              >
                 <X size={16} />
               </button>
             </RadixDialog.Close>
@@ -408,7 +419,9 @@ function ConflictResolverDialog({
 
   const bulkAll = (choice: "local" | "remote" | "skip") => {
     const map: Record<string, string> = {};
-    conflicts.forEach((c) => (map[c.id] = choice));
+    conflicts.forEach((c) => {
+      map[c.id] = choice;
+    });
     setResolutions(map);
   };
 
@@ -436,8 +449,8 @@ function ConflictResolverDialog({
   return (
     <RadixDialog.Root open onOpenChange={(o) => !o && onClose()}>
       <RadixDialog.Portal>
-        <RadixDialog.Overlay className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm" />
-        <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 flex h-[640px] w-[920px] -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl border border-(--line) bg-(--bg-elev) shadow-xl">
+        <RadixDialog.Overlay className="zpass-backdrop fixed inset-0 z-40" />
+        <RadixDialog.Content className="zpass-glass fixed left-1/2 top-1/2 z-50 flex h-[640px] w-[920px] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl">
           {/* Header */}
           <header className="flex items-center justify-between gap-2 border-b border-(--line-soft) px-5 py-4">
             <div className="flex flex-col leading-tight">
@@ -459,7 +472,10 @@ function ConflictResolverDialog({
                 全部跳过
               </Button>
               <RadixDialog.Close asChild>
-                <button className="text-(--text-4) hover:text-(--text-2)">
+                <button
+                  type="button"
+                  className="text-(--text-4) hover:text-(--text-2)"
+                >
                   <X size={16} />
                 </button>
               </RadixDialog.Close>
@@ -492,8 +508,9 @@ function ConflictResolverDialog({
                 variant="ghost"
                 disabled={idx === 0}
                 onClick={() => setIdx((i) => Math.max(0, i - 1))}
+                leftIcon={<ChevronLeft size={14} strokeWidth={1.5} />}
               >
-                ← 上一条
+                上一条
               </Button>
               <Button
                 variant="ghost"
@@ -515,8 +532,9 @@ function ConflictResolverDialog({
                 onClick={() =>
                   setIdx((i) => Math.min(conflicts.length - 1, i + 1))
                 }
+                rightIcon={<ChevronRight size={14} strokeWidth={1.5} />}
               >
-                下一条 →
+                下一条
               </Button>
             </div>
             <div className="flex items-center gap-3">
@@ -562,19 +580,21 @@ function ConflictPanel({
       onClick={onSelect}
       className={
         "flex flex-1 min-w-0 cursor-pointer flex-col overflow-y-auto p-5 transition-colors " +
+        // 选中态：brand-soft 底 + 1px brand inset 环（修复原 --accent-bg 幽灵 token
+        // 致背景透明，并把 web 味的 ring-2 收到 1px）
         (selected
-          ? "bg-(--accent-bg) ring-2 ring-(--accent) ring-inset"
+          ? "bg-(--brand-soft) ring-1 ring-(--brand) ring-inset"
           : "hover:bg-(--bg)")
       }
     >
       <header className="mb-3 flex items-center justify-between">
         <span className="text-[13px] font-semibold">{title}</span>
-        <input
-          type="radio"
-          checked={selected}
-          onChange={onSelect}
-          className="cursor-pointer"
-        />
+        {/* 自绘单选点（替换原生 radio，三端一致） */}
+        {selected ? (
+          <CircleDot size={16} strokeWidth={1.75} className="text-(--brand)" />
+        ) : (
+          <Circle size={16} strokeWidth={1.75} className="text-(--text-4)" />
+        )}
       </header>
       <dl className="flex flex-col gap-2 text-[12px]">
         <Field

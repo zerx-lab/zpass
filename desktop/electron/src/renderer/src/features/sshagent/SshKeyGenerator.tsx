@@ -32,6 +32,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/Button";
+import { Select } from "@/components/Select";
 import { writeClipboard } from "@/lib/clipboard";
 
 export type SshKeyMode = "generate" | "import";
@@ -53,7 +54,7 @@ export function SshKeyModeTabs({
 }) {
 	const { t } = useTranslation();
 	return (
-		<div className="flex items-center gap-1 rounded-md border border-(--line) bg-(--bg-elev-2) p-1">
+		<div className="flex items-center gap-1 rounded-md border border-(--line-soft) bg-(--bg-elev-2) p-1">
 			<TabButton
 				active={mode === "generate"}
 				disabled={disabled}
@@ -223,7 +224,7 @@ export function SshKeyGeneratorPanel({
 	};
 
 	return (
-		<div className="flex flex-col gap-3 rounded-md border border-(--line) bg-(--bg-elev-2) p-3.5">
+		<div className="flex flex-col gap-3 rounded-md border border-(--line-soft) bg-(--bg-elev-2) p-3.5">
 			{/* 提示行 */}
 			<div className="flex items-center gap-2 text-[12px] text-(--text-3)">
 				<KeyRound size={13} strokeWidth={1.5} />
@@ -233,25 +234,20 @@ export function SshKeyGeneratorPanel({
 			{/* 算法 + comment + 生成按钮 */}
 			<div className="grid grid-cols-1 gap-2.5">
 				<div className="flex flex-col gap-1.5">
-					<label
-						htmlFor="ssh-algo"
-						className="font-mono text-[10.5px] tracking-wider text-(--text-3) uppercase"
-					>
+					<span className="font-mono text-[10.5px] tracking-wider text-(--text-3) uppercase">
 						{t("sshkey_algo_label")}
-					</label>
-					<select
-						id="ssh-algo"
+					</span>
+					<Select
+						ariaLabel={t("sshkey_algo_label")}
 						value={algo}
-						onChange={(e) => setAlgo(e.target.value)}
+						onChange={setAlgo}
 						disabled={generating}
-						className="rounded-md border border-(--line) bg-(--bg) px-2.5 py-1.5 text-[13px] text-(--text) outline-none focus:border-(--text-3)"
-					>
-						{supportedAlgos.map((a) => (
-							<option key={a} value={a}>
-								{algoLabel(a)}
-							</option>
-						))}
-					</select>
+						options={supportedAlgos.map((a) => ({
+							value: a,
+							label: algoLabel(a),
+						}))}
+						className="min-w-0 w-full"
+					/>
 				</div>
 
 				<div className="flex flex-col gap-1.5">

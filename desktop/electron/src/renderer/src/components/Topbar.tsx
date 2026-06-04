@@ -1,4 +1,4 @@
-import { Bell, Moon, Plus, Search, Sun } from "lucide-react";
+import { Bell, ChevronRight, Moon, Plus, Search, Sun } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useMatch, useNavigate, useSearchParams } from "react-router-dom";
 import { formatShortcut, SHORTCUTS } from "@/lib/keys";
@@ -179,7 +179,11 @@ export function Topbar() {
 					return (
 						<>
 							<span>{t("topbar_vault")}</span>
-							<span className="mx-1 text-(--text-3)">›</span>
+							<ChevronRight
+								size={13}
+								strokeWidth={1.5}
+								className="mx-0.5 shrink-0 text-(--text-4)"
+							/>
 							<b className="text-(--text)">{selectedName}</b>
 						</>
 					);
@@ -188,7 +192,11 @@ export function Topbar() {
 					return (
 						<>
 							<span>{t("topbar_vault")}</span>
-							<span className="mx-1 text-(--text-3)">›</span>
+							<ChevronRight
+								size={13}
+								strokeWidth={1.5}
+								className="mx-0.5 shrink-0 text-(--text-4)"
+							/>
 							<b className="text-(--text)">{t(FILTER_LABEL_KEY[vaultFilter])}</b>
 						</>
 					);
@@ -208,7 +216,7 @@ export function Topbar() {
 
 	return (
 		<header className="flex h-11 items-center gap-2 border-b border-(--line) bg-(--bg-elev) px-4">
-			<div className="text-[13px] text-(--text-2)">{crumbs}</div>
+			<div className="flex items-center text-[13px] text-(--text-2)">{crumbs}</div>
 
 			{/* TotpPage 专属：来源快速筛选 chip ——
 			 *

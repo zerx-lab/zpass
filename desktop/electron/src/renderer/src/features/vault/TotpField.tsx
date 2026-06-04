@@ -160,7 +160,7 @@ export function TotpField({ itemId, variant = "row", onCopied }: TotpFieldProps)
 				<span className="font-mono text-[10.5px] tracking-wider text-(--text-3) uppercase">
 					{t("field_totp_code")}
 				</span>
-				<div className="flex items-center gap-2 rounded-(--radius) border border-(--line) bg-(--bg-elev-2) px-3 py-2.5 text-[12.5px] text-(--text-3)">
+				<div className="flex items-center gap-2 rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) px-3 py-2.5 text-[12.5px] text-(--text-3)">
 					<ShieldAlert size={13} strokeWidth={1.5} className="shrink-0 text-(--text-4)" />
 					<span className="flex-1">{error}</span>
 				</div>
@@ -175,7 +175,7 @@ export function TotpField({ itemId, variant = "row", onCopied }: TotpFieldProps)
 				<span className="font-mono text-[10.5px] tracking-wider text-(--text-3) uppercase">
 					{t("field_totp_code")}
 				</span>
-				<div className="rounded-(--radius) border border-(--line) bg-(--bg-elev-2) px-3 py-2.5 text-[12.5px] text-(--text-3)">
+				<div className="rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) px-3 py-2.5 text-[12.5px] text-(--text-3)">
 					{t("vault_loading")}
 				</div>
 			</div>
@@ -199,7 +199,7 @@ export function TotpField({ itemId, variant = "row", onCopied }: TotpFieldProps)
 	if (variant === "card") {
 		// 聚合页右侧大片：大字号 + 类型徽标 + 倒计时/计数器
 		return (
-			<div className="flex flex-col items-center gap-3 rounded-lg border border-(--line) bg-(--bg-elev-2) px-6 py-5">
+			<div className="flex flex-col items-center gap-3 rounded-lg border border-(--line-soft) bg-(--bg-elev-2) px-6 py-5">
 				<div className="flex items-center gap-2 text-[10.5px] font-mono uppercase tracking-wider text-(--text-3)">
 					<span>{typeBadge}</span>
 					{isHOTP && (
@@ -253,7 +253,7 @@ export function TotpField({ itemId, variant = "row", onCopied }: TotpFieldProps)
 					<span className="text-(--text-4) normal-case tracking-normal">· #{snapshot.counter}</span>
 				)}
 			</span>
-			<div className="flex items-center gap-2 rounded-(--radius) border border-(--line) bg-(--bg-elev-2) px-3 py-2.5">
+			<div className="flex items-center gap-2 rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) px-3 py-2.5">
 				<ShieldCheck size={13} strokeWidth={1.5} className="shrink-0 text-(--text-3)" />
 				<button
 					type="button"
