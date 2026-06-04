@@ -85,8 +85,23 @@ export interface UIState {
 	/** 触发"打开新建条目对话框"的全局信号 */
 	requestNewItem: () => void;
 
+	/**
+	 * 消费并清零"新建"信号 —— VaultPage 打开对话框后调用，把计数器复位回 0。
+	 *
+	 * 必须清零的原因：newItemRequest 是常驻 store 的计数器，VaultPage 是其唯一
+	 * 订阅方且会随路由切换卸载/重挂。若不清零，残留的 >0 计数器会在 VaultPage
+	 * 下次挂载时被"挂载即跑一次"的 useEffect 当成有效信号，凭空弹出新建对话框
+	 * （切走侧边栏菜单再切回"所有条目"即复现）。清零后信号变成一次性脉冲，
+	 * 重挂载读到 0 → 不再误触发。
+	 */
+	clearNewItemRequest: () => void;
+
 	/** 触发"打开指定条目编辑对话框"的全局信号 */
 	requestEditItem: (id: string) => void;
+
+	/** 消费并清零"编辑"信号 —— 同 clearNewItemRequest，VaultPage 打开编辑
+	 * 对话框后置 null，避免残留信号在重挂载时凭空弹出编辑对话框。 */
+	clearEditItemRequest: () => void;
 
 	/** 推入一条 Toast；返回该 toast 的 id 便于外部手动 dismiss */
 	pushToast: (toast: Omit<ToastItem, "id"> & { id?: string }) => string;
@@ -118,6 +133,8 @@ export const useUIStore = create<UIState>((set) => ({
 
 	requestNewItem: () => set((s) => ({ newItemRequest: s.newItemRequest + 1 })),
 
+	clearNewItemRequest: () => set({ newItemRequest: 0 }),
+
 	requestEditItem: (id) =>
 		set((s) => ({
 			editItemRequest: {
@@ -125,6 +142,8 @@ export const useUIStore = create<UIState>((set) => ({
 				counter: (s.editItemRequest?.counter ?? 0) + 1,
 			},
 		})),
+
+	clearEditItemRequest: () => set({ editItemRequest: null }),
 
 	pushToast: (toast) => {
 		const id = toast.id ?? genId();

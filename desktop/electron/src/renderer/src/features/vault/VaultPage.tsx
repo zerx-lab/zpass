@@ -647,6 +647,8 @@ export function VaultPage() {
 	const pushToast = useUIStore((s) => s.pushToast);
 	const newItemRequest = useUIStore((s) => s.newItemRequest);
 	const editItemRequest = useUIStore((s) => s.editItemRequest);
+	const clearNewItemRequest = useUIStore((s) => s.clearNewItemRequest);
+	const clearEditItemRequest = useUIStore((s) => s.clearEditItemRequest);
 
 	// ----- 本地 UI 状态 -----
 	/** 对话框 mode："new" 新建 / "edit" 编辑当前选中条目 / null 关闭 */
@@ -915,11 +917,18 @@ export function VaultPage() {
 	// 同样按当前 filter 推导 preset type。
 	// preset 跟随触发瞬间的 filter；不把 filter / filterToPresetType 放进
 	// 依赖避免 filter 变化时虚假重开 dialog。
-	// biome-ignore lint/correctness/useExhaustiveDependencies: 仅 newItemRequest 是触发依据
+	//
+	// 打开后立即 clearNewItemRequest() 把信号清零 —— 否则残留的 >0 计数器会在
+	// VaultPage 下次挂载（切走侧边栏菜单再切回"所有条目"）时被这个"挂载即跑"
+	// 的 effect 当成有效信号，凭空弹出新建对话框。清零后重挂载读到 0 → 跳过。
+	// 跨页 +新建 仍正常：Topbar navigate 后用 rAF 延迟 requestNewItem，增量落在
+	// 挂载之后，effect 再次跑时才 >0 → 打开。
+	// biome-ignore lint/correctness/useExhaustiveDependencies: 仅 newItemRequest 是触发依据；filter/setter/clear 均为稳定引用
 	useEffect(() => {
 		if (newItemRequest > 0) {
 			setPresetType(filterToPresetType(filter));
 			setDialogMode("new");
+			clearNewItemRequest();
 		}
 	}, [newItemRequest]);
 
@@ -927,10 +936,18 @@ export function VaultPage() {
 	// 条目选中并打开编辑 dialog。openEditDialog 内部会等 fetchItem 完成
 	// 再切 dialogMode，所以跨页跳转后 itemDetails 缓存未命中也安全。
 	//
-	// biome-ignore lint/correctness/useExhaustiveDependencies: 仅 editItemRequest.counter 是触发依据
+	// 消费后立即 clearEditItemRequest() 置 null —— 与新建信号同理：editItemRequest
+	// 是常驻 store 的一次性命令，若不清零，残留的 non-null 会在 VaultPage 重挂载
+	// 时凭空弹出编辑对话框（先从 TOTP 页编辑过一次、再切走菜单切回即复现）。
+	// 跨页编辑仍正常：TotpPage 在 navigate 前同步置位，VaultPage 挂载时读到 fresh
+	// non-null → 打开并清零；之后重挂载读 null → 跳过。先取 id 再清零，避免清零
+	// 后 openEditDialog 拿不到目标。
+	// biome-ignore lint/correctness/useExhaustiveDependencies: 仅 editItemRequest.counter 是触发依据；openEditDialog/clear 为稳定引用
 	useEffect(() => {
 		if (!editItemRequest) return;
-		void openEditDialog(editItemRequest.id);
+		const { id } = editItemRequest;
+		clearEditItemRequest();
+		void openEditDialog(id);
 	}, [editItemRequest?.counter]);
 
 	// ----- 派生数据 -----
