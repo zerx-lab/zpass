@@ -107,10 +107,10 @@ const (
 	// 是配对 PSK 派生用的 Argon2id 参数。比 vault 主密码 KDF 弱（vault 是
 	// m=64MiB, t=3），因为 PIN 只 6 位、生存窗口短（30 分钟会话），过慢
 	// 会让用户在手机上等太久。8 MiB × 2 iter × 1 par ≈ 100ms in laptop CPU。
-	syncPSKMemoryKiB    uint32 = 8 * 1024
-	syncPSKIterations   uint32 = 2
-	syncPSKParallelism  uint8  = 1
-	syncPSKKeyLen       uint32 = 32
+	syncPSKMemoryKiB   uint32 = 8 * 1024
+	syncPSKIterations  uint32 = 2
+	syncPSKParallelism uint8  = 1
+	syncPSKKeyLen      uint32 = 32
 
 	// 配对 PIN 长度（位）—— 与 cryptocore-sync 一致。
 	syncPinDigits = 6
@@ -145,8 +145,8 @@ const (
 	syncAADPush            = "zpass-sync:push"
 	syncAADCommit          = "zpass-sync:commit"
 	syncAADProgress        = "zpass-sync:progress"
-	syncAADReportConflicts  = "zpass-sync:report-conflicts"
-	syncAADPollResolutions  = "zpass-sync:poll-resolutions"
+	syncAADReportConflicts = "zpass-sync:report-conflicts"
+	syncAADPollResolutions = "zpass-sync:poll-resolutions"
 
 	// 方向位（混入 nonce 第一字节），与 cryptocore-sync 一致。
 	syncDirServer byte = 0x01
@@ -181,9 +181,9 @@ type SyncPairRequest struct {
 
 type SyncPairResponse struct {
 	ProtoVersion int    `json:"protoVersion"`
-	SessionID    string `json:"sessionId"`    // hex 16B
-	Salt         string `json:"salt"`         // hex 16B
-	ServerNonce  string `json:"serverNonce"`  // hex 16B
+	SessionID    string `json:"sessionId"`   // hex 16B
+	Salt         string `json:"salt"`        // hex 16B
+	ServerNonce  string `json:"serverNonce"` // hex 16B
 }
 
 // SyncPairConfirmRequest 是 POST /v1/pair/confirm 的请求体
@@ -236,9 +236,10 @@ type SyncFetchRequest struct {
 //   - tombstone：空字符串（对端只需要 id + DeletedAt 元数据即可调 DeleteItem）
 //
 // 为什么传 plaintext 而非 vault 加密的 ciphertext：
-//   两端 vault 完全独立 —— desktop 用自己的 DEK_A 加密，phone 用 DEK_B 加密；
-//   把 DEK_A 加密的密文整行推给 phone，phone 用 DEK_B 解密会 AEAD tag fail
-//   （"invalid tag"），第一次同步看似成功但下次 listItems 解密全部失败。
+//
+//	两端 vault 完全独立 —— desktop 用自己的 DEK_A 加密，phone 用 DEK_B 加密；
+//	把 DEK_A 加密的密文整行推给 phone，phone 用 DEK_B 解密会 AEAD tag fail
+//	（"invalid tag"），第一次同步看似成功但下次 listItems 解密全部失败。
 //
 // 传输安全：整个 SyncItemRecord 数组装进 Batch{Response,Request} 后再走
 // session AEAD（XChaCha20-Poly1305 + 方向位 + counter），所以 plaintext
@@ -314,18 +315,18 @@ type SyncReportConflictsResponse struct {
 //
 // Op 取值（phone 端做对应操作）:
 //   - "overwrite":   用 PayloadB64 解出来的 plaintext 覆盖 phone 端该 id 的行
-//                    （updatedAt 用 desktop 当前 vault 内的，保持两端一致）
+//     （updatedAt 用 desktop 当前 vault 内的，保持两端一致）
 //   - "delete":      phone 端把该 id 软删（desktop 用户最终选择删除该条）
 //   - "noop":        phone 端不动（desktop 用户保留 phone 已有版本）
 //   - "duplicate":   phone 端用 NewID 创建一份副本，PayloadB64 是 phone 原版本；
-//                    原 id 仍按 overwrite/noop 分支处理
+//     原 id 仍按 overwrite/noop 分支处理
 type SyncResolutionAction struct {
-	ID        string `json:"id"`
-	Op        string `json:"op"`
+	ID         string `json:"id"`
+	Op         string `json:"op"`
 	PayloadB64 string `json:"payload,omitempty"`
-	UpdatedAt int64  `json:"updatedAt,omitempty"`
-	CreatedAt int64  `json:"createdAt,omitempty"`
-	NewID     string `json:"newId,omitempty"`
+	UpdatedAt  int64  `json:"updatedAt,omitempty"`
+	CreatedAt  int64  `json:"createdAt,omitempty"`
+	NewID      string `json:"newId,omitempty"`
 }
 
 // SyncPollResolutionsRequest 是 phone 轮询请求体
@@ -363,12 +364,12 @@ type SyncProgress struct {
 // sessionKey 是 32 字节 XChaCha20-Poly1305 密钥。
 // sendCounter / recvCounter 单调递增；接收方拒绝 ≤ last 的 counter。
 type syncSession struct {
-	id             string
-	sessionKey     []byte
-	role           syncRole // server / client
-	pairedAt       time.Time
-	sendCounter    atomic.Uint64
-	lastRecvCount  atomic.Uint64 // server 侧记录 client→server 的最大计数；client 侧反之
+	id            string
+	sessionKey    []byte
+	role          syncRole // server / client
+	pairedAt      time.Time
+	sendCounter   atomic.Uint64
+	lastRecvCount atomic.Uint64 // server 侧记录 client→server 的最大计数；client 侧反之
 }
 
 type syncRole int
@@ -476,27 +477,27 @@ func (s *syncSession) OpenJSON(frame []byte, aad []byte, out any) error {
 //   - "divergent_content" 不同 updatedAt 且内容不同
 //   - "delete_vs_edit"    一方删了一方改了
 type SyncConflict struct {
-	ID                string             `json:"id"`
-	Kind              string             `json:"kind"`
-	Local             *ItemPayload       `json:"local,omitempty"`           // nil = local 不存在 / 解密失败
-	Remote            *ItemPayload       `json:"remote,omitempty"`          // nil = remote 不存在
-	LocalManifest     SyncManifestEntry  `json:"localManifest"`
-	RemoteManifest    SyncManifestEntry  `json:"remoteManifest"`
-	SuggestedRemote   bool               `json:"suggestedRemote"`           // UI 默认勾选项
+	ID              string            `json:"id"`
+	Kind            string            `json:"kind"`
+	Local           *ItemPayload      `json:"local,omitempty"`  // nil = local 不存在 / 解密失败
+	Remote          *ItemPayload      `json:"remote,omitempty"` // nil = remote 不存在
+	LocalManifest   SyncManifestEntry `json:"localManifest"`
+	RemoteManifest  SyncManifestEntry `json:"remoteManifest"`
+	SuggestedRemote bool              `json:"suggestedRemote"` // UI 默认勾选项
 	// 用户决策（在 ResolveConflict 后填充）
-	Resolution        string             `json:"resolution,omitempty"`      // "local" | "remote" | "duplicate" | "skip"
+	Resolution string `json:"resolution,omitempty"` // "local" | "remote" | "duplicate" | "skip"
 }
 
 // SyncStatus 是前端轮询的整体状态
 type SyncStatus struct {
-	ServerRunning bool          `json:"serverRunning"`
-	ServerPort    int           `json:"serverPort,omitempty"`
-	ServerPin     string        `json:"serverPin,omitempty"`
-	ServerHosts   []string      `json:"serverHosts,omitempty"`
-	QRPayload     string        `json:"qrPayload,omitempty"`
-	Active        bool          `json:"active"`
-	Role          string        `json:"role,omitempty"` // "server" / "client"
-	Progress      SyncProgress  `json:"progress"`
+	ServerRunning bool           `json:"serverRunning"`
+	ServerPort    int            `json:"serverPort,omitempty"`
+	ServerPin     string         `json:"serverPin,omitempty"`
+	ServerHosts   []string       `json:"serverHosts,omitempty"`
+	QRPayload     string         `json:"qrPayload,omitempty"`
+	Active        bool           `json:"active"`
+	Role          string         `json:"role,omitempty"` // "server" / "client"
+	Progress      SyncProgress   `json:"progress"`
 	Conflicts     []SyncConflict `json:"conflicts,omitempty"`
 }
 
@@ -510,15 +511,15 @@ type SyncService struct {
 	mu sync.RWMutex
 
 	// Server 状态
-	listener     net.Listener
-	server       *http.Server
-	pin          string
-	salt         []byte
-	pinFailures  int
-	pinLockedAt  time.Time
-	pendingPair  *pendingPair         // 配对窗口内的 client 信息
-	serverSess   *syncSession          // 配对成功后的会话
-	serverHosts  []string
+	listener    net.Listener
+	server      *http.Server
+	pin         string
+	salt        []byte
+	pinFailures int
+	pinLockedAt time.Time
+	pendingPair *pendingPair // 配对窗口内的 client 信息
+	serverSess  *syncSession // 配对成功后的会话
+	serverHosts []string
 
 	// Client 状态（本端主动连别人）
 	clientSess    *syncSession
@@ -541,12 +542,12 @@ type SyncService struct {
 
 // pendingPair 是配对中间态：server 收到 client_nonce 后、收到 confirm 前
 type pendingPair struct {
-	sessionID    string
-	salt         []byte
-	clientNonce  []byte
-	serverNonce  []byte
-	sessionKey   []byte // 派生后暂存 — 用于校验 confirm
-	createdAt    time.Time
+	sessionID   string
+	salt        []byte
+	clientNonce []byte
+	serverNonce []byte
+	sessionKey  []byte // 派生后暂存 — 用于校验 confirm
+	createdAt   time.Time
 }
 
 func NewSyncService(vault *VaultService) *SyncService {
@@ -1250,8 +1251,9 @@ func (s *SyncService) handleCommitServer(w http.ResponseWriter, r *http.Request)
 //   - skip      → 不动 desktop 端 vault
 //   - local     → 不动 desktop 端 vault（已经是本端版本，等下次 phone 同步时被拉）
 //   - remote    → 用 phone 推过来的 plaintext payload 覆盖 desktop 当前行；
-//                 用 nowMs() 作为新 UpdatedAt，确保大于双方 manifest 时间戳
+//     用 nowMs() 作为新 UpdatedAt，确保大于双方 manifest 时间戳
 //   - duplicate → 用 phone payload 在 desktop 创建新 id 条目（双份保留）
+//
 // applyServerMerge 把 desktop UI 上的决策双向落地：
 //   - desktop vault：直接写入（IngestForeignPayload / CreateItem）
 //   - phone 端：生成 SyncResolutionAction 列表 → 存进 s.pendingResolutions →
@@ -2051,7 +2053,8 @@ func decideBoth(local, remote SyncManifestEntry, plan *syncMergePlan) {
 // deriveSyncSessionKey 用 PIN + salt 派生 32 字节 session_key
 //
 // 输入：salt(16) || sessionID(32 hex chars=>16B) || clientNonce(16) || serverNonce(16)
-//   — 共 64 字节 Argon2id salt 输入（标准 Argon2id 接受任意长 salt）
+//
+//	— 共 64 字节 Argon2id salt 输入（标准 Argon2id 接受任意长 salt）
 func deriveSyncSessionKey(pin string, salt []byte, sessionID string, clientNonce, serverNonce []byte) ([]byte, error) {
 	if pin == "" {
 		return nil, ErrSyncInvalidPin

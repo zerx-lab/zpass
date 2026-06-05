@@ -160,7 +160,7 @@ func TestImportedPasskeyCreateListSign(t *testing.T) {
 func TestCompleteImportedPasskeyAcceptsBase64CredentialAndStringCount(t *testing.T) {
 	fields := bwGooglePasskeyFields()
 	fields["credentialId"] = bwGoogleCredentialB64 // 已是 base64url，非 GUID
-	fields["signCount"] = "7"                       // Bitwarden 把 counter 存为字符串
+	fields["signCount"] = "7"                      // Bitwarden 把 counter 存为字符串
 
 	if err := completeImportedPasskey(fields); err != nil {
 		t.Fatalf("completeImportedPasskey: %v", err)

@@ -319,7 +319,6 @@ func (s *VaultService) CheckBreachedPasswords() ([]BreachResult, error) {
 	return results, nil
 }
 
-
 // breachSnapshotNamespace is the namespace key used to persist breach check
 // results via ConfigService. Stores []BreachResult (with CheckedAt), no
 // plaintext passwords or hashes are written to disk.

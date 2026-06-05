@@ -849,4 +849,74 @@ export const zh: Strings = {
 	qr_err_not_image: "仅支持图片文件。",
 	qr_err_too_large: "图片过大（上限 10 MB）。",
 	qr_err_no_image_in_clipboard: "剪贴板中未发现图片。",
+
+	// 云同步 —— 登录/注册/设置共用 key（前缀 cloud_）
+	// 登录页模式切换
+	cloud_signin_tab: "已有账户，直接登录",
+	cloud_register_tab: "创建新账户",
+	// 注册表单
+	cloud_register_title: "创建 ZPass 账户",
+	cloud_register_sub: "主密码在本地加密你的保险库，服务端不可见。",
+	cloud_new_password_placeholder: "主密码",
+	cloud_confirm_password_placeholder: "确认主密码",
+	cloud_register_submit: "创建账户",
+	cloud_register_loading: "账户创建中…",
+	// Secret Key 存档步骤
+	cloud_secretkey_title: "保存你的 Secret Key",
+	cloud_secretkey_sub: "请写下或存放到安全的地方，这是唯一的副本。",
+	cloud_secretkey_label: "Secret Key",
+	cloud_secretkey_placeholder: "Z1-...",
+	cloud_secretkey_save_warning:
+		"此 Secret Key 一旦丢失无法找回。ZPass 不会在任何地方存储它——你是唯一的持有者。没有它，你的数据将无法解密。",
+	cloud_secretkey_saved_checkbox: "我已将 Secret Key 保存到安全的地方",
+	cloud_continue: "继续",
+	// Server URL 配置
+	cloud_server_url_label: "服务端地址",
+	cloud_server_url_desc: "输入 ZPass 同步服务的 URL。",
+	cloud_server_save: "保存",
+	// 错误 key
+	cloud_err_credentials: "邮箱、密码或 Secret Key 不正确。",
+	cloud_err_not_configured: "尚未配置同步服务端，请先在上方填写服务器地址。",
+	cloud_err_mfa: "需要多因素认证。",
+	cloud_err_generic: "出现了问题，请重试。",
+	cloud_err_pwd_mismatch: "两次输入的密码不一致。",
+	cloud_err_secretkey_required: "登录需要提供 Secret Key。",
+	cloud_err_secretkey_format:
+		"Secret Key 格式不对 —— 应以 Z1- 开头,后接 account id 与 key 主体。请粘贴你创建账户时拿到的那串完整 key;还没有账户请选择「创建新账户」。",
+	// 设置区块
+	cloud_settings_title: "云端同步",
+	cloud_settings_desc: "通过 ZPass 账户在多设备间安全同步保险库。",
+	cloud_not_signed_in: "未登录",
+	cloud_signin_btn: "登录",
+	cloud_signout: "退出登录",
+	cloud_token_persisted: "token 已持久化",
+	// 空间同步
+	cloud_enable_for_space: "为此空间启用云同步",
+	cloud_synced: "云同步已启用",
+	cloud_unlink: "解除绑定",
+	// 立即同步
+	cloud_sync_now: "立即同步",
+	cloud_sync_done_summary: "已拉取 {{pulled}} 条，已推送 {{pushed}} 条",
+	// 进度阶段
+	cloud_progress_pushing: "推送变更中",
+	cloud_progress_pulling: "拉取变更中",
+	cloud_progress_conflict: "等待冲突解决",
+	cloud_progress_done: "同步完成",
+	cloud_progress_error: "同步出错",
+	// 冲突解决
+	cloud_conflicts_pending: "{{count}} 条冲突待处理",
+	cloud_resolve_conflicts: "解决冲突",
+	cloud_conflict_title: "解决冲突（{{idx}} / {{total}}）",
+	cloud_conflict_local: "本机",
+	cloud_conflict_remote: "云端（远端）",
+	cloud_conflict_all_local: "全部保留本机",
+	cloud_conflict_all_remote: "全部保留云端",
+	cloud_conflict_all_skip: "全部跳过",
+	cloud_conflict_prev: "上一条",
+	cloud_conflict_next: "下一条",
+	cloud_conflict_duplicate: "两份都保留",
+	cloud_conflict_duplicate_hint: "将两个版本作为独立条目分别保存",
+	cloud_conflict_skip: "跳过",
+	cloud_conflict_skip_hint: "保留本机版本，忽略云端版本",
+	cloud_conflict_apply: "应用全部",
 };

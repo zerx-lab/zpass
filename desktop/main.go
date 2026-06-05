@@ -143,6 +143,7 @@ type deps struct {
 	sshAgent      *services.SshAgentService
 	browserBridge *services.BrowserBridgeServer
 	sync          *services.SyncService
+	cloud         *services.CloudService
 	registry      *wailscompat.Registry
 	hub           *wailscompat.Hub
 }
@@ -175,9 +176,25 @@ func buildServices() (*deps, error) {
 	}
 
 	hub := wailscompat.NewHub()
-	emit := hub.EmitterFunc()
+	hubEmit := hub.EmitterFunc()
+
+	// CloudService owns the zero-knowledge cloud account session and per-vault
+	// sync. It emits cloud:* progress/auth events over the same hub.
+	cloudSvc := services.NewCloudService(vault)
+
+	// emit wraps the hub emitter so a local vault change also nudges an
+	// automatic cloud sync (debounced) — the push half of auto-sync; the
+	// periodic loop + sign-in kick cover remote pulls.
+	emit := func(event string, payload any) {
+		hubEmit(event, payload)
+		if event == "vault:changed" {
+			cloudSvc.NudgeSync()
+		}
+	}
 	sshAgent.SetEventEmitter(emit)
 	vault.SetEventEmitter(emit)
+	cloudSvc.SetEventEmitter(emit)
+	cloudSvc.StartBackgroundSync()
 
 	syncSvc := services.NewSyncService(vault)
 
@@ -189,6 +206,7 @@ func buildServices() (*deps, error) {
 	registry.Register("SshAgentService", sshAgent)
 	registry.Register("ExportService", services.NewExportService(vault))
 	registry.Register("SyncService", syncSvc)
+	registry.Register("CloudService", cloudSvc)
 
 	// Re-adopt a background agent that the previous GUI run left alive.
 	// Same logic as the old Wails main.go — see SshAgentService.Shutdown
@@ -209,6 +227,7 @@ func buildServices() (*deps, error) {
 		sshAgent:      sshAgent,
 		browserBridge: browserBridge,
 		sync:          syncSvc,
+		cloud:         cloudSvc,
 		registry:      registry,
 		hub:           hub,
 	}, nil
@@ -227,6 +246,9 @@ func (d *deps) shutdown() {
 	if d.sync != nil {
 		_ = d.sync.StopServer()
 		_ = d.sync.Disconnect()
+	}
+	if d.cloud != nil {
+		_ = d.cloud.Stop()
 	}
 	if d.sshAgent != nil {
 		_ = d.sshAgent.Shutdown()

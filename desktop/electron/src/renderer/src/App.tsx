@@ -1,11 +1,12 @@
 import { RouterProvider } from "react-router-dom";
-import { router } from "@/app/router";
-import { LockSync } from "@/app/LockSync";
-import { ThemeSync } from "@/app/ThemeSync";
-import { Shortcuts } from "@/app/Shortcuts";
 import { AutoLock } from "@/app/AutoLock";
-import { VaultEventSync } from "@/app/VaultEventSync";
+import { CloudEventSync } from "@/app/CloudEventSync";
+import { LockSync } from "@/app/LockSync";
+import { router } from "@/app/router";
+import { Shortcuts } from "@/app/Shortcuts";
 import { SpaceSync } from "@/app/SpaceSync";
+import { ThemeSync } from "@/app/ThemeSync";
+import { VaultEventSync } from "@/app/VaultEventSync";
 import { ApprovalToast } from "@/features/sshagent/ApprovalToast";
 
 /**
@@ -55,6 +56,12 @@ export function App() {
 			 */}
 			<LockSync />
 			<VaultEventSync />
+			{/*
+			 * 云同步事件桥 —— 订阅 cloud:* 后端事件，驱动 useCloudStore 状态更新
+			 * （同步进度 / 认证变化 / 冲突通知）。同时在 mount 时调用 init()
+			 * 初始化云端配置并拉取 status，所有路由均生效。
+			 */}
+			<CloudEventSync />
 			{/*
 			 * 空间隔离同步 —— 把前端 activeSpaceId 推给后端 currentSpaceID，
 			 * 并在切空间 / 解锁时认领历史数据 + 重载列表。详见 SpaceSync.tsx。

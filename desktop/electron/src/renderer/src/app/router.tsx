@@ -87,6 +87,7 @@ import { Toast } from "@/components/Toast";
 import { GeneratorPage } from "@/features/generator/GeneratorPage";
 import { HealthPage } from "@/features/health/HealthPage";
 import { OnboardingPage } from "@/features/onboarding/OnboardingPage";
+import { CloudSyncSection } from "@/features/settings/CloudSyncSection";
 import { LanSyncSection } from "@/features/settings/LanSyncSection";
 import { SettingsLayout } from "@/features/settings/SettingsLayout";
 import { AboutSection } from "@/features/settings/sections/AboutSection";
@@ -295,6 +296,7 @@ export const router = createBrowserRouter([
 												element: <SshAgentSection />,
 											},
 											{ path: "lan-sync", element: <LanSyncSection /> },
+								{ path: "cloud-sync", element: <CloudSyncSection /> },
 											{ path: "about", element: <AboutSection /> },
 										],
 									},

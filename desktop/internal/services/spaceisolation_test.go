@@ -79,10 +79,10 @@ func hasSpaceColumn(t *testing.T, db *VaultDB) bool {
 	defer rows.Close()
 	for rows.Next() {
 		var (
-			cid             int
-			name, ctype     string
-			notnull, pk     int
-			dflt            any
+			cid         int
+			name, ctype string
+			notnull, pk int
+			dflt        any
 		)
 		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
 			t.Fatalf("scan pragma: %v", err)
@@ -99,7 +99,7 @@ func hasSpaceColumn(t *testing.T, db *VaultDB) bool {
 // ---------------------------------------------------------------------------
 
 // TestSpaceMigration_V4ToV5AddsColumn 验证 v4 老表（无 space_id）经
-// ensureVaultItemsV5Schema 后补齐列，且老行回填为 ''。
+// ensureVaultItemsV5Schema 后补齐列，且老行回填为 ”。
 func TestSpaceMigration_V4ToV5AddsColumn(t *testing.T) {
 	withTempHome(t)
 	db, err := OpenVaultDB()
@@ -266,7 +266,7 @@ func TestUpdateItem_PreservesSpace(t *testing.T) {
 // 3. ClaimOrphanItems
 // ---------------------------------------------------------------------------
 
-// makeOrphan 创建一条正常条目，再把它的 space_id 列改成 ''（模拟 v5 迁移遗留的
+// makeOrphan 创建一条正常条目，再把它的 space_id 列改成 ”（模拟 v5 迁移遗留的
 // orphan）。注意：此时密文内嵌的 SpaceID 仍是创建时的空间，故意制造「列与密文
 // 不一致」让认领去修复。
 func makeOrphan(t *testing.T, svc *VaultService, name string) string {

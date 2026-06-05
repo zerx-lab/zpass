@@ -827,7 +827,7 @@ func (s *VaultService) GetActiveSpace() string {
 	return s.currentSpaceID
 }
 
-// ClaimOrphanItems 把所有「未归属空间」（space_id=''）的历史条目认领到指定空间
+// ClaimOrphanItems 把所有「未归属空间」（space_id=”）的历史条目认领到指定空间
 //
 // 用途：v4→v5 迁移后老条目 space_id 为空（orphan）。前端首次解锁后调用本方法
 // （传当前激活空间）把这批历史数据一次性归到用户当前所在的空间，并由前端持久化

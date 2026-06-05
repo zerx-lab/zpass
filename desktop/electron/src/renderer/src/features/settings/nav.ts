@@ -1,6 +1,7 @@
 import {
 	AppWindow,
 	ArrowRightLeft,
+	Cloud,
 	Globe,
 	Info,
 	LayoutGrid,
@@ -81,6 +82,12 @@ export const NAV_ITEMS: NavItem[] = [
 		id: "lan-sync",
 		labelKey: "settings_section_lan_sync",
 		icon: ArrowRightLeft,
+		group: "security",
+	},
+	{
+		id: "cloud-sync",
+		labelKey: "cloud_settings_title",
+		icon: Cloud,
 		group: "security",
 	},
 	{

@@ -452,6 +452,76 @@ export const en = {
 	signin_err_password: "Password cannot be empty.",
 	signin_err_credentials: "Incorrect email or password.",
 
+	// Cloud sync —— 登录/注册/设置共用 key（前缀 cloud_）
+	// 登录页模式切换
+	cloud_signin_tab: "Sign in instead",
+	cloud_register_tab: "Create account",
+	// 注册表单
+	cloud_register_title: "Create your ZPass account",
+	cloud_register_sub: "Your master password encrypts your vault locally — we never see it.",
+	cloud_new_password_placeholder: "Master password",
+	cloud_confirm_password_placeholder: "Confirm master password",
+	cloud_register_submit: "Create account",
+	cloud_register_loading: "Creating account…",
+	// Secret Key 存档步骤
+	cloud_secretkey_title: "Save your Secret Key",
+	cloud_secretkey_sub: "Write it down or store it in a safe place. This is the only copy.",
+	cloud_secretkey_label: "Secret Key",
+	cloud_secretkey_placeholder: "Z1-...",
+	cloud_secretkey_save_warning:
+		"This Secret Key cannot be recovered if lost. ZPass stores it nowhere — you are the only holder. Without it, your data cannot be decrypted.",
+	cloud_secretkey_saved_checkbox: "I have saved my Secret Key somewhere safe",
+	cloud_continue: "Continue",
+	// Server URL 配置
+	cloud_server_url_label: "Server URL",
+	cloud_server_url_desc: "Enter the URL of your ZPass sync server.",
+	cloud_server_save: "Save",
+	// 错误 key
+	cloud_err_credentials: "Incorrect email, password, or Secret Key.",
+	cloud_err_not_configured: "No sync server configured. Please enter a server URL above.",
+	cloud_err_mfa: "Multi-factor authentication is required.",
+	cloud_err_generic: "Something went wrong. Please try again.",
+	cloud_err_pwd_mismatch: "Passwords do not match.",
+	cloud_err_secretkey_required: "Secret Key is required to sign in.",
+	cloud_err_secretkey_format:
+		"That Secret Key doesn't look right — it starts with Z1- followed by your account id and the key body. Paste the exact key from when you created your account; if you don't have one yet, choose Create account.",
+	// 设置区块
+	cloud_settings_title: "Cloud sync",
+	cloud_settings_desc: "Sync your vault securely across devices using your ZPass account.",
+	cloud_not_signed_in: "Not signed in",
+	cloud_signin_btn: "Sign in",
+	cloud_signout: "Sign out",
+	cloud_token_persisted: "token persisted",
+	// 空间同步
+	cloud_enable_for_space: "Enable cloud sync for this space",
+	cloud_synced: "Cloud sync enabled",
+	cloud_unlink: "Unlink",
+	// 立即同步
+	cloud_sync_now: "Sync now",
+	cloud_sync_done_summary: "Pulled {{pulled}}, pushed {{pushed}}",
+	// 进度阶段
+	cloud_progress_pushing: "Pushing changes",
+	cloud_progress_pulling: "Pulling changes",
+	cloud_progress_conflict: "Awaiting conflict resolution",
+	cloud_progress_done: "Sync complete",
+	cloud_progress_error: "Sync error",
+	// 冲突解决
+	cloud_conflicts_pending: "{{count}} conflict(s) pending",
+	cloud_resolve_conflicts: "Resolve conflicts",
+	cloud_conflict_title: "Resolve conflicts ({{idx}} / {{total}})",
+	cloud_conflict_local: "This device",
+	cloud_conflict_remote: "Cloud (remote)",
+	cloud_conflict_all_local: "All: keep local",
+	cloud_conflict_all_remote: "All: keep remote",
+	cloud_conflict_all_skip: "All: skip",
+	cloud_conflict_prev: "Previous",
+	cloud_conflict_next: "Next",
+	cloud_conflict_duplicate: "Keep both",
+	cloud_conflict_duplicate_hint: "Save both copies as separate entries",
+	cloud_conflict_skip: "Skip",
+	cloud_conflict_skip_hint: "Keep local, ignore remote",
+	cloud_conflict_apply: "Apply all",
+
 	// Onboarding —— 首次引导：创建第一个空间
 	onboarding_back: "Back",
 	onboarding_step: "Step 1 · Create your first workspace",

@@ -151,10 +151,10 @@ type otpParams struct {
 //   - 其它字段（otp_digits/otp_period/otp_algorithm/hotp_counter）同理
 //
 // 解析顺序：
-//   1. 先建立默认值（totp / SHA1 / 6 / 30 / counter=0）
-//   2. 如果 secret 字段是 otpauth:// URI，解析 URI 覆盖默认值
-//   3. fields 显式字段（otp_type/...）再次覆盖（用户在编辑表单上明确配置）
-//   4. 根据最终 type 调整 Steam 的默认 5 位 + Steam encoder
+//  1. 先建立默认值（totp / SHA1 / 6 / 30 / counter=0）
+//  2. 如果 secret 字段是 otpauth:// URI，解析 URI 覆盖默认值
+//  3. fields 显式字段（otp_type/...）再次覆盖（用户在编辑表单上明确配置）
+//  4. 根据最终 type 调整 Steam 的默认 5 位 + Steam encoder
 func extractOTPParams(fields map[string]any) (*otpParams, error) {
 	rawSecret, _ := fields["totp"].(string)
 	if strings.TrimSpace(rawSecret) == "" {
@@ -501,11 +501,11 @@ func computeOTP(p *otpParams, now time.Time) (*TOTPCode, error) {
 // 字段语义：
 //   - Secret         ：base32 密钥（必填，否则视为解析失败）
 //   - Type           ：URI path 头部的算法类型（"totp"/"hotp"/"steam"，
-//                      若未识别则为空字符串，由调用方走默认 totp）
+//     若未识别则为空字符串，由调用方走默认 totp）
 //   - Algorithm      ：URI ?algorithm=SHA1 等，0 表示未指定
 //   - Digits         ：URI ?digits=6 等，0 表示未指定
 //   - DigitsExplicit ：URI 是否显式给了 digits（用于区分"6 因为没填"和
-//                      "6 因为用户填了 6"，影响 Steam 默认 5 位的回退逻辑）
+//     "6 因为用户填了 6"，影响 Steam 默认 5 位的回退逻辑）
 //   - Period         ：URI ?period=30 等，0 表示未指定
 //   - Counter        ：URI ?counter=N（HOTP 必填）
 //   - HasCounter     ：URI 是否显式给了 counter

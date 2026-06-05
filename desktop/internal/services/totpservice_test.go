@@ -48,7 +48,8 @@ import (
 // loginWithTOTP 构造一个带 TOTP 密钥的 login 条目
 //
 // 密钥来自 RFC 6238 / Google Authenticator 文档常用的示例 base32：
-//   "JBSWY3DPEHPK3PXP" → "Hello!\xde\xad\xbe\xef"
+//
+//	"JBSWY3DPEHPK3PXP" → "Hello!\xde\xad\xbe\xef"
 func loginWithTOTP(name string, secret string) ItemPayload {
 	in := loginItemFixture(name)
 	in.Fields["totp"] = secret
@@ -467,10 +468,10 @@ const steamCharSet = "23456789BCDFGHJKMNPQRTVWXY"
 //
 // 不能像 RFC 4226 那样写"绝对码"测试 —— Steam Guard 的算法是基于当前
 // 时间的，没有官方公布的固定测试向量；我们退而求其次，验证：
-//   1. 长度是 5（Steam 官方）
-//   2. 每个字符都来自 Steam 字母表
-//   3. type 字段标记为 steam
-//   4. Period/Remaining 仍然有意义（Steam 是基于时间的）
+//  1. 长度是 5（Steam 官方）
+//  2. 每个字符都来自 Steam 字母表
+//  3. type 字段标记为 steam
+//  4. Period/Remaining 仍然有意义（Steam 是基于时间的）
 func TestSteamGuard_OutputFormat(t *testing.T) {
 	svc, _ := newTestService(t)
 	if err := svc.Initialize("test-master-password"); err != nil {

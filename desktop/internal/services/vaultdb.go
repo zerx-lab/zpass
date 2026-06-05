@@ -95,7 +95,14 @@ const (
 	// v4 → v5：vault_items 新增 space_id 列（空间隔离）+ 索引。每个条目归属
 	// 一个「空间(Space)」，所有读写按当前激活空间过滤；老条目迁移时 space_id
 	// 默认 ''（orphan，待前端首次解锁后认领到当前激活空间）。
-	vaultSchemaVersion = 5
+	// v5 → v6：新增 cloud_vaults 表（云同步空间↔vault 绑定）。把本地 space
+	// 绑定到云端 server 分配的 vault_id；同步引擎据此把该空间条目推送/拉取到
+	// 对应云 vault。无敏感数据（vault_key 只在内存，绝不落盘）。
+	// v6 → v7：cloud_vaults 新增 account_id 列（云账户隔离）。绑定按云账户
+	// 归属，同步只处理当前登录账户的绑定 —— 否则换账户登录后旧绑定指向的
+	// vault 当前账户非成员，member/self 返 404 打断同步。老绑定 account_id
+	// 回填为 ''，被当前账户过滤掉（需重新 link），不再产生 404。
+	vaultSchemaVersion = 7
 
 	// kdfNameArgon2id 写入 vault_meta.kdf 字段的标识
 	// 未来若引入新 KDF（比如 PHC 接班的算法），这里增加新常量并在
@@ -144,7 +151,7 @@ type VaultMeta struct {
 // 顶层缓存方便 SQL 层快速过滤；权威值仍在加密 payload 内（AEAD 保护）。
 //
 // SpaceID 空间归属（明文列）—— 空间隔离：
-//   - '' = orphan（v4→v5 迁移的老条目，待前端认领到当前激活空间）
+//   - ” = orphan（v4→v5 迁移的老条目，待前端认领到当前激活空间）
 //   - 非空 = 该条目所属空间 id（与前端 spaces store 的 Space.id 对应）
 //
 // 明文化 space_id 是刻意的：它只是 UI 分组标识，不是敏感字段（不像 password）。
@@ -363,6 +370,14 @@ func (db *VaultDB) initSchema() error {
 	if err := db.ensureVaultItemsV5Schema(); err != nil {
 		return fmt.Errorf("ensure vault_items v5 schema: %w", err)
 	}
+	// v6 的 cloud_vaults 表（云同步绑定）—— 幂等 CREATE TABLE IF NOT EXISTS。
+	if err := db.ensureCloudVaultsSchema(); err != nil {
+		return fmt.Errorf("ensure cloud_vaults v6 schema: %w", err)
+	}
+	// v7：cloud_vaults 幂等补 account_id 列（老 v6 表缺此列）。
+	if err := db.ensureCloudVaultsAccountColumn(); err != nil {
+		return fmt.Errorf("ensure cloud_vaults v7 account_id: %w", err)
+	}
 
 	// 若 vault_meta 已有行，检查 version；落后就跑 migrate
 	// 没有行（首次启动 / 未 Initialize）则跳过迁移，由 Initialize 直接
@@ -450,8 +465,8 @@ func (db *VaultDB) ensureVaultItemsV4Schema() error {
 //
 // 与 ensureVaultItemsV4Schema 完全相同的幂等模式：
 //  1. PRAGMA table_info(vault_items) 看是否已有 space_id 列
-//  2. 没有 → ALTER TABLE vault_items ADD COLUMN space_id TEXT NOT NULL DEFAULT ''
-//     —— SQLite 允许给非空列加默认值，已有行自动回填 ''（=orphan，待认领）
+//  2. 没有 → ALTER TABLE vault_items ADD COLUMN space_id TEXT NOT NULL DEFAULT ”
+//     —— SQLite 允许给非空列加默认值，已有行自动回填 ”（=orphan，待认领）
 //  3. CREATE INDEX IF NOT EXISTS idx_vault_items_space（按空间+时间复合，仅活动行）
 //
 // 调用时机：每次 initSchema 启动都跑一次，无论 vault 是否已 Initialize；
@@ -577,6 +592,20 @@ func (db *VaultDB) migrate(from, to int) error {
 			// 待前端首次解锁后 ClaimOrphanItems 认领到当前激活空间）。
 			if err := db.ensureVaultItemsV5Schema(); err != nil {
 				return fmt.Errorf("v5: ensure space_id schema: %w", err)
+			}
+		case 6:
+			// v5 → v6：新增 cloud_vaults 表（云同步空间↔vault 绑定）。
+			// 同 v4/v5，实际改动已在 initSchema 头部的 ensureCloudVaultsSchema()
+			// 幂等执行过；此处只需确认成功。老 vault 无云绑定，表为空即可。
+			if err := db.ensureCloudVaultsSchema(); err != nil {
+				return fmt.Errorf("v6: ensure cloud_vaults schema: %w", err)
+			}
+		case 7:
+			// v6 → v7：cloud_vaults 新增 account_id 列（云账户隔离）。
+			// 实际改动已在 initSchema 头部的 ensureCloudVaultsAccountColumn()
+			// 幂等执行过；此处只需确认成功。
+			if err := db.ensureCloudVaultsAccountColumn(); err != nil {
+				return fmt.Errorf("v7: ensure cloud_vaults account_id: %w", err)
 			}
 		}
 		// 落版本号 —— 每个分支结束后单独 UPDATE，避免某个分支内部
@@ -805,9 +834,9 @@ func scanItemRows(rows *sql.Rows) ([]VaultItemRow, error) {
 // ListItemsBySpace 返回指定空间的「未删除」条目（按 updated_at 倒序）
 //
 // 空间隔离的核心查询：vaultservice.ListItems 在持有当前激活空间时调本方法，
-// 走 idx_vault_items_space 复合部分索引。spaceID 为 '' 时返回 orphan（未认领）
-// 条目 —— 但 vaultservice 层禁止 currentSpaceID 为 ''（见 ErrSpaceNotSelected），
-// 所以正常路径不会用 '' 调到这里；DB 层不额外拦截，保持职责单一。
+// 走 idx_vault_items_space 复合部分索引。spaceID 为 ” 时返回 orphan（未认领）
+// 条目 —— 但 vaultservice 层禁止 currentSpaceID 为 ”（见 ErrSpaceNotSelected），
+// 所以正常路径不会用 ” 调到这里；DB 层不额外拦截，保持职责单一。
 func (db *VaultDB) ListItemsBySpace(spaceID string) ([]VaultItemRow, error) {
 	rows, err := db.handle.Query(`
 		SELECT id, payload, created_at, updated_at, deleted_at, space_id
@@ -821,7 +850,7 @@ func (db *VaultDB) ListItemsBySpace(spaceID string) ([]VaultItemRow, error) {
 	return scanItemRows(rows)
 }
 
-// ListOrphanItems 返回所有 space_id = '' 的条目（含 tombstone）
+// ListOrphanItems 返回所有 space_id = ” 的条目（含 tombstone）
 //
 // 供 vaultservice.ClaimOrphanItems 一次性认领历史数据用。**含 tombstone**：
 // orphan 墓碑也必须被认领，否则它们永远是孤儿，且会在同步时把「未归属」状态
@@ -1113,7 +1142,7 @@ func (db *VaultDB) RestoreItem(id string, payload []byte, updatedAt int64) error
 // UpdateItemSpace 改写条目的 payload + space_id（**不动** created_at / updated_at / deleted_at）
 //
 // 专供 vaultservice.ClaimOrphanItems 认领历史 orphan 条目用：把 space_id 从
-// '' 改成目标空间，同时重写 payload（其内嵌的 SpaceID 字段也要更新，供同步
+// ” 改成目标空间，同时重写 payload（其内嵌的 SpaceID 字段也要更新，供同步
 // 跨设备传播）。时间戳保持不变是刻意的 —— 认领不是「修改」，不应改变条目在
 // 列表里的排序，也不应污染同步的 LWW（last-write-wins）顺序把它顶成「最新」。
 //
@@ -1144,7 +1173,7 @@ func (db *VaultDB) UpdateItemSpace(id, spaceID string, payload []byte) error {
 // SetItemSpace 仅改写条目的 space_id 列（不动 payload / 时间戳）
 //
 // 给 ClaimOrphanItems 处理「密文损坏、无法解密重写 payload」的 orphan 条目用：
-// 至少把它从 '' 归属到目标空间，避免永久孤儿（否则它每次启动都被当 orphan
+// 至少把它从 ” 归属到目标空间，避免永久孤儿（否则它每次启动都被当 orphan
 // 重复扫描）。正常条目走 UpdateItemSpace（连 payload 内嵌 SpaceID 一起重写）。
 //
 // 找不到 id 返回 ErrItemNotFound。
