@@ -13,7 +13,7 @@
 //
 // 本页是 Sync.ets（client）的服务端对应，沿用相同的视觉语言（hero / 卡片 / 顶栏）。
 
-import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
+import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType, alpha1f } from '../theme/Tokens';
 import { safeAreaState, SafeAreaState } from '../state/SafeArea';
 import { vaultStore, VaultStore } from '../state/VaultStore';
 import { promptAction, router } from '@kit.ArkUI';
@@ -220,7 +220,7 @@ struct SyncHostPage {
       .width(56)
       .height(56)
       .borderRadius(ZRadius.xl)
-      .backgroundColor(`${this.zc.info}1f`)
+      .backgroundColor(alpha1f(this.zc.info))
       .justifyContent(FlexAlign.Center)
       .alignItems(HorizontalAlign.Center)
       .margin({ bottom: ZSpacing.xs });
@@ -320,7 +320,7 @@ struct SyncHostPage {
     }
     .width('100%')
     .alignItems(VerticalAlign.Center)
-    .backgroundColor(`${this.zc.warn}1f`)
+    .backgroundColor(alpha1f(this.zc.warn))
     .borderRadius(ZRadius.lg)
     .padding({
       left: ZSpacing.md,

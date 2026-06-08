@@ -11,7 +11,7 @@
 // 鸿蒙端无 ActivityIndicator，进度阶段用文本 + 进度条体现。
 // PIN 输入用透明 TextInput 叠在 6 格视觉层上，与 phone 视觉等价。
 
-import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
+import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType, alpha1f } from '../theme/Tokens';
 import { vaultStore } from '../state/VaultStore';
 import { safeAreaState, SafeAreaState } from '../state/SafeArea';
 import { promptAction, router } from '@kit.ArkUI';
@@ -138,7 +138,7 @@ struct SyncPage {
             .width(56)
             .height(56)
             .borderRadius(ZRadius.xl)
-            .backgroundColor(`${this.zc.info}1f`)
+            .backgroundColor(alpha1f(this.zc.info))
             .justifyContent(FlexAlign.Center)
             .alignItems(HorizontalAlign.Center)
             .margin({ bottom: ZSpacing.xs });
@@ -433,7 +433,7 @@ struct SyncPage {
         .width(28)
         .height(28)
         .borderRadius(ZRadius.md)
-        .backgroundColor(`${this.zc.ok}1f`)
+        .backgroundColor(alpha1f(this.zc.ok))
         .justifyContent(FlexAlign.Center)
         .alignItems(HorizontalAlign.Center);
         Text('同步完成')
@@ -477,7 +477,7 @@ struct SyncPage {
           top: ZSpacing.sm,
           bottom: ZSpacing.sm,
         })
-        .backgroundColor(`${this.zc.warn}1f`)
+        .backgroundColor(alpha1f(this.zc.warn))
         .borderRadius(ZRadius.md);
       }
     }
@@ -515,7 +515,7 @@ struct SyncPage {
         .width(28)
         .height(28)
         .borderRadius(ZRadius.md)
-        .backgroundColor(`${this.zc.danger}1f`)
+        .backgroundColor(alpha1f(this.zc.danger))
         .justifyContent(FlexAlign.Center)
         .alignItems(HorizontalAlign.Center);
         Text('同步失败')

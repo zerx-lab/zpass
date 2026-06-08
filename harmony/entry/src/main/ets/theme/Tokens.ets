@@ -172,6 +172,15 @@ export class ZColorsClass {
 
 export const ZColors: ZColorsClass = new ZColorsClass();
 
+/**
+ * 将 6 位 hex (#RRGGBB) 转换为 ArkUI 的 12% 透明前缀格式 (#1fRRGGBB / #AARRGGBB)。
+ * ArkUI 8 位十六进制格式为 #AARRGGBB，alpha 在最前，与 CSS/RN 的 #RRGGBBAA 相反。
+ * 传入非标准格式（非 '#' 开头或长度不为 7）时原样返回。
+ */
+export function alpha1f(hex: string): string {
+  return hex.length === 7 && hex.charAt(0) === '#' ? '#1f' + hex.substring(1) : hex;
+}
+
 export class ZSpacing {
   static readonly xs: number = 4;
   static readonly sm: number = 8;

@@ -7,7 +7,7 @@
 // 这样 KDF 等待发生在最后，避免在第一步就占用 UI 数秒。
 // 主密码不可找回 —— 用户应在第一步看到"不可恢复"提示。
 
-import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
+import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType, alpha1f } from '../theme/Tokens';
 import { vaultStore, type VaultStore } from '../state/VaultStore';
 import { estimateStrength, type Strength } from '../lib/Password';
 import { safeAreaState, SafeAreaState } from '../state/SafeArea';
@@ -343,7 +343,7 @@ export struct OnboardingOverlay {
     }
     .width('100%')
     .padding({ left: ZSpacing.sm, right: ZSpacing.sm, top: 6, bottom: 6 })
-    .backgroundColor(this.zc.danger + '1f')
+    .backgroundColor(alpha1f(this.zc.danger))
     .borderRadius(ZRadius.md)
     .margin({ top: ZSpacing.sm });
   }
@@ -510,7 +510,7 @@ export struct OnboardingOverlay {
       .width(20)
       .height(20)
       .borderRadius(10)
-      .backgroundColor(this.zc.ok + '1f')
+      .backgroundColor(alpha1f(this.zc.ok))
       .justifyContent(FlexAlign.Center)
       .alignItems(HorizontalAlign.Center);
 

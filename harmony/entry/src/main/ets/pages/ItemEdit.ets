@@ -13,7 +13,7 @@
 //     breached / strength 等未知键，避免编辑回存丢字段
 //   - 保存时序列化为 ItemPayload.fields 透传 vaultService
 
-import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
+import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType, alpha1f } from '../theme/Tokens';
 import { vaultStore, type VaultStore } from '../state/VaultStore';
 import type { UpdateItemPatch, VaultItemType } from '../lib/VaultService';
 import { typeLabel } from '../lib/Format';
@@ -987,7 +987,7 @@ struct ItemEdit {
       }
       .width(32).height(32)
       .borderRadius(ZRadius.sm)
-      .backgroundColor(this.isFavorite ? (this.zc.warn + '1f') : this.zc.bgActive)
+      .backgroundColor(this.isFavorite ? alpha1f(this.zc.warn) : this.zc.bgActive)
       .justifyContent(FlexAlign.Center)
       .alignItems(VerticalAlign.Center);
 

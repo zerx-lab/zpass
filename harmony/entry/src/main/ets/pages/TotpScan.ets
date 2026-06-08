@@ -9,7 +9,7 @@
 // 鸿蒙优势：用 ScanKit 比 phone 自实现 BarCodeScanner 简单一大截 ——
 // 系统级 UI + 权限弹窗 + 解码全包了。
 
-import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
+import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType, alpha1f } from '../theme/Tokens';
 import { parseOtpauth, formatBase32Groups, type OtpMeta, type OtpParseError } from '../lib/Totp';
 import { scanBarcode, scanCore } from '@kit.ScanKit';
 import { promptAction, router } from '@kit.ArkUI';
@@ -248,7 +248,7 @@ struct TotpScan {
             }
             .height(28)
             .padding({ left: ZSpacing.sm, right: ZSpacing.sm })
-            .backgroundColor(this.zc.ok + '1f')
+            .backgroundColor(alpha1f(this.zc.ok))
             .borderRadius(ZRadius.md)
             .alignItems(VerticalAlign.Center);
 
@@ -326,7 +326,7 @@ struct TotpScan {
               }
               .width(64).height(64)
               .borderRadius(ZRadius.xl)
-              .backgroundColor(this.zc.warn + '1f')
+              .backgroundColor(alpha1f(this.zc.warn))
               .justifyContent(FlexAlign.Center)
               .alignItems(HorizontalAlign.Center);
 

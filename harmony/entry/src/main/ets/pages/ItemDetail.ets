@@ -18,7 +18,7 @@ import { copyEphemeral, copyText } from '../lib/Clipboard';
 import { generateTotp, formatTotpCode, totpRemaining, TOTP_PERIOD } from '../lib/Totp';
 import { estimateStrength, strengthLabel, crackTime } from '../lib/Password';
 import { parseCustomFields, CustomField } from '../lib/CustomFields';
-import { promptAction, router } from '@kit.ArkUI';
+import { floatingBall, promptAction, router } from '@kit.ArkUI';
 import { safeAreaState, SafeAreaState } from '../state/SafeArea';
 
 interface VisibleField {
@@ -67,6 +67,9 @@ struct ItemDetail {
   /** 遮蔽圆点索引（避免在 build 内写数组字面量） */
   private maskRange: number[] = [0, 1, 2, 3, 4, 5];
 
+  /** 悬浮球控制器（仅 login 类型且有密码时创建） */
+  private fbCtrl: floatingBall.FloatingBallController | null = null;
+
   aboutToAppear(): void {
     const params = router.getParams() as Record<string, Object> | null;
     if (params && typeof params.id === 'string') {
@@ -82,6 +85,42 @@ struct ItemDetail {
 
   aboutToDisappear(): void {
     this.stopTotpTicker();
+    this.stopFloatingBall();
+  }
+
+  private startFloatingBall(password: string): void {
+    if (!floatingBall.isFloatingBallEnabled()) return;
+    if (this.fbCtrl) return;
+    const preview = password.length > 10 ? password.substring(0, 10) + '...' : password;
+    floatingBall.create({ context: getContext(this) })
+      .then((ctrl: floatingBall.FloatingBallController) => {
+        this.fbCtrl = ctrl;
+        return ctrl.startFloatingBall({
+          template: floatingBall.FloatingBallTemplate.EMPHATIC,
+          title: preview,
+          content: '复制密码',
+          backgroundColor: '#FFFFFF',
+        });
+      })
+      .then(() => {
+        if (!this.fbCtrl) return;
+        this.fbCtrl.on('click', (): void => {
+          copyEphemeral(password).catch(() => {});
+        });
+      })
+      .catch(() => {
+        this.fbCtrl = null;
+      });
+  }
+
+  private stopFloatingBall(): void {
+    if (!this.fbCtrl) return;
+    const ctrl = this.fbCtrl;
+    this.fbCtrl = null;
+    try {
+      ctrl.off('click');
+    } catch (_e) {}
+    ctrl.stopFloatingBall().catch(() => {});
   }
 
   private async load(id: string): Promise<void> {
@@ -97,6 +136,13 @@ struct ItemDetail {
       this.errorText = '';
       this.isFavorite = it.fields.favorite === true;
       this.maybeStartTotpTicker();
+      // 首次加载 login 且有密码时启动悬浮球（onPageShow 再次调用时 fbCtrl 已存在，跳过）
+      if (it.type === 'login' && !this.fbCtrl) {
+        const pw = (it.fields.password as string | undefined) ?? '';
+        if (pw.length > 0) {
+          this.startFloatingBall(pw);
+        }
+      }
     } catch (e) {
       this.errorText = (e as Error).message;
     }
@@ -598,16 +644,19 @@ struct ItemDetail {
 
   @Builder
   fieldCard(fields: VisibleField[]) {
-    Column({ space: 0 }) {
-      ForEach(fields, (f: VisibleField, idx: number) => {
-        this.fieldRow(f, idx === fields.length - 1);
-      }, (f: VisibleField) => f.key);
+    Column() {
+      Column({ space: 0 }) {
+        ForEach(fields, (f: VisibleField, idx: number) => {
+          this.fieldRow(f, idx === fields.length - 1);
+        }, (f: VisibleField) => f.key);
+      }
+      .width('100%')
+      .backgroundColor(this.zc.bgElev)
+      .borderRadius(ZRadius.xl)
+      .clip(true);
     }
     .width('100%')
-    .backgroundColor(this.zc.bgElev)
-    .borderRadius(ZRadius.xl)
-    .clip(true)
-    .margin({ left: ZSpacing.lg, right: ZSpacing.lg });
+    .padding({ left: ZSpacing.lg, right: ZSpacing.lg });
   }
 
   /* ----- 遮蔽圆点（6 个，禁 unicode） ----- */

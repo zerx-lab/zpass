@@ -9,7 +9,7 @@
 // 本页不碰网络：只消费 @ObservedV2 syncServer 单例的 @Trace pendingConflicts，
 // 并调用 resolveConflict / applyMerge。敏感字段点按展开（禁 unicode，6 圆点遮罩）。
 
-import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
+import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType, alpha1f } from '../theme/Tokens';
 import { safeAreaState, SafeAreaState } from '../state/SafeArea';
 import { vaultStore } from '../state/VaultStore';
 import { promptAction, router } from '@kit.ArkUI';
@@ -482,7 +482,7 @@ struct SyncConflictsPage {
     }
     .padding({ left: ZSpacing.xs, right: ZSpacing.xs, top: 2, bottom: 2 })
     .borderRadius(ZRadius.sm)
-    .backgroundColor(`${tone === 'info' ? this.zc.info : this.zc.ok}1f`)
+    .backgroundColor(alpha1f(tone === 'info' ? this.zc.info : this.zc.ok))
     .alignItems(VerticalAlign.Center);
   }
 

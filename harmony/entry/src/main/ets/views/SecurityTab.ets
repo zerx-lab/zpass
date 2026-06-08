@@ -7,7 +7,7 @@
 //
 // 网络扫描缓存：进程内 Map，vault 锁定时一并清空（在 vaultStore.lock() 里调）。
 
-import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
+import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType, alpha1f } from '../theme/Tokens';
 import { vaultStore, type VaultStore } from '../state/VaultStore';
 import { estimateStrength } from '../lib/Password';
 import { batchCheckBreaches, type BreachableItem, type BreachResult } from '../lib/Breach';
@@ -323,7 +323,7 @@ export struct SecurityTab {
       .width(64)
       .height(64)
       .borderRadius(ZRadius.xl)
-      .backgroundColor(this.zc.ok + '1f')
+      .backgroundColor(alpha1f(this.zc.ok))
       .justifyContent(FlexAlign.Center)
       .alignItems(HorizontalAlign.Center)
       .margin({ bottom: ZSpacing.sm });
@@ -383,7 +383,7 @@ export struct SecurityTab {
           .width(56)
           .height(56)
           .borderRadius(28)
-          .backgroundColor(this.colorForScore(this.adjustedScore) + '1f')
+          .backgroundColor(alpha1f(this.colorForScore(this.adjustedScore)))
           .justifyContent(FlexAlign.Center)
           .alignItems(HorizontalAlign.Center);
 
@@ -458,7 +458,7 @@ export struct SecurityTab {
       .width(38)
       .height(38)
       .borderRadius(ZRadius.lg)
-      .backgroundColor(accent + '1f')
+      .backgroundColor(alpha1f(accent))
       .justifyContent(FlexAlign.Center)
       .alignItems(HorizontalAlign.Center);
 
@@ -604,7 +604,7 @@ export struct SecurityTab {
       .width(56)
       .height(56)
       .borderRadius(ZRadius.xl)
-      .backgroundColor(this.zc.ok + '1f')
+      .backgroundColor(alpha1f(this.zc.ok))
       .justifyContent(FlexAlign.Center)
       .alignItems(HorizontalAlign.Center)
       .margin({ bottom: ZSpacing.xs });
@@ -635,7 +635,7 @@ export struct SecurityTab {
       .width(56)
       .height(56)
       .borderRadius(ZRadius.xl)
-      .backgroundColor(this.zc.warn + '1f')
+      .backgroundColor(alpha1f(this.zc.warn))
       .justifyContent(FlexAlign.Center)
       .alignItems(HorizontalAlign.Center)
       .margin({ bottom: ZSpacing.xs });
@@ -691,7 +691,7 @@ export struct SecurityTab {
               .width(32)
               .height(32)
               .borderRadius(ZRadius.md)
-              .backgroundColor(this.zc.danger + '1f')
+              .backgroundColor(alpha1f(this.zc.danger))
               .justifyContent(FlexAlign.Center)
               .alignItems(HorizontalAlign.Center);
 
@@ -713,7 +713,7 @@ export struct SecurityTab {
               Text('已泄露')
                 .fontSize(ZType.captionSize)
                 .fontColor(this.zc.danger)
-                .backgroundColor(this.zc.danger + '1f')
+                .backgroundColor(alpha1f(this.zc.danger))
                 .borderRadius(ZRadius.md)
                 .padding({ left: 6, right: 6, top: 2, bottom: 2 });
 
@@ -767,7 +767,7 @@ export struct SecurityTab {
             .fontSize(ZType.captionSize)
             .fontWeight(FontWeight.Medium)
             .fontColor(this.actionItems.length > 5 ? this.zc.danger : this.zc.warn)
-            .backgroundColor((this.actionItems.length > 5 ? this.zc.danger : this.zc.warn) + '1f')
+            .backgroundColor(alpha1f(this.actionItems.length > 5 ? this.zc.danger : this.zc.warn))
             .borderRadius(ZRadius.md)
             .padding({ left: 6, right: 6, top: 2, bottom: 2 });
         }
@@ -792,7 +792,7 @@ export struct SecurityTab {
                 .width(32)
                 .height(32)
                 .borderRadius(ZRadius.md)
-                .backgroundColor(this.zc.danger + '1f')
+                .backgroundColor(alpha1f(this.zc.danger))
                 .justifyContent(FlexAlign.Center)
                 .alignItems(HorizontalAlign.Center);
 
@@ -814,7 +814,7 @@ export struct SecurityTab {
                 Text(issue.severity === 'breach' ? '已泄露' : '弱')
                   .fontSize(ZType.captionSize)
                   .fontColor(this.zc.danger)
-                  .backgroundColor(this.zc.danger + '1f')
+                  .backgroundColor(alpha1f(this.zc.danger))
                   .borderRadius(ZRadius.md)
                   .padding({ left: 6, right: 6, top: 2, bottom: 2 });
 
@@ -863,7 +863,7 @@ export struct SecurityTab {
       .width(56)
       .height(56)
       .borderRadius(ZRadius.xl)
-      .backgroundColor(this.zc.ok + '1f')
+      .backgroundColor(alpha1f(this.zc.ok))
       .justifyContent(FlexAlign.Center)
       .alignItems(HorizontalAlign.Center)
       .margin({ bottom: ZSpacing.xs });
