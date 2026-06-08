@@ -17,6 +17,7 @@
 import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
 import { safeAreaState, SafeAreaState } from '../state/SafeArea';
 import { vaultStore, type VaultStore, type VaultFilterType } from '../state/VaultStore';
+import { motionStore, MotionStore } from '../state/MotionStore';
 import type { ItemPayload } from '../lib/VaultService';
 import { faviconColor, faviconInitials, relativeTime, typeLabel } from '../lib/Format';
 import { estimateStrength } from '../lib/Password';
@@ -51,6 +52,7 @@ export struct VaultTab {
 
   /** 全局 store —— Local 引用同一个对象；@Trace 字段变更触发本组件重渲 */
   @Local store: VaultStore = vaultStore;
+  @Local ms: MotionStore = motionStore;
 
   /** 顶部空间面板是否展开 */
   @Local showSpacePicker: boolean = false;
@@ -59,8 +61,14 @@ export struct VaultTab {
   @Local activeFilterKey: ExtFilterKey = 'all';
 
   aboutToAppear(): void {
-    // 进入页面时刷新一次；解锁后 store 的状态可能已 ready
     this.store.refresh();
+    if (motionStore.gripEnabled) {
+      motionStore.subscribe();
+    }
+  }
+
+  aboutToDisappear(): void {
+    motionStore.unsubscribe();
   }
 
   private activeSpaceName(): string {
@@ -171,8 +179,7 @@ export struct VaultTab {
   }
 
   build() {
-    // 使用 Stack 实现 FAB 浮层（底部右下角固定按钮）
-    Stack({ alignContent: Alignment.BottomEnd }) {
+    Stack({ alignContent: (this.ms.gripEnabled && this.ms.holdingLeft) ? Alignment.BottomStart : Alignment.BottomEnd }) {
       Column() {
         Row().height(this.safeArea.top).width('100%');
 
@@ -231,30 +238,33 @@ export struct VaultTab {
         }
 
         // ── 搜索 ──
-        Row({ space: ZSpacing.sm }) {
-          Image($r('app.media.ic_search'))
-            .width(16)
-            .height(16)
-            .fillColor(this.zc.text3);
-          TextInput({ placeholder: '搜索', text: this.store.query })
-            .placeholderColor(this.zc.text3)
-            .placeholderFont({ size: ZType.bodySize })
-            .fontColor(this.zc.text)
-            .fontSize(ZType.bodySize)
-            .backgroundColor('#00000000')
-            .borderRadius(0)
-            .padding(0)
-            .layoutWeight(1)
-            .onChange((v: string) => {
-              this.store.query = v;
-            });
+        Column() {
+          Row({ space: ZSpacing.sm }) {
+            Image($r('app.media.ic_search'))
+              .width(16)
+              .height(16)
+              .fillColor(this.zc.text3);
+            TextInput({ placeholder: '搜索', text: this.store.query })
+              .placeholderColor(this.zc.text3)
+              .placeholderFont({ size: ZType.bodySize })
+              .fontColor(this.zc.text)
+              .fontSize(ZType.bodySize)
+              .backgroundColor('#00000000')
+              .borderRadius(0)
+              .padding(0)
+              .layoutWeight(1)
+              .onChange((v: string) => {
+                this.store.query = v;
+              });
+          }
+          .width('100%')
+          .height(38)
+          .padding({ left: ZSpacing.md, right: ZSpacing.md })
+          .backgroundColor(this.zc.bgElev)
+          .borderRadius(ZRadius.lg);
         }
         .width('100%')
-        .height(38)
-        .padding({ left: ZSpacing.md, right: ZSpacing.md })
-        .backgroundColor(this.zc.bgElev)
-        .borderRadius(ZRadius.lg)
-        .margin({
+        .padding({
           left: ZSpacing.lg,
           right: ZSpacing.lg,
           top: ZSpacing.xs,
@@ -279,41 +289,42 @@ export struct VaultTab {
         if (this.store.filteredItems.length === 0) {
           this.emptyState();
         } else {
-          // [低] insetGrouped 卡片样式：
-          //   List 提供滚动 + swipeAction 支持
-          //   水平 padding 由 List 的 margin 提供，bgElev+圆角+clip 套在 List 上
-          //   items 行自身无背景，由 List 的 bgElev 统一显色
-          List({ space: 0 }) {
-            ForEach(this.store.filteredItems, (it: ItemPayload, idx: number) => {
-              ListItem() {
-                Column() {
-                  this.itemRow(it);
-                  // hairline 分隔线（非最后一项）
-                  if (idx < this.store.filteredItems.length - 1) {
-                    Divider()
-                      .strokeWidth(0.5)
-                      .color(this.zc.lineSoft)
-                      .margin({ left: ZSpacing.lg + 38 + ZSpacing.md, right: 0 });
+          // insetGrouped 卡片：外层 Column 提供水平 padding，List 不带水平 margin
+          Column() {
+            List({ space: 0 }) {
+              ForEach(this.store.filteredItems, (it: ItemPayload, idx: number) => {
+                ListItem() {
+                  Column() {
+                    this.itemRow(it);
+                    // hairline 分隔线（非最后一项）
+                    if (idx < this.store.filteredItems.length - 1) {
+                      Divider()
+                        .strokeWidth(0.5)
+                        .color(this.zc.lineSoft)
+                        .margin({ left: ZSpacing.lg + 38 + ZSpacing.md, right: 0 });
+                    }
                   }
+                  .width('100%');
                 }
-                .width('100%');
-              }
-              .onClick(() => this.onTapItem(it))
-              .swipeAction({ end: this.swipeActions(it) });
-            }, (it: ItemPayload) => it.id);
+                .onClick(() => this.onTapItem(it))
+                .swipeAction({ end: this.swipeActions(it) });
+              }, (it: ItemPayload) => it.id);
 
-            // 底部 Tab bar + FAB 避让占位
-            ListItem() {
-              Row().height(80 + ZSpacing.xl + 8 + this.safeArea.bottom).width('100%');
+              // 底部 Tab bar + FAB 避让占位
+              ListItem() {
+                Row().height(80 + ZSpacing.xl + 8 + this.safeArea.bottom).width('100%');
+              }
             }
+            .layoutWeight(1)
+            .width('100%')
+            .scrollBar(BarState.Off)
+            .backgroundColor(this.zc.bgElev)
+            .borderRadius(ZRadius.xl)
+            .clip(true);
           }
           .layoutWeight(1)
           .width('100%')
-          .scrollBar(BarState.Off)
-          .backgroundColor(this.zc.bgElev)
-          .borderRadius(ZRadius.xl)
-          .clip(true)
-          .margin({ left: ZSpacing.lg, right: ZSpacing.lg, top: ZSpacing.sm });
+          .padding({ left: ZSpacing.lg, right: ZSpacing.lg, top: ZSpacing.sm });
         }
       }
       .width('100%')
@@ -324,7 +335,7 @@ export struct VaultTab {
       .backgroundColor(this.zc.bg)
       .padding({ bottom: this.safeArea.keyboard });
 
-      // [高/低] FAB：ic_plus 图标，浮动右下角
+      // FAB：ic_plus 图标，位置随握姿自适应（左手左侧，右手右侧）
       Column() {
         Image($r('app.media.ic_plus'))
           .width(22)
@@ -337,10 +348,9 @@ export struct VaultTab {
       .backgroundColor(this.zc.accent)
       .justifyContent(FlexAlign.Center)
       .alignItems(HorizontalAlign.Center)
-      .margin({
-        right: ZSpacing.xl,
-        bottom: ZSpacing.xl + 8 + this.safeArea.bottom,
-      })
+      .margin((this.ms.gripEnabled && this.ms.holdingLeft)
+        ? { left: ZSpacing.xl, bottom: ZSpacing.xl + 8 + this.safeArea.bottom }
+        : { right: ZSpacing.xl, bottom: ZSpacing.xl + 8 + this.safeArea.bottom })
       .onClick(() => this.onTapNew());
     }
     .width('100%')

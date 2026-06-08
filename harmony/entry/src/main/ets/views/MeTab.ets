@@ -13,8 +13,9 @@
 //
 // autoLock / clipboardClear 等高级设置 phone 端也未实现，本端同步不做。
 
-import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
+import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType, alpha1f } from '../theme/Tokens';
 import { vaultStore, type VaultStore } from '../state/VaultStore';
+import { motionStore, MotionStore } from '../state/MotionStore';
 import { promptAction, router } from '@kit.ArkUI';
 import { exportVaultToFile, importVaultFromFile } from '../lib/Transfer';
 import { common } from '@kit.AbilityKit';
@@ -49,6 +50,7 @@ export struct MeTab {
   @Local safeArea: SafeAreaState = safeAreaState;
   @Local zc: ZColorsClass = ZColors;
   @Local store: VaultStore = vaultStore;
+  @Local ms: MotionStore = motionStore;
 
   /** 启用信任设备时的密码确认浮层 */
   @Local showConfirmPw: boolean = false;
@@ -560,6 +562,16 @@ export struct MeTab {
             .borderRadius(ZRadius.xl)
             .clip(true);
 
+            // 交互
+            this.sectionHeader('交互');
+            Column() {
+              this.rowGripSwitch();
+            }
+            .width('100%')
+            .backgroundColor(this.zc.bgElev)
+            .borderRadius(ZRadius.xl)
+            .clip(true);
+
             // 数据
             this.sectionHeader('数据');
             Column() {
@@ -727,7 +739,7 @@ export struct MeTab {
 
   /**
    * rowAction: 左图标（可选 tint 背景）+ 标签 + 右箭头
-   * iconBg: icon 容器背景色（用于普通行传 zc.bgElev，危险行传 danger+'1f' 等）
+   * iconBg: icon 容器背景色（用于普通行传 zc.bgElev，危险行传 alpha1f(danger) 等）
    * iconColor: icon 填色
    */
   @Builder
@@ -873,7 +885,7 @@ export struct MeTab {
       .width(32)
       .height(32)
       .borderRadius(ZRadius.md)
-      .backgroundColor(`${iconColor}1f`)
+      .backgroundColor(alpha1f(iconColor))
       .justifyContent(FlexAlign.Center)
       .alignItems(VerticalAlign.Center);
 
@@ -912,7 +924,7 @@ export struct MeTab {
       .width(32)
       .height(32)
       .borderRadius(ZRadius.md)
-      .backgroundColor(`${iconColor}1f`)
+      .backgroundColor(alpha1f(iconColor))
       .justifyContent(FlexAlign.Center)
       .alignItems(VerticalAlign.Center);
 
@@ -993,6 +1005,63 @@ export struct MeTab {
   }
 
   @Builder
+  rowGripSwitch() {
+    Row({ space: ZSpacing.md }) {
+      Row() {
+        Image($r('app.media.ic_settings'))
+          .width(18)
+          .height(18)
+          .fillColor(this.zc.text);
+      }
+      .width(32)
+      .height(32)
+      .borderRadius(ZRadius.md)
+      .backgroundColor(this.zc.bgElev)
+      .justifyContent(FlexAlign.Center)
+      .alignItems(VerticalAlign.Center);
+
+      Column({ space: 2 }) {
+        Text('智感握姿')
+          .fontSize(ZType.bodySize)
+          .fontColor(this.zc.text);
+        Text('自动识别握持手，首页添加按钮随手移位')
+          .fontSize(ZType.captionSize)
+          .fontColor(this.zc.text3)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis });
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1);
+
+      Stack({ alignContent: Alignment.Start }) {
+        Row()
+          .width(50)
+          .height(30)
+          .backgroundColor(this.ms.gripEnabled ? this.zc.accent : this.zc.text3)
+          .borderRadius(15);
+        Row()
+          .width(26)
+          .height(26)
+          .backgroundColor('#FFFFFF')
+          .borderRadius(13)
+          .margin({ left: this.ms.gripEnabled ? 22 : 2 });
+      }
+      .width(50)
+      .height(30);
+    }
+    .width('100%')
+    .padding({
+      left: ZSpacing.lg,
+      right: ZSpacing.lg,
+      top: ZSpacing.md,
+      bottom: ZSpacing.md,
+    })
+    .onClick(() => {
+      motionStore.setGripEnabled(!motionStore.gripEnabled);
+    });
+  }
+
+  @Builder
   divider() {
     Divider().strokeWidth(0.5).color(this.zc.line).margin({ left: ZSpacing.lg, right: ZSpacing.lg });
   }
@@ -1012,7 +1081,7 @@ export struct MeTab {
     }
     .width('100%')
     .padding({ left: ZSpacing.md, right: ZSpacing.md, top: ZSpacing.sm, bottom: ZSpacing.sm })
-    .backgroundColor(`${this.zc.danger}1f`)
+    .backgroundColor(alpha1f(this.zc.danger))
     .borderRadius(ZRadius.md);
   }
 
@@ -1398,7 +1467,7 @@ export struct MeTab {
           .fontWeight(FontWeight.Medium)
           .fontColor(this.zc.info)
           .padding({ left: 8, right: 8, top: 2, bottom: 2 })
-          .backgroundColor(`${this.zc.info}1f`)
+          .backgroundColor(alpha1f(this.zc.info))
           .borderRadius(ZRadius.sm);
       } else {
         Image($r('app.media.ic_chevron_right'))
