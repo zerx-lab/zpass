@@ -24,9 +24,12 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/Button";
 import {
 	applyCloudMerge,
+	bindCloudVault,
 	createCloudVault,
 	listCloudConflicts,
 	listLinkedSpaces,
+	listRemoteVaults,
+	type RemoteVault,
 	resolveCloudConflict,
 	type SyncConflict,
 	signOutCloud,
@@ -34,7 +37,7 @@ import {
 	unlinkSpace,
 } from "@/lib/cloud-api";
 import { CLOUD_BASE_URL_LOCKED, useCloudStore } from "@/stores/cloud";
-import { useActiveSpace } from "@/stores/spaces";
+import { useActiveSpace, useSpacesStore } from "@/stores/spaces";
 import { dialogPortalContainer } from "./shared";
 
 /* ----------------------------------------------------------------------------
@@ -339,6 +342,9 @@ export function CloudSyncSection() {
 					</div>
 				)}
 
+				{/* ── 云端空间：选择云端 vault 绑定到本地空间（仅已登录时展示）── */}
+				{signedIn && <RemoteVaultsPanel onChanged={refreshLinked} />}
+
 				{/* ── 立即同步（仅已登录时展示）── */}
 				{signedIn && (
 					<div className="flex flex-col gap-2 px-5 py-4">
@@ -430,6 +436,219 @@ export function CloudSyncSection() {
 				/>
 			)}
 		</section>
+	);
+}
+
+/* ----------------------------------------------------------------------------
+ * 云端空间面板 —— 列出账户下所有云端 vault，把未绑定的绑定到本地空间
+ *   - 服务端零知识，列表只有「条目数 / 创建时间 / 短 id / 角色」，无空间名
+ *   - 已绑定：显示绑定到的本地空间名 + 解绑
+ *   - 未绑定：选一个本地空间（或新建一个）后绑定 → 触发同步拉取
+ * 绑定模型 1:1：一个本地空间 ↔ 一个云端 vault（后端强制，冲突报错）
+ * -------------------------------------------------------------------------- */
+
+function RemoteVaultsPanel({ onChanged }: { onChanged: () => void | Promise<void> }) {
+	const { t } = useTranslation();
+	const spaces = useSpacesStore((s) => s.spaces);
+	const createSpace = useSpacesStore((s) => s.createSpace);
+
+	const [vaults, setVaults] = useState<RemoteVault[]>([]);
+	const [loading, setLoading] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	const [busyId, setBusyId] = useState<string | null>(null);
+
+	const refresh = useCallback(async () => {
+		setLoading(true);
+		setError(null);
+		try {
+			setVaults(await listRemoteVaults());
+		} catch (e) {
+			setError(messageOf(e));
+		} finally {
+			setLoading(false);
+		}
+	}, []);
+
+	useEffect(() => {
+		void refresh();
+	}, [refresh]);
+
+	const spaceName = (id: string) => spaces.find((s) => s.id === id)?.name ?? id;
+
+	// 本地空间中尚未被任何云端 vault 绑定的，可作为绑定目标
+	const boundSpaceIds = new Set(vaults.map((v) => v.boundSpaceId).filter(Boolean));
+	const availableSpaces = spaces.filter((s) => !boundSpaceIds.has(s.id));
+
+	const doBind = async (vaultId: string, spaceId: string) => {
+		setBusyId(vaultId);
+		setError(null);
+		try {
+			await bindCloudVault(spaceId, vaultId);
+			await refresh();
+			await onChanged();
+		} catch (e) {
+			setError(messageOf(e));
+		} finally {
+			setBusyId(null);
+		}
+	};
+
+	const bindToNew = async (vaultId: string, name: string) => {
+		const id = createSpace({ name: name.trim() });
+		await doBind(vaultId, id);
+	};
+
+	const unbind = async (spaceId: string, vaultId: string) => {
+		setBusyId(vaultId);
+		setError(null);
+		try {
+			await unlinkSpace(spaceId);
+			await refresh();
+			await onChanged();
+		} catch (e) {
+			setError(messageOf(e));
+		} finally {
+			setBusyId(null);
+		}
+	};
+
+	const fmtDate = (iso: string) => {
+		const d = new Date(iso);
+		return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString();
+	};
+
+	return (
+		<div className="flex flex-col gap-3 px-5 py-4">
+			<div className="flex items-center justify-between gap-3">
+				<div className="flex min-w-0 flex-col leading-tight">
+					<span className="text-[13px] font-medium text-(--text)">
+						{t("cloud_remote_vaults_title")}
+					</span>
+					<span className="mt-0.5 text-[11.5px] text-(--text-3)">
+						{t("cloud_remote_vaults_desc")}
+					</span>
+				</div>
+				<Button variant="ghost" size="sm" onClick={() => void refresh()} disabled={loading} loading={loading}>
+					{t("cloud_remote_refresh")}
+				</Button>
+			</div>
+
+			{error && (
+				<div className="flex items-start gap-2 text-[12px] text-(--text-2)">
+					<ShieldAlert size={13} strokeWidth={1.5} className="mt-0.5 shrink-0 text-(--text-3)" />
+					<span>{error}</span>
+				</div>
+			)}
+
+			{!loading && vaults.length === 0 && (
+				<div className="text-[12px] text-(--text-4)">{t("cloud_remote_none")}</div>
+			)}
+
+			<div className="flex flex-col gap-2">
+				{vaults.map((v) => (
+					<div
+						key={v.vaultId}
+						className="flex flex-col gap-2 rounded-lg border border-(--line-soft) bg-(--bg) px-3 py-2.5"
+					>
+						<div className="flex items-center justify-between gap-3">
+							<div className="flex min-w-0 flex-col leading-tight">
+								<span className="font-mono text-[11px] text-(--text-2)">
+									{v.vaultId.slice(0, 8)}
+									<span className="ml-1.5 rounded-sm bg-(--bg-elev) px-1 py-px text-[9.5px] uppercase text-(--text-4)">
+										{v.role}
+									</span>
+								</span>
+								<span className="mt-0.5 text-[11.5px] text-(--text-3)">
+									{t("cloud_remote_items", { count: v.itemCount })} · {t("cloud_remote_created", { date: fmtDate(v.createdAt) })}
+								</span>
+							</div>
+							{v.boundSpaceId ? (
+								<Button
+									variant="ghost"
+									size="sm"
+									onClick={() => void unbind(v.boundSpaceId, v.vaultId)}
+									disabled={busyId === v.vaultId}
+									loading={busyId === v.vaultId}
+									className="shrink-0"
+								>
+									{t("cloud_unlink")}
+								</Button>
+							) : null}
+						</div>
+
+						{v.boundSpaceId ? (
+							<div className="text-[11.5px] text-(--text-2)">
+								{t("cloud_remote_bound_to", { space: spaceName(v.boundSpaceId) })}
+							</div>
+						) : (
+							<RemoteVaultBindControl
+								spaces={availableSpaces}
+								busy={busyId === v.vaultId}
+								onBindExisting={(spaceId) => void doBind(v.vaultId, spaceId)}
+								onBindNew={(name) => void bindToNew(v.vaultId, name)}
+							/>
+						)}
+					</div>
+				))}
+			</div>
+		</div>
+	);
+}
+
+/* 单个未绑定云端 vault 的绑定控件：选已有本地空间，或新建一个再绑定 */
+function RemoteVaultBindControl({
+	spaces,
+	busy,
+	onBindExisting,
+	onBindNew,
+}: {
+	spaces: { id: string; name: string }[];
+	busy: boolean;
+	onBindExisting: (spaceId: string) => void;
+	onBindNew: (name: string) => void;
+}) {
+	const { t } = useTranslation();
+	const NEW = "__new__";
+	const [choice, setChoice] = useState("");
+	const [newName, setNewName] = useState("");
+	const isNew = choice === NEW;
+	const canBind = isNew ? newName.trim().length > 0 : choice !== "";
+
+	return (
+		<div className="flex flex-wrap items-center gap-2">
+			<select
+				value={choice}
+				onChange={(e) => setChoice(e.target.value)}
+				className="rounded-(--radius) border border-(--line) bg-(--bg-elev) px-2 py-1 text-[12px] text-(--text) focus:border-(--text) focus:outline-none"
+			>
+				<option value="" disabled>
+					{t("cloud_remote_pick_space")}
+				</option>
+				{spaces.map((s) => (
+					<option key={s.id} value={s.id}>
+						{s.name}
+					</option>
+				))}
+				<option value={NEW}>{t("cloud_remote_new_space")}</option>
+			</select>
+			{isNew && (
+				<input
+					type="text"
+					value={newName}
+					onChange={(e) => setNewName(e.target.value)}
+					placeholder={t("cloud_remote_new_space_name")}
+					className="min-w-0 flex-1 rounded-(--radius) border border-(--line) bg-(--bg-elev) px-2 py-1 text-[12px] text-(--text) placeholder:text-(--text-4) focus:border-(--text) focus:outline-none"
+				/>
+			)}
+			<Button
+				size="sm"
+				disabled={busy || !canBind}
+				loading={busy}
+				onClick={() => (isNew ? onBindNew(newName) : onBindExisting(choice))}
+			>
+				{t("cloud_remote_bind")}
+			</Button>
+		</div>
 	);
 }
 

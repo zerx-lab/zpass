@@ -2196,6 +2196,36 @@ func (s *VaultService) DecryptAuditPayload(ciphertext []byte) ([]byte, error) {
 	return OpenAEAD(s.dek, ciphertext, []byte(auditAAD))
 }
 
+// cloudCredAAD 是加密「云自动登录凭据」(云主密码)的上下文标签,与 audit/item
+// 的 aad 域分离,防止把别处密文拼接到云凭据槽位上试探。带版本号便于未来轮换。
+const cloudCredAAD = "cloud-cred:v1"
+
+// SealCloudCredential 用本地保险库 DEK 加密一段云自动登录凭据(云主密码)。
+//
+// 供 CloudService 在登录成功后,把云账户主密码以「仅本地解锁后可解」的形式
+// 落盘——这样即便本地解锁密码与云密码不同,解锁后也能重建云会话。CloudService
+// 只传明文、拿密文,永不接触 DEK,保持「只有 vault 持有 DEK」的不变量。
+// vault 锁定时返回 ErrVaultLocked。
+func (s *VaultService) SealCloudCredential(plaintext []byte) ([]byte, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.dek == nil {
+		return nil, ErrVaultLocked
+	}
+	return SealAEAD(s.dek, plaintext, []byte(cloudCredAAD))
+}
+
+// OpenCloudCredential 用 DEK 解密 SealCloudCredential 落盘的云凭据密文。
+// vault 锁定时返回 ErrVaultLocked;密文损坏/被篡改 → AEAD 校验失败 → 返错。
+func (s *VaultService) OpenCloudCredential(ciphertext []byte) ([]byte, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.dek == nil {
+		return nil, ErrVaultLocked
+	}
+	return OpenAEAD(s.dek, ciphertext, []byte(cloudCredAAD))
+}
+
 // AuditDBRow 是返回给 SshAgentService 的「DB 中一条 audit」表示
 //
 // Plaintext 是解密后的 JSON 字节，调用者负责 unmarshal 到 AuditEntry。

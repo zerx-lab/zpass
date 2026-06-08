@@ -61,9 +61,8 @@ export function WelcomePage() {
 	const navigate = useNavigate();
 	const continueAsGuest = useAccountStore((s) => s.continueAsGuest);
 
-	// 云端登录入口当前禁用 —— 当 onSignIn 在按钮 onClick 上仍被引用时
-	// （即便按钮已 disabled），保留 handler 让未来恢复时只需改两处：
-	// 这里去掉 disabled，外加 i18n 删除 coming_soon 字串。短期无感知。
+	// 云端登录入口 —— 跳到 /signin 填写邮箱/主密码/Secret Key。只有 SignInPage
+	// 提交成功后才会 accountStore.signIn() 改变 mode，此处仅负责跳转。
 	const onSignIn = () => {
 		navigate("/signin");
 	};
@@ -156,47 +155,33 @@ export function WelcomePage() {
 					*/}
 					<div className="flex flex-col gap-3">
 						{/*
-							主选项：登录云端账户 —— 当前阶段禁用
+							主选项：登录云端账户
 							----------------------------------------------------------------
-							云端同步功能尚未实现：后端 / E2EE 协议 / 多设备同步链路都还没
-							落地，过早暴露登录入口会造成"点了无反应"或"登录后看到空数据"
-							的产品体验事故。
-							
-							处理方式：保留按钮骨架（视觉上向用户传达"未来会支持云同步"），
-							但通过 disabled / aria-disabled / cursor-not-allowed 完全屏蔽
-							点击交互；右上角加 "Coming soon" 徽标做明确预告。整张卡降透
-							明度（opacity-60）压低视觉权重，让"跳过 / 本地模式"成为唯一
-							可点击的主路径。
-							
-							未来云同步上线时只需删除 disabled / opacity / Coming soon 徽标
-							恢复 onClick 即可，不影响现有视觉骨架。
+							云同步后端（零知识账户 P2 + 同步引擎 P3）已落地，登录入口
+							正式开放。描边 / 图标方块比"跳过"亮一档，表达"前-后"层级与
+							"推荐登录以获得云同步"的产品意图，但不靠反色实心白底喊叫
+							（暗色下刺眼，与黑白基调割裂——见文件顶部视觉注释）。
 						*/}
 						<button
 							type="button"
 							onClick={onSignIn}
-							disabled
-							aria-disabled="true"
-							title={t("welcome_signin_coming_soon")}
-							className="group flex cursor-not-allowed items-center gap-4 rounded-xl border border-(--line-soft) bg-(--bg-elev-2) px-5 py-3 text-left opacity-60 transition-colors"
+							className="group flex items-center gap-4 rounded-xl border border-(--line) bg-(--bg-elev-2) px-5 py-3 text-left transition-colors hover:border-(--text-3) hover:bg-(--bg-active)"
 						>
-							<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-(--line) bg-(--bg-elev) transition-colors">
+							<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-(--line) bg-(--bg-active) transition-colors group-hover:border-(--text-3)">
 								<Cloud
 									size={18}
 									strokeWidth={1.5}
-									className="text-(--text-3)"
+									className="text-(--text) transition-colors"
 								/>
 							</div>
 							<div className="flex min-w-0 flex-1 flex-col gap-0.5">
-								<span className="text-sm font-semibold text-(--text-2)">
+								<span className="text-sm font-semibold text-(--text)">
 									{t("welcome_signin_title")}
 								</span>
 								<span className="text-xs leading-relaxed text-(--text-3)">
 									{t("welcome_signin_desc")}
 								</span>
 							</div>
-							<span className="shrink-0 rounded-sm border border-(--line) bg-(--bg-elev) px-1.5 py-0.5 font-mono text-[10px] tracking-wider text-(--text-3) uppercase">
-								{t("welcome_signin_coming_soon")}
-							</span>
 						</button>
 
 						{/*

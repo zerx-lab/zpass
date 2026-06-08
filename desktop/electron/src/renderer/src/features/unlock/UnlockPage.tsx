@@ -79,6 +79,7 @@ import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/Button";
 import { MiniTitlebar } from "@/components/MiniTitlebar";
+import { restoreCloudSession } from "@/lib/cloud-api";
 import { vaultApi, vaultErrorKind } from "@/lib/vault-api";
 import { useLockStore } from "@/stores/lock";
 import { useVaultStore } from "@/stores/vault";
@@ -231,6 +232,15 @@ export function UnlockPage() {
 			// 三步**必须**按这个顺序，详见文件顶部注释。
 			unlockLockStore();
 			await loadVault();
+
+			// 静默恢复云会话：本地解锁用的主密码恰好就是云账户主密码（D1 决策），
+			// 配合已存进钥匙串的 email + Secret Key，无需再走独立登录页即可重建
+			// 云会话并恢复自动同步。fire-and-forget —— 无凭据返回 signedIn:false，
+			// 密码不匹配则抛错，两种情况都不应阻塞本地解锁（catch 静默)。后端
+			// 成功后会 emit cloud:auth:changed，CloudEventSync 据此刷新云状态。
+			void restoreCloudSession(password).catch(() => {
+				/* 未配置云端 / 未存凭据 / 云密码不一致 —— 静默,保持本地可用 */
+			});
 
 			// 跳回原路径（LockGuard 记录的 from），replace=true 避免 /unlock
 			// 留在历史栈，防止"后退"又回到解锁页

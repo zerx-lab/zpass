@@ -64,6 +64,21 @@ export interface LinkedSpace {
   vaultId: string;
 }
 
+/** 云端一个 vault(空间)的零知识安全元数据 + 本地绑定状态。 */
+export interface RemoteVault {
+  vaultId: string;
+  /** 服务端创建时间(RFC3339 字符串)。 */
+  createdAt: string;
+  /** 条目数(服务端可见的计数,不含明文)。 */
+  itemCount: number;
+  /** 同步高水位 seq。 */
+  currentSeq: number;
+  /** 当前账户在该 vault 的角色(owner/member 等)。 */
+  role: string;
+  /** 已绑定到的本地空间 id;空串 = 未绑定。 */
+  boundSpaceId: string;
+}
+
 /* ----------------------------------------------------------------------------
  * 错误规范化 —— 同 vault-api 的 callWails
  * -------------------------------------------------------------------------- */
@@ -122,6 +137,23 @@ export async function signOutCloud(): Promise<void> {
   await callCloud("SignOut", () => $WailsCall.ByName(`${SVC}.SignOut`) as Promise<void>);
 }
 
+/**
+ * 用本地解锁时输入的主密码静默恢复云会话。
+ *
+ * 零知识约束下账户私钥不落盘,每次启动必须用主密码重新派生;但 email +
+ * Secret Key 已在上次登录时存进 OS 钥匙串,所以用户只在本地解锁处输入一次
+ * 主密码,即可重建云会话并恢复自动同步——无需再走独立登录页。
+ *
+ * 无配置 / 未存凭据时返回 signedIn:false(不是错误),调用方可在每次解锁后
+ * 无条件触发。返回 signedIn:false 或抛错都应被静默处理,绝不阻塞本地解锁。
+ */
+export async function restoreCloudSession(masterPassword: string): Promise<AccountResult> {
+  return callCloud(
+    "RestoreSession",
+    () => $WailsCall.ByName(`${SVC}.RestoreSession`, masterPassword) as Promise<AccountResult>,
+  );
+}
+
 /* ----------------------------------------------------------------------------
  * 同步：空间绑定 / 立即同步 / 冲突解决
  * -------------------------------------------------------------------------- */
@@ -131,6 +163,23 @@ export async function createCloudVault(spaceId: string): Promise<string> {
   return callCloud(
     "CreateCloudVault",
     () => $WailsCall.ByName(`${SVC}.CreateCloudVault`, spaceId) as Promise<string>,
+  );
+}
+
+/** 列出账户下所有云端 vault(空间)及其本地绑定状态。 */
+export async function listRemoteVaults(): Promise<RemoteVault[]> {
+  const arr = (await callCloud(
+    "ListRemoteVaults",
+    () => $WailsCall.ByName(`${SVC}.ListRemoteVaults`) as Promise<RemoteVault[] | null>,
+  )) as RemoteVault[] | null;
+  return arr ?? [];
+}
+
+/** 把一个已存在的云端 vault 绑定到本地空间(随后自动同步拉取其条目)。 */
+export async function bindCloudVault(spaceId: string, vaultId: string): Promise<void> {
+  await callCloud(
+    "BindCloudVault",
+    () => $WailsCall.ByName(`${SVC}.BindCloudVault`, spaceId, vaultId) as Promise<void>,
   );
 }
 

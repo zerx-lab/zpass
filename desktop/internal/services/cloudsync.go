@@ -205,6 +205,137 @@ func (s *CloudService) UnlinkSpace(spaceID string) error {
 	return s.vault.db.DeleteCloudVault(spaceID)
 }
 
+// RemoteVault is one cloud vault the signed-in account belongs to, annotated with
+// the local space currently bound to it. It carries only the zero-knowledge-safe
+// metadata the server exposes — the vault NAME is never included because the
+// server never sees it (it lives encrypted inside the vault).
+type RemoteVault struct {
+	VaultID      string `json:"vaultId"`
+	CreatedAt    string `json:"createdAt"`
+	ItemCount    int64  `json:"itemCount"`
+	CurrentSeq   int64  `json:"currentSeq"`
+	Role         string `json:"role"`
+	BoundSpaceID string `json:"boundSpaceId"` // local space bound to this vault; "" = unbound
+}
+
+// ListRemoteVaults returns every cloud vault the signed-in account is a member
+// of, each annotated with the local space bound to it (BoundSpaceID="" when
+// unbound). It is the data source for the "choose which cloud spaces to sync"
+// UI — the user picks an unbound vault and binds it to a local space.
+func (s *CloudService) ListRemoteVaults() ([]RemoteVault, error) {
+	s.mu.RLock()
+	client := s.client
+	signedIn := s.session != nil
+	accountID := ""
+	if s.session != nil {
+		accountID = s.session.accountID
+	}
+	s.mu.RUnlock()
+	if !signedIn {
+		return nil, ErrCloudNotSignedIn
+	}
+	if client == nil {
+		return nil, ErrCloudNotConfigured
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), cloud.DefaultTimeout)
+	defer cancel()
+	summaries, err := client.ListVaults(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Reverse map vault_id -> local space_id for this account's bindings.
+	bound := make(map[string]string)
+	if s.vault != nil {
+		if rows, lerr := s.vault.db.ListCloudVaultsForAccount(accountID); lerr == nil {
+			for _, r := range rows {
+				bound[r.VaultID] = r.SpaceID
+			}
+		}
+	}
+
+	out := make([]RemoteVault, 0, len(summaries))
+	for _, v := range summaries {
+		out = append(out, RemoteVault{
+			VaultID:      v.VaultID,
+			CreatedAt:    v.CreatedAt,
+			ItemCount:    v.ItemCount,
+			CurrentSeq:   v.CurrentSeq,
+			Role:         v.Role,
+			BoundSpaceID: bound[v.VaultID],
+		})
+	}
+	return out, nil
+}
+
+// BindCloudVault binds an EXISTING cloud vault to a local space — the inverse of
+// CreateCloudVault (which mints a fresh vault for a space). It proves membership
+// by unwrapping the vault key (member/self), records the binding, and kicks an
+// immediate sync so the vault's items pull into the space. The 1:1 model is
+// enforced: a space already bound, or a vault already bound to another space, is
+// rejected (the caller must unlink first). Binding the same pair again is a
+// no-op. Runs under syncMu so it cannot overlap a sync run.
+func (s *CloudService) BindCloudVault(spaceID, vaultID string) error {
+	spaceID = strings.TrimSpace(spaceID)
+	vaultID = strings.TrimSpace(vaultID)
+	if spaceID == "" || vaultID == "" {
+		return errors.New("cloud: space id and vault id are required")
+	}
+	if s.vault == nil {
+		return errors.New("cloud: vault service unavailable")
+	}
+
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+
+	s.mu.RLock()
+	client := s.client
+	sess := s.session
+	accountID := ""
+	if sess != nil {
+		accountID = sess.accountID
+	}
+	s.mu.RUnlock()
+	if sess == nil {
+		return ErrCloudNotSignedIn
+	}
+	if client == nil {
+		return ErrCloudNotConfigured
+	}
+
+	// Enforce the 1:1 binding model.
+	if existing, err := s.vault.db.GetCloudVaultBySpace(spaceID); err == nil && existing != nil {
+		if existing.VaultID == vaultID {
+			return nil // already bound to this vault — idempotent
+		}
+		return errors.New("cloud: this space is already linked to a different vault; unlink it first")
+	}
+	if rows, err := s.vault.db.ListCloudVaults(); err == nil {
+		for _, r := range rows {
+			if r.VaultID == vaultID && r.SpaceID != spaceID {
+				return errors.New("cloud: this vault is already linked to another space")
+			}
+		}
+	}
+
+	// Prove membership and cache the vault key (404 -> not a member).
+	ctx, cancel := context.WithTimeout(context.Background(), cloud.DefaultTimeout)
+	defer cancel()
+	if _, err := s.vaultKey(ctx, client, vaultID); err != nil {
+		if errors.Is(err, ErrCloudNotMember) {
+			return errors.New("cloud: not a member of this vault")
+		}
+		return fmt.Errorf("cloud: verify vault membership: %w", err)
+	}
+
+	if err := s.vault.db.PutCloudVault(spaceID, vaultID, accountID, nowMillis()); err != nil {
+		return err
+	}
+	s.kickSync()
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Sync entry points
 // ---------------------------------------------------------------------------
@@ -283,6 +414,13 @@ func (s *CloudService) runSync(parent context.Context) (CloudSyncSummary, error)
 		}
 	}
 
+	// Notify the local vault layer when sync wrote items so the UI reloads
+	// the items list. IngestForeignPayload does not call notifyVaultChanged
+	// itself (to avoid per-item spam), so we emit one batch notification here.
+	if s.vault != nil && (summary.Pulled > 0 || summary.Pushed > 0) {
+		s.vault.notifyVaultChanged("cloud-sync", "", "")
+	}
+
 	summary.Conflicts = s.conflictCount()
 	if lastErr != nil {
 		return summary, lastErr
@@ -357,10 +495,11 @@ func (s *CloudService) syncVaultOnce(ctx context.Context, spaceID, vaultID strin
 		if !ok {
 			continue
 		}
-		if applyErr := s.applyRemoteItem(spaceID, id, it, vaultKey); applyErr == nil {
-			pulled++
-		} else {
+		applied, applyErr := s.applyRemoteItem(spaceID, id, it, vaultKey)
+		if applyErr != nil {
 			s.emitEvent("cloud:sync:warning", map[string]any{"id": id, "message": applyErr.Error()})
+		} else if applied {
+			pulled++
 		}
 	}
 
@@ -489,15 +628,17 @@ func (s *CloudService) fetchSnapshot(ctx context.Context, client *cloud.Client, 
 }
 
 // applyRemoteItem decrypts a snapshot item with the vault key and ingests the
-// plaintext under the local DEK, pinning it to the bound space.
-func (s *CloudService) applyRemoteItem(spaceID, id string, it cloud.SnapshotItem, vaultKey []byte) error {
+// plaintext under the local DEK, pinning it to the bound space. Returns
+// (applied, err): applied is false when the item was skipped by LWW (local is
+// already at least as new), true when it was actually written to the DB.
+func (s *CloudService) applyRemoteItem(spaceID, id string, it cloud.SnapshotItem, vaultKey []byte) (bool, error) {
 	payload, err := s.decryptRemote(id, it, vaultKey)
 	if err != nil || payload == nil {
-		return err
+		return false, err
 	}
 	payload.SpaceID = spaceID
-	_, err = s.vault.IngestForeignPayload(id, payload, payload.CreatedAt, it.UpdatedAt)
-	return err
+	applied, err := s.vault.IngestForeignPayload(id, payload, payload.CreatedAt, it.UpdatedAt)
+	return applied, err
 }
 
 // decryptRemote turns a snapshot item's ciphertext into a desktop ItemPayload.

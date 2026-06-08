@@ -350,7 +350,7 @@ func (s *CloudService) Register(email, masterPassword string) (RegisterResult, e
 		return RegisterResult{}, fmt.Errorf("cloud: upload keyset (account created; sign in again to finish setup): %w", err)
 	}
 
-	s.establishSession(email, accountID, resp.SessionToken, priv, pub)
+	s.establishSession(email, accountID, resp.SessionToken, secretKey, masterPassword, priv, pub)
 
 	return RegisterResult{
 		Email:     email,
@@ -384,7 +384,58 @@ type AccountResult struct {
 func (s *CloudService) SignIn(email, masterPassword, secretKey string) (AccountResult, error) {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
+	return s.signInLocked(email, masterPassword, secretKey)
+}
 
+// RestoreSession silently rebuilds the cloud session at local vault unlock using
+// the master password the user just typed plus the email + Secret Key persisted
+// at the last sign-in. It is the mechanism behind "stay signed in": the account
+// private key is never stored (zero-knowledge), so each launch must re-derive it
+// — but the user only types the master password once (at unlock), not the full
+// credential set. It is a no-op (SignedIn:false, no error) when nothing is
+// configured or no credentials were stored, so callers can fire it on every
+// unlock unconditionally. A non-nil error means the stored credentials did not
+// match the typed master password (e.g. a divergent cloud password); callers
+// should treat that as "not restored" rather than a fatal unlock failure.
+func (s *CloudService) RestoreSession(masterPassword string) (AccountResult, error) {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+
+	s.mu.RLock()
+	baseURL := s.baseURL
+	sess := s.session
+	s.mu.RUnlock()
+	if baseURL == "" {
+		return AccountResult{SignedIn: false}, nil
+	}
+	if sess != nil {
+		// Already live this run — nothing to do.
+		return AccountResult{Email: sess.email, AccountID: sess.accountID, SignedIn: true}, nil
+	}
+
+	email, okE, _ := s.store.Get(credStoreKey("email-", baseURL))
+	secretKey, okS, _ := s.store.Get(credStoreKey("sk-", baseURL))
+	if !okE || !okS || email == "" || secretKey == "" {
+		// No stored credentials → cannot auto-restore; not an error.
+		return AccountResult{SignedIn: false}, nil
+	}
+
+	// Prefer the DEK-wrapped cloud password (handles local-unlock-password !=
+	// cloud-password). It can only be decrypted now because the local vault was
+	// just unlocked. Fall back to the typed master password for legacy logins
+	// that predate password persistence, or same-password setups.
+	cloudPassword := masterPassword
+	if blob, ok, _ := s.store.Get(credStoreKey("pw-", baseURL)); ok && blob != "" && s.vault != nil && s.vault.IsUnlocked() {
+		if ct, decErr := cloudB64.DecodeString(blob); decErr == nil {
+			if pw, openErr := s.vault.OpenCloudCredential(ct); openErr == nil {
+				cloudPassword = string(pw)
+			}
+		}
+	}
+	return s.signInLocked(email, cloudPassword, secretKey)
+}
+
+func (s *CloudService) signInLocked(email, masterPassword, secretKey string) (AccountResult, error) {
 	email = normalizeEmail(email)
 	if email == "" {
 		return AccountResult{}, errors.New("cloud: email is required")
@@ -484,7 +535,7 @@ func (s *CloudService) SignIn(email, masterPassword, secretKey string) (AccountR
 		return AccountResult{}, err
 	}
 
-	s.establishSession(email, accountID, finResp.SessionToken, priv, pub)
+	s.establishSession(email, accountID, finResp.SessionToken, strings.TrimSpace(secretKey), masterPassword, priv, pub)
 
 	return AccountResult{Email: email, AccountID: accountID, SignedIn: true}, nil
 }
@@ -542,10 +593,15 @@ func (s *CloudService) SignOut() error {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	s.mu.RLock()
-	key := tokenStoreKey(s.baseURL)
+	baseURL := s.baseURL
 	s.mu.RUnlock()
 	s.teardownSession()
-	_ = s.store.Delete(key) // outside mu: keychain calls can block on a prompt
+	// Outside mu: keychain calls can block on a prompt. Drop the JWT AND the
+	// auto-unlock credentials so the next launch starts fully signed-out.
+	_ = s.store.Delete(tokenStoreKey(baseURL))
+	_ = s.store.Delete(credStoreKey("email-", baseURL))
+	_ = s.store.Delete(credStoreKey("sk-", baseURL))
+	_ = s.store.Delete(credStoreKey("pw-", baseURL))
 	s.emitAuthChanged(false, "", "")
 	return nil
 }
@@ -609,10 +665,30 @@ func tokenStoreKey(baseURL string) string {
 	return "session-token-" + hex.EncodeToString(sum[:6])
 }
 
+// credStoreKey derives a per-server keychain slot for an auto-unlock credential
+// (the account email and Secret Key), so RestoreSession can silently re-derive
+// the account private key at local unlock without prompting for them again. Like
+// tokenStoreKey it is namespaced by the server origin. The Secret Key is the
+// "something you have" factor and is deliberately kept on-device (mirrors
+// 1Password); it alone cannot unlock anything without the master password.
+func credStoreKey(prefix, baseURL string) string {
+	if baseURL == "" {
+		return prefix + "default"
+	}
+	sum := sha256.Sum256([]byte(baseURL))
+	return prefix + hex.EncodeToString(sum[:6])
+}
+
 // establishSession installs a fresh session (under mu, also setting the token on
-// the shared sync client) and then persists the token to the keychain OUTSIDE
-// the lock (keychain ops can block on a prompt). Caller holds opMu.
-func (s *CloudService) establishSession(email, accountID, token string, priv, pub [cloudcrypto.X25519KeySize]byte) {
+// the shared sync client) and then persists the token + auto-unlock credentials
+// to the keychain OUTSIDE the lock (keychain ops can block on a prompt). Caller
+// holds opMu. secretKey is the canonical Secret Key string; cloudPassword is the
+// cloud account master password. Both are stored so RestoreSession can rebuild
+// the session at local unlock — the cloud password is DEK-wrapped (decryptable
+// only after a local vault unlock) so it works even when the local unlock
+// password differs from the cloud password (the D1 "same password" assumption
+// does not always hold).
+func (s *CloudService) establishSession(email, accountID, token, secretKey, cloudPassword string, priv, pub [cloudcrypto.X25519KeySize]byte) {
 	s.mu.Lock()
 	s.clearSessionLocked()
 	s.session = &cloudSession{
@@ -628,7 +704,8 @@ func (s *CloudService) establishSession(email, accountID, token string, priv, pu
 	}
 	s.cachedToken = token
 	persist := s.store.Available()
-	key := tokenStoreKey(s.baseURL)
+	baseURL := s.baseURL
+	key := tokenStoreKey(baseURL)
 	s.mu.Unlock()
 
 	if persist {
@@ -636,6 +713,25 @@ func (s *CloudService) establishSession(email, accountID, token string, priv, pu
 			// Non-fatal: the session still works in-memory this run; we just
 			// won't have a persisted token next launch.
 			s.emitEvent("cloud:auth:store-warning", map[string]any{"message": err.Error()})
+		}
+		// Persist the auto-unlock credentials (email + Secret Key). Best-effort:
+		// a failure only means the next launch falls back to a manual sign-in.
+		if secretKey != "" {
+			_ = s.store.Set(credStoreKey("email-", baseURL), email)
+			_ = s.store.Set(credStoreKey("sk-", baseURL), secretKey)
+		}
+		// DEK-wrap the cloud master password and persist it, so RestoreSession can
+		// sign in at unlock even when the local unlock password differs from the
+		// cloud password. Requires the local vault to be unlocked NOW (it is — the
+		// user signs into cloud from inside the unlocked app). If it is locked or
+		// wrapping fails, we simply skip it (auto-restore then needs matching
+		// passwords or a manual sign-in).
+		if cloudPassword != "" && s.vault != nil && s.vault.IsUnlocked() {
+			if ct, err := s.vault.SealCloudCredential([]byte(cloudPassword)); err == nil {
+				_ = s.store.Set(credStoreKey("pw-", baseURL), cloudB64.EncodeToString(ct))
+			} else {
+				s.emitEvent("cloud:auth:store-warning", map[string]any{"message": "seal cloud credential: " + err.Error()})
+			}
 		}
 	}
 	s.emitAuthChanged(true, email, accountID)
