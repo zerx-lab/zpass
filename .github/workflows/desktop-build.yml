@@ -3,7 +3,7 @@ name: Build Desktop
 # ZPass Desktop 多平台打包 workflow（Electron Forge + Vite 架构）
 # -----------------------------------------------------------------------------
 # 目标矩阵:
-#   - Windows x64           Squirrel Setup .exe  + 便携 .zip
+#   - Windows x64           NSIS 向导式 Setup .exe (electron-builder) + 便携 .zip
 #   - Linux   x64           AppImage + .deb + .rpm + .pkg.tar.zst + 便携 .zip
 #   - macOS   arm64         DMG (hdiutil) + 便携 .zip  (Apple Silicon, ad-hoc 签名)
 #   - Browser Extension     Chrome (MV3) zip + Firefox (MV2) zip + sources.zip
@@ -15,7 +15,8 @@ name: Build Desktop
 # 设计要点:
 #   - Forge 通过 forge.config.ts 的 makers 配置在各 OS 上选用对应打包器
 #       linux  -> MakerAppImage / MakerDeb / MakerRpm (+ MakerZIP)
-#       win32  -> MakerSquirrel (+ MakerZIP)
+#       win32  -> MakerZIP (便携包); NSIS 安装包由 electron-builder --prepackaged
+#                 在 task make 之后对 Forge 打好的 out/zpass-win32-x64/ 二次封装
 #       darwin -> MakerZIP; .dmg 由本 workflow 直接用 hdiutil 把签好名的 .app
 #                 打包, 不引入 @electron-forge/maker-dmg 依赖.
 #   - macOS Apple Silicon (arm64) 强制要求所有原生可执行通过 codesign, 哪怕只是
@@ -30,8 +31,8 @@ name: Build Desktop
 #     `wxt zip` 产出 chrome/firefox 的发布 zip, firefox 还会附带
 #     sources.zip 用于 AMO 审核 (扩展用了 minify, 必须提交源码).
 #   - 每个 job 直接 push 资产到 GitHub Release (softprops/action-gh-release),
-#     绕开 actions/upload-artifact 500MB 配额 (Forge Squirrel 单个 .exe 接近
-#     200MB). 同时也用 upload-artifact 留一份方便 workflow_dispatch 下载验证.
+#     绕开 actions/upload-artifact 500MB 配额 (Windows 安装包单个 .exe 上百 MB).
+#     同时也用 upload-artifact 留一份方便 workflow_dispatch 下载验证.
 # -----------------------------------------------------------------------------
 
 on:
@@ -61,10 +62,10 @@ env:
 
 jobs:
   # ===========================================================================
-  # Windows x64 - Squirrel Setup.exe + 便携 zip
+  # Windows x64 - NSIS 向导式 Setup.exe (electron-builder) + 便携 zip
   # ===========================================================================
   build-windows:
-    name: Windows x64 (Squirrel Setup)
+    name: Windows x64 (NSIS Setup)
     runs-on: windows-latest
     permissions:
       contents: write
@@ -112,34 +113,36 @@ jobs:
       # 显式设 GOOS/GOARCH 防止 task build:go 在跨架构 runner 上猜错;
       # CGO_ENABLED=0 因为 Go 端依赖 modernc.org/sqlite (pure Go), 不需要
       # 链接 system libsqlite, 避免 Windows 上找不到 gcc 的麻烦.
-      - name: Build (task make → Squirrel installer + zip)
+      #
+      # `task make` 在 win32 上现在只产出便携 zip + 已打包的 out/zpass-win32-x64/
+      # (Forge packager 的 unpacked 目录, 含 asar / fuses / extraResource /
+      # locale 裁剪 / win32metadata). NSIS 安装包由下一步用 electron-builder
+      # 对这个目录二次封装, 不再走 Squirrel.
+      - name: Build (task make → portable zip + packaged app dir)
         env:
           GOOS: windows
           GOARCH: amd64
           CGO_ENABLED: "0"
         run: task make
 
-      # Forge 输出布局:
-      #   out/make/squirrel.windows/x64/<name>-<version> Setup.exe
-      #   out/make/squirrel.windows/x64/<name>-<version>-full.nupkg
-      #   out/make/squirrel.windows/x64/RELEASES
-      #   out/make/zip/win32/x64/<name>-win32-x64-<version>.zip
+      # 向导式 NSIS 安装包: electron-builder --prepackaged 直接吃上一步 Forge
+      # 已打好的 out/zpass-win32-x64/, 跳过自己的打包阶段, 输出到 out/make/nsis/.
+      # 配置见 desktop/electron-builder.win.yml (oneClick:false 启用安装向导).
+      - name: Build NSIS installer (electron-builder --prepackaged)
+        run: pnpm run make:win:nsis
+
+      # 产物布局:
+      #   out/make/nsis/ZPass-Setup-<version>.exe   (electron-builder NSIS 向导安装包)
+      #   out/make/zip/win32/x64/<name>-win32-x64-<version>.zip  (Forge 便携 zip)
       # 重命名成稳定的 release 资产名 (无版本号), 方便用户直接下载.
       - name: Stage release assets
         run: |
           mkdir -p release
           shopt -s nullglob
 
-          for f in out/make/squirrel.windows/x64/*Setup*.exe; do
+          for f in out/make/nsis/*.exe; do
             cp "$f" "release/ZPass-windows-x64-Setup.exe"
           done
-          # 兜底: 如果 Squirrel 命名约定变了, 抓任意 .exe (排除 nupkg 等)
-          if [ ! -f release/ZPass-windows-x64-Setup.exe ]; then
-            for f in out/make/squirrel.windows/x64/*.exe; do
-              cp "$f" "release/ZPass-windows-x64-Setup.exe"
-              break
-            done
-          fi
 
           for f in out/make/zip/win32/x64/*.zip; do
             cp "$f" "release/ZPass-windows-x64.zip"
@@ -147,6 +150,13 @@ jobs:
 
           echo "--- release/ contents ---"
           ls -lah release/
+
+          # NSIS exe 是必须产物, 缺了直接红, 别把只有 zip 的残包推给用户.
+          if [ ! -f release/ZPass-windows-x64-Setup.exe ]; then
+            echo "::error::NSIS installer not found in out/make/nsis/"
+            ls -lah out/make/nsis/ || true
+            exit 1
+          fi
 
       - name: Resolve release context
         id: release_ctx

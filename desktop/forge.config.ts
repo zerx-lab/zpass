@@ -1,6 +1,5 @@
 import type { ForgeConfig } from "@electron-forge/shared-types";
 import { MakerZIP } from "@electron-forge/maker-zip";
-import { MakerSquirrel } from "@electron-forge/maker-squirrel";
 import { MakerDeb } from "@electron-forge/maker-deb";
 import { MakerRpm } from "@electron-forge/maker-rpm";
 import { MakerAppImage } from "@reforged/maker-appimage";
@@ -83,8 +82,10 @@ const config: ForgeConfig = {
     asar: true,
     // Both fields drive Electron Packager's output layout:
     //   - `name`           -> determines `out/<name>-<platform>-<arch>/`
-    //   - `executableName` -> the binary filename inside that dir + the
-    //                         token Squirrel uses for app id (Windows)
+    //   - `executableName` -> the binary filename inside that dir; also what
+    //                         electron-builder's win.executableName must match
+    //                         when building the NSIS installer (see
+    //                         electron-builder.win.yml)
     // We pin both to "zpass" (lowercase, FHS-safe) so downstream scripts
     // (scripts/make-arch.sh, install-desktop, future deb maker) don't need
     // to know about case quirks or the historical package.json name.
@@ -144,7 +145,9 @@ const config: ForgeConfig = {
   //
   //   linux   -> AppImage + .deb + .rpm (.pkg.tar.zst is produced separately
   //              by scripts/make-arch.sh; no Forge maker for pacman exists)
-  //   win32   -> Squirrel.Windows (RELEASES + .nupkg + Setup.exe; auto-update capable)
+  //   win32   -> ZIP only. NSIS 安装包 (向导式) 不走 Forge maker, 而是 CI 在
+  //              `task make` 之后用 electron-builder --prepackaged 对 Forge
+  //              已打好的 out/zpass-win32-x64/ 二次封装, 见 electron-builder.win.yml。
   //   darwin  -> ZIP (no signing identity wired in yet)
   //
   // ZIP is also kept as a portable fallback on linux/win32.
@@ -206,18 +209,6 @@ const config: ForgeConfig = {
         categories: ["Utility"],
         license: "MIT",
       },
-    }),
-    new MakerSquirrel({
-      // `name` becomes the Squirrel app id; must be a valid file/dir token.
-      name: "zpass",
-      // `title` / `authors` / `description` populate the Setup.exe's own
-      // VERSIONINFO and the Add/Remove Programs entry. Without these the
-      // installer shows up as "zpass Setup" by an unknown author; with
-      // them the user sees "ZPass" by "ZPass" in both places.
-      title: "ZPass",
-      authors: "ZPass",
-      description: "Zero-knowledge desktop password manager",
-      setupIcon: "./assets/logo/zpass.ico",
     }),
     new MakerZIP({}, ["darwin", "linux", "win32"]),
   ],

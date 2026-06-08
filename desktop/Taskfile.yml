@@ -162,6 +162,18 @@ tasks:
     cmds:
       - pnpm run make
 
+  make:win:nsis:
+    desc: Produce a Windows NSIS 向导式安装包 (.exe) under out/make/nsis/
+    # Forge 生态没有可靠的 NSIS maker, 用 electron-builder 的 --prepackaged 模式
+    # 对 `task make` (或 task build) 已经打好的 out/zpass-win32-x64/ 二次封装成
+    # 带安装向导的 NSIS exe。deps 用 build 确保 out/zpass-win32-x64/ 存在;
+    # 若同一次 CI 已跑过 task make 则 build 的 sources 缓存命中, 不重复打包。
+    # 见 electron-builder.win.yml。
+    platforms: [windows]
+    deps: [build]
+    cmds:
+      - pnpm run make:win:nsis
+
   build:arch:
     desc: Produce an Arch Linux pacman package (.pkg.tar.zst) under out/make/arch/
     # No Electron Forge maker for pacman exists today (到2026, the @reforged

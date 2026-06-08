@@ -1,0 +1,54 @@
+# electron-builder 配置 —— 仅用于 Windows NSIS 安装包。
+# -----------------------------------------------------------------------------
+# 为什么单独用 electron-builder 而不是 Electron Forge maker:
+#   Forge 自带的 MakerSquirrel 产出的 Setup.exe 是 Squirrel 风格的「静默自动
+#   安装」—— 双击后没有任何向导, 直接解包到 %LocalAppData% 并自动启动, 用户
+#   普遍反馈「这不像安装包」。我们想要传统的 NSIS 向导(下一步 / 选安装目录 /
+#   建快捷方式), Forge 生态里没有可靠的 NSIS maker, 因此引入 electron-builder
+#   只负责把 *已经由 Forge packager 打好的* 目录包成 NSIS。
+#
+# prepackaged 模式 (见 package.json 的 make:win:nsis 脚本):
+#   electron-builder --win --prepackaged out/zpass-win32-x64
+#   这样跳过 electron-builder 自己的打包阶段, 直接复用 Forge 产出的
+#   out/zpass-win32-x64/ (asar / fuses / extraResource / locale 裁剪 /
+#   win32metadata 全部已生效), 避免两套打包逻辑各打一份、各踩各的坑。
+#   Forge packager 产出的目录布局 (zpass.exe + resources/app.asar + locales/)
+#   正好就是 electron-builder 期望的 win-unpacked 结构。
+# -----------------------------------------------------------------------------
+
+appId: com.zerx.zpass
+productName: ZPass
+copyright: Copyright (C) 2020-2026 Denver Technologies, Inc.
+
+directories:
+  # 跟 Forge maker 的 out/make/ 保持同一根, CI 的 Stage release assets 一处收口。
+  output: out/make/nsis
+
+win:
+  # prepackaged 目录里 Forge 把主二进制命名为 zpass.exe (packagerConfig.executableName)。
+  # 不设这个, electron-builder 会按 productName 去找 "ZPass.exe" 而报找不到主程序。
+  executableName: zpass
+  icon: assets/logo/zpass.ico
+  target:
+    - nsis
+
+nsis:
+  # oneClick:false 是关键 —— 关掉 Squirrel/NSIS 的一键静默安装, 启用带界面的
+  # 安装向导。其余选项给用户常规预期的安装体验。
+  oneClick: false
+  # per-user 安装 (装到 %LocalAppData%), 默认不需要管理员 / 不弹 UAC;
+  # 仍允许用户在向导里抬升为全机安装。
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: ZPass
+  installerIcon: assets/logo/zpass.ico
+  uninstallerIcon: assets/logo/zpass.ico
+  installerHeaderIcon: assets/logo/zpass.ico
+  # 文件名带版本号便于本地辨认; CI 会再复制成无版本号的稳定 release 资产名。
+  artifactName: ZPass-Setup-${version}.${ext}
+  # 不做差分包 / 不配 publish: 当前没有接入 electron-builder 的自动更新通道,
+  # 关掉以免它去生成/索要 latest.yml 之类的更新元数据。
+  differentialPackage: false
