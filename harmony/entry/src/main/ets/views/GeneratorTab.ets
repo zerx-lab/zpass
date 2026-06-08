@@ -222,7 +222,7 @@ export struct GeneratorTab {
           Stack({ alignContent: Alignment.TopEnd }) {
             Column() {
               if (this.genCount <= 1) {
-                this.colorizedText(this.tokenize());
+                this.colorizedText();
 
                 // 强度行：进度条占满 + 标签 + 熵值，顶部 1px 细线分隔
                 Row({ space: ZSpacing.sm }) {
@@ -399,11 +399,16 @@ export struct GeneratorTab {
   }
 
   // 逐字符着色文本 —— 单条模式展示
+  //
+  // 不接收 tokens 入参：@Builder 的「按值传参」不会随源数据变化刷新（这正是
+  // 「单条密码点重新生成不更新、批量正常」的根因 —— 批量走 build() 内联 Text 直读
+  // 状态，故能刷新）。改为无参、在 builder 体内直读 this.genResult（经 tokenize），
+  // 让 @ComponentV2 把 genResult 记为该 builder 的依赖，regenerate 后正常刷新。
   @Builder
-  colorizedText(tokens: CharToken[]) {
+  colorizedText() {
     Text() {
       ForEach(
-        tokens,
+        this.tokenize(),
         (tok: CharToken, _i: number) => {
           Span(tok.char).fontColor(this.charColor(tok.kind));
         },
