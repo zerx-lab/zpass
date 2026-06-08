@@ -258,11 +258,24 @@ func (c *ConfigService) Write(namespace, value string) error {
 		return err
 	}
 	finalPath := resolveFilePath(dir, namespace)
-	// tmp 文件放同一目录下，rename 才能保证跨文件系统一致性与原子性
-	tmpPath := filepath.Join(dir, namespace+".json.tmp")
+	// tmp 文件放同一目录下，rename 才能保证跨文件系统一致性与原子性。
+	//
+	// ⚠️ 必须用「唯一」tmp 文件名（os.CreateTemp 的 * 通配），不能用固定的
+	// `<namespace>.json.tmp`：同一 namespace 的并发写（如 store 启动时连续多次
+	// setState 触发的多次 setItem）若共用同一 tmp 路径会相互踩踏 —— 写 A 与写 B
+	// 都写同一个 tmp，A 先 rename 走，B 再 rename 时 tmp 已不存在 →
+	// "rename …tmp -> …json: no such file or directory"，且 B 的内容丢失。
+	// 唯一 tmp 名让每个写各自独立，最后 rename 者胜（last-writer-wins，与
+	// zustand 每次 setState 全量覆盖的语义一致）。
+	tmp, err := os.CreateTemp(dir, namespace+".json.*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp for %s: %w", namespace, err)
+	}
+	tmpPath := tmp.Name()
+	// writeAndSync 会以 O_TRUNC 重新打开该路径；这里先关掉空句柄。唯一文件名
+	// 已经规避了并发 writer 竞态，重开写入的微小开销可忽略。
+	_ = tmp.Close()
 
-	// 用闭包包住文件句柄，确保任何路径退出（含 panic）时都能 Close。
-	// 不用 defer 在外层是因为 Sync 必须在 Close 之前。
 	if err := writeAndSync(tmpPath, value); err != nil {
 		// 写失败时主动清理 tmp，避免磁盘积累半成品
 		_ = os.Remove(tmpPath)
