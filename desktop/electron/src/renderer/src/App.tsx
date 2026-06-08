@@ -1,5 +1,6 @@
 import { RouterProvider } from "react-router-dom";
 import { AutoLock } from "@/app/AutoLock";
+import { CloudAutoRestore } from "@/app/CloudAutoRestore";
 import { CloudEventSync } from "@/app/CloudEventSync";
 import { LockSync } from "@/app/LockSync";
 import { router } from "@/app/router";
@@ -62,6 +63,11 @@ export function App() {
 			 * 初始化云端配置并拉取 status，所有路由均生效。
 			 */}
 			<CloudEventSync />
+			{/*
+			 * 云会话自动恢复 —— 信任设备免主密码启动时，等「本地已解锁 + 云端已配置
+			 * + 尚未登录」条件齐备后用 DEK 包裹凭据重建云会话。详见 CloudAutoRestore.tsx。
+			 */}
+			<CloudAutoRestore />
 			{/*
 			 * 空间隔离同步 —— 把前端 activeSpaceId 推给后端 currentSpaceID，
 			 * 并在切空间 / 解锁时认领历史数据 + 重载列表。详见 SpaceSync.tsx。
