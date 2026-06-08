@@ -32,7 +32,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/Button";
 import { MiniTitlebar } from "@/components/MiniTitlebar";
 import { registerCloud, signInCloud } from "@/lib/cloud-api";
@@ -105,6 +105,10 @@ type PageMode = "signin" | "register" | "save-key";
 export function SignInPage() {
 	const { t } = useTranslation();
 	const navigate = useNavigate();
+	const location = useLocation();
+	// 入口页可能在 state.from 里塞来源路径(如从 设置→云端同步 点"登录"进入)。
+	// 登录/注册完成后回到来源页,而不是一律跳首页 —— 与 UnlockPage 同一模式。
+	const from = (location.state as { from?: string } | null)?.from ?? "/vault";
 	const accountStoreSignIn = useAccountStore((s) => s.signIn);
 	const cloudStore = useCloudStore();
 	const { status } = cloudStore;
@@ -191,7 +195,7 @@ export function SignInPage() {
 				email: result.email,
 				displayName: deriveDisplayName(result.email),
 			});
-			navigate("/vault", { replace: true });
+			navigate(from, { replace: true });
 		} catch (e) {
 			setErrorKey(mapError(e));
 		} finally {

@@ -450,12 +450,27 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
 
 	update: async (input) => {
 		try {
-			await vaultApi.updateItem(input);
-			// 写完清缓存：下次详情页再展开会重新拉，避免显示旧 fields
+			const summary = await vaultApi.updateItem(input);
+			// 乐观回填详情缓存,而不是删除后等重拉:
+			// 后端 UpdateItem 是"完整对象替换"语义(见 vault-api 注释),所以
+			// 提交的 input.fields 就是落库后的权威内容,直接写进缓存与 getItem
+			// 结果一致。若沿用旧的"先 delete 再 load",详情面板会在重拉 fields
+			// 的异步窗口里短暂落到 `!detail` 分支闪出空白(尤其绑定云端时
+			// vault:changed 多次触发 load,闪烁更明显)。
 			set((state) => {
-				const next = { ...state.itemDetails };
-				delete next[input.id];
-				return { itemDetails: next, error: null };
+				const prev = state.itemDetails[input.id];
+				const nextPayload: VaultItemPayload = {
+					id: input.id,
+					type: input.type,
+					name: input.name,
+					fields: { ...input.fields },
+					createdAt: prev?.createdAt ?? summary.createdAt,
+					updatedAt: summary.updatedAt,
+				};
+				return {
+					itemDetails: { ...state.itemDetails, [input.id]: nextPayload },
+					error: null,
+				};
 			});
 			await get().load();
 			// 若是 login 类型，异步触发单条泄露检测（密码可能已修改）

@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/Button";
 import {
 	applyCloudMerge,
@@ -56,6 +56,7 @@ function messageOf(e: unknown): string {
 export function CloudSyncSection() {
 	const { t } = useTranslation();
 	const navigate = useNavigate();
+	const location = useLocation();
 	const activeSpace = useActiveSpace();
 	const cloudStore = useCloudStore();
 	const { status, progress, conflictCount, setBaseUrl } = cloudStore;
@@ -268,7 +269,14 @@ export function CloudSyncSection() {
 								{status?.baseUrl || ""}
 							</span>
 						</div>
-						<Button onClick={() => navigate("/signin")} className="shrink-0">
+						<Button
+							onClick={() =>
+								navigate("/signin", {
+									state: { from: location.pathname + location.search },
+								})
+							}
+							className="shrink-0"
+						>
 							{t("cloud_signin_btn")}
 						</Button>
 					</div>
