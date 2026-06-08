@@ -225,11 +225,11 @@ struct SyncHostPage {
       .alignItems(HorizontalAlign.Center)
       .margin({ bottom: ZSpacing.xs });
 
-      Text('让别人连我')
+      Text('接受设备连接')
         .fontSize(ZType.title2Size)
         .fontWeight(FontWeight.Bold)
         .fontColor(this.zc.text);
-      Text('在另一台设备的「局域网同步」里扫码或手输下方 IP 与 PIN 即可连接到本机同步')
+      Text('本机将作为局域网同步服务端。其他设备扫描下方二维码，或手动输入本机 IP 与配对 PIN，即可建立端到端加密通道安全同步密码库——全程不经任何外部服务器中转。')
         .fontSize(ZType.footnoteSize)
         .fontColor(this.zc.text3)
         .textAlign(TextAlign.Center)
