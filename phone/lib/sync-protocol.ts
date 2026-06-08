@@ -36,6 +36,10 @@ import {
   utf8,
   utf8Decode,
 } from "./crypto";
+import {
+  isNativeCryptoAvailable,
+  nativeArgon2idRaw,
+} from "../modules/zpass-crypto";
 import { vaultService, type ItemPayload } from "./vault-service";
 import { readVaultFile } from "./vault-storage";
 
@@ -1057,10 +1061,30 @@ export async function deriveSyncSessionKey(
     serverNonce,
     salt.length + sidBytes.length + clientNonce.length,
   );
-  // 不走 hash-wasm：Hermes 不暴露 WebAssembly 全局，会直接抛
-  // 「WebAssembly is not supported in this environment」。也不走 nativeDeriveKEK：
-  // cryptocore::derive_kek 强校验 salt.len() == 32，64 字节 sync salt 会被拒。
-  // 用 @noble/hashes 纯 JS：Hermes 完全兼容，配对是一次性操作（数秒），可接受。
+  // 优先走原生 Rust（libcryptocore.so）的 argon2id_raw：它接受任意长度 salt，
+  // 因此能吃下 64 字节的 sync 拼接 salt（derive_kek 会因 salt.len()!=32 拒绝，
+  // 故这里用 argon2id_raw 而非 nativeDeriveKEK）。原生约 100–300ms，相比 Hermes
+  // 纯 JS Argon2id 的数秒是配对校验耗时的主要来源。算法/参数/字节布局与下方
+  // @noble 兜底完全一致（Argon2id / V0x13 / m=8MiB,t=2,p=1,dkLen=32），跨端不分叉。
+  if (isNativeCryptoAvailable()) {
+    try {
+      const keyB64 = await nativeArgon2idRaw(
+        toB64(utf8(pin)),
+        toB64(combined),
+        SYNC_PSK_MEMORY_KIB,
+        SYNC_PSK_ITERATIONS,
+        SYNC_PSK_PARALLELISM,
+        SYNC_PSK_KEY_LEN,
+      );
+      return fromB64(keyB64);
+    } catch (e) {
+      // 原生不可用 / 异常时退回纯 JS，保证配对仍能完成（仅更慢）。
+      console.warn("[sync] native argon2idRaw failed, fallback to JS:", e);
+    }
+  }
+  // 兜底：iOS / web / 原生未编译场景。不走 hash-wasm：Hermes 不暴露 WebAssembly
+  // 全局，会直接抛「WebAssembly is not supported in this environment」。
+  // @noble/hashes 纯 JS：Hermes 完全兼容，配对是一次性操作（数秒），可接受。
   return nobleArgon2id(pin, combined, {
     m: SYNC_PSK_MEMORY_KIB,
     t: SYNC_PSK_ITERATIONS,

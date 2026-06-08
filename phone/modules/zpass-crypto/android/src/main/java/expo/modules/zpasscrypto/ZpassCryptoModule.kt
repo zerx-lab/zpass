@@ -70,6 +70,21 @@ class ZpassCryptoModule : Module() {
       Base64.encodeToString(key, Base64.NO_WRAP)
     }
 
+    AsyncFunction("argon2idRaw") {
+        passwordB64: String,
+        saltB64: String,
+        memKiB: Int,
+        iter: Int,
+        par: Int,
+        keyLen: Int ->
+      // password 也走 base64：sync PIN 可能含非 ASCII，base64 是无损二进制载体，
+      // 与 Rust argon2id_raw(password: &[u8]) 的字节语义一致。
+      val password = Base64.decode(passwordB64, Base64.NO_WRAP)
+      val salt = Base64.decode(saltB64, Base64.NO_WRAP)
+      val key = RustCryptoCore.argon2idRaw(password, salt, memKiB, iter, par, keyLen)
+      Base64.encodeToString(key, Base64.NO_WRAP)
+    }
+
     AsyncFunction("sealAEAD") {
         keyB64: String, plaintextB64: String, aadB64: String ->
       val key = Base64.decode(keyB64, Base64.NO_WRAP)

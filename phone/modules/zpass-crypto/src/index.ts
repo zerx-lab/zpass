@@ -36,6 +36,18 @@ interface ZpassCryptoNative {
     par: number,
     keyLen: number,
   ): Promise<string>;
+  /**
+   * Argon2id 通用派生（LAN 同步 PSK）；salt 长度不限。
+   * password 走 base64（与 Rust argon2id_raw 的 &[u8] 语义一致）；返回 base64 派生密钥。
+   */
+  argon2idRaw(
+    passwordB64: string,
+    saltB64: string,
+    memKiB: number,
+    iter: number,
+    par: number,
+    keyLen: number,
+  ): Promise<string>;
   /** XChaCha20-Poly1305 加密；返回 base64 编码的 nonce+ct+tag */
   sealAEAD(keyB64: string, plaintextB64: string, aadB64: string): Promise<string>;
   /** 解密 sealAEAD 输出 */
@@ -78,6 +90,25 @@ export async function nativeDeriveKEK(
 ): Promise<string> {
   if (!native) throw new Error("ZpassCrypto native module not available");
   return native.deriveKEK(password, saltB64, memKiB, iter, par, keyLen);
+}
+
+/**
+ * Argon2id 通用派生（原生，LAN 同步 PSK）
+ *
+ * 与 {@link nativeDeriveKEK} 的区别：salt 长度不限（同步用 64 字节拼接 salt），
+ * password 走 base64 字节。原生约 100–300ms，相比 Hermes 纯 JS Argon2id 的数秒
+ * 是用户可感知的提速。仅 Android 编入；其它平台 native 为 null，调用方需兜底。
+ */
+export async function nativeArgon2idRaw(
+  passwordB64: string,
+  saltB64: string,
+  memKiB: number,
+  iter: number,
+  par: number,
+  keyLen: number,
+): Promise<string> {
+  if (!native) throw new Error("ZpassCrypto native module not available");
+  return native.argon2idRaw(passwordB64, saltB64, memKiB, iter, par, keyLen);
 }
 
 export async function nativeSealAEAD(

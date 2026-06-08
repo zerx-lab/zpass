@@ -381,6 +381,38 @@ mod tests {
         assert_eq!(got, want, "argon2id 字节级与 Go 版分叉");
     }
 
+    /// LAN 同步原生路径锚点：`argon2id_raw` 必须与已跟 Go/@noble 对齐的
+    /// `derive_kek` 在相同输入下字节级一致（两者共用 Argon2id/V0x13 配置）。
+    /// 这间接保证 phone 原生 `nativeArgon2idRaw` 与 JS 兜底 / desktop 不分叉。
+    #[test]
+    fn argon2id_raw_matches_kek_for_same_input() {
+        let salt = vec![0xABu8; SALT_SIZE];
+        let kek = derive_kek("correct horse battery staple", &salt, 8 * 1024, 2, 2, 32).unwrap();
+        let raw = argon2id_raw(
+            "correct horse battery staple".as_bytes(),
+            &salt,
+            8 * 1024,
+            2,
+            2,
+            32,
+        )
+        .unwrap();
+        assert_eq!(raw, kek, "argon2id_raw 与 derive_kek 派生分叉");
+    }
+
+    /// `argon2id_raw` 接受 64 字节同步拼接 salt（derive_kek 会因 != 32 拒绝），
+    /// 且对短于 1 字节的空 salt 报错。
+    #[test]
+    fn argon2id_raw_accepts_sync_salt() {
+        let salt64: Vec<u8> = (0u8..64).collect();
+        let k = argon2id_raw("123456".as_bytes(), &salt64, 8 * 1024, 2, 1, 32).unwrap();
+        assert_eq!(k.len(), 32);
+        assert!(matches!(
+            argon2id_raw("123456".as_bytes(), &[], 8 * 1024, 2, 1, 32),
+            Err(Error::SaltLength { got: 0 })
+        ));
+    }
+
     #[test]
     fn derive_kek_validation_order() {
         let salt = vec![0u8; SALT_SIZE];

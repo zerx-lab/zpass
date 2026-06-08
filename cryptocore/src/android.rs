@@ -12,7 +12,7 @@
 //
 // Rust guideline compliant 2026-02-21
 
-use crate::{derive_kek, open_aead, random_bytes, seal_aead};
+use crate::{argon2id_raw, derive_kek, open_aead, random_bytes, seal_aead};
 use jni::JNIEnv;
 use jni::objects::{JByteArray, JClass, JString};
 use jni::sys::{jbyteArray, jint};
@@ -76,6 +76,46 @@ pub extern "system" fn Java_com_zerx_zpass_cryptocore_RustCryptoCore_deriveKek<'
         return throw(&mut env, "argon2id parameter cannot be negative");
     }
     let r = derive_kek(
+        &password,
+        &salt,
+        mem_kib as u32,
+        iter as u32,
+        par as u32,
+        key_len as u32,
+    );
+    vec_to_jbytearray(&mut env, r)
+}
+
+/// Argon2id 通用派生（LAN 同步 PSK）—— salt / keyLen 不限，password 走 bytes。
+///
+/// 与 [`Java_com_zerx_zpass_cryptocore_RustCryptoCore_deriveKek`] 的区别：调用
+/// [`argon2id_raw`] 而非 `derive_kek`，因此接受同步用的 64-byte 拼接 salt
+/// （`baseSalt||sessionId||clientNonce||serverNonce`）。password 以 UTF-8 字节
+/// 传入（与 phone `@noble` 兜底对 PIN 字符串的 UTF-8 编码一致），保证字节级对齐。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_zerx_zpass_cryptocore_RustCryptoCore_argon2idRaw<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    password: JByteArray<'local>,
+    salt: JByteArray<'local>,
+    mem_kib: jint,
+    iter: jint,
+    par: jint,
+    key_len: jint,
+) -> jbyteArray {
+    let password = match jbytes_to_vec(&mut env, &password) {
+        Ok(v) => v,
+        Err(e) => return throw(&mut env, &e),
+    };
+    let salt = match jbytes_to_vec(&mut env, &salt) {
+        Ok(v) => v,
+        Err(e) => return throw(&mut env, &e),
+    };
+    // jint = i32；若调用方传负数说明 Kotlin 侧没做转换，直接拒绝
+    if mem_kib < 0 || iter < 0 || par < 0 || key_len < 0 {
+        return throw(&mut env, "argon2id parameter cannot be negative");
+    }
+    let r = argon2id_raw(
         &password,
         &salt,
         mem_kib as u32,

@@ -28,6 +28,22 @@ object RustCryptoCore {
     keyLen: Int,
   ): ByteArray
 
+  /**
+   * Argon2id 通用派生（LAN 同步 PSK）；password / salt 走 ByteArray，salt 长度不限。
+   *
+   * 与 deriveKek 的区别：调用 Rust argon2id_raw，接受同步用的 64 字节拼接 salt；
+   * password 以 UTF-8 字节传入（PIN 字符串的 UTF-8 编码）。失败抛 RuntimeException。
+   */
+  @JvmStatic
+  external fun argon2idRaw(
+    password: ByteArray,
+    salt: ByteArray,
+    memKib: Int,
+    iter: Int,
+    par: Int,
+    keyLen: Int,
+  ): ByteArray
+
   /** XChaCha20-Poly1305 加密；输出 = nonce(24) || ct || tag(16) */
   @JvmStatic
   external fun sealAead(key: ByteArray, plaintext: ByteArray, aad: ByteArray): ByteArray
