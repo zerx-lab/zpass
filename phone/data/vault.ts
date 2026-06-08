@@ -150,3 +150,16 @@ export type VaultItem =
   | SshItem
   | PasskeyItem
   | TotpItem;
+
+/**
+ * 是否应归入「验证码」视图。
+ *
+ * 两类来源（见 TotpItem 注释）：
+ *   - 独立 totp 条目
+ *   - 携带 totp 密钥的 login 条目（2FA / MFA 二次验证码）
+ */
+export function itemHasTotp(item: VaultItem): boolean {
+  if (item.type === "totp") return !!item.secret?.trim();
+  if (item.type === "login") return !!item.totp?.trim();
+  return false;
+}

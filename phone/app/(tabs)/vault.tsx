@@ -34,7 +34,7 @@ import {
 import { dialog } from "@/components/ui/dialog";
 import { SpaceAvatar } from "@/components/space-avatar";
 import { useVault } from "@/contexts/vault-context";
-import type { VaultItem, VaultItemType } from "@/data/vault";
+import { itemHasTotp, type VaultItem, type VaultItemType } from "@/data/vault";
 import {
   faviconColor,
   faviconInitials,
@@ -336,6 +336,8 @@ export default function VaultScreen() {
   const filtered = useMemo(() => {
     let list = sorted;
     if (activeFilter === "fav") list = list.filter((i) => i.favorite);
+    else if (activeFilter === "totp")
+      list = list.filter(itemHasTotp);
     else if (activeFilter !== "all")
       list = list.filter((i) => i.type === activeFilter);
     if (search.trim()) {
@@ -359,7 +361,10 @@ export default function VaultScreen() {
       "ssh",
       "passkey",
     ]) {
-      result[t] = items.filter((i) => i.type === t).length;
+      result[t] =
+        t === "totp"
+          ? items.filter(itemHasTotp).length
+          : items.filter((i) => i.type === t).length;
     }
     return result;
   }, [items]);
