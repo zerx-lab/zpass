@@ -64,7 +64,11 @@ interface CryptocoreNative {
     nonce: ArrayBuffer,
   ) => ArrayBuffer;
   isSyncServerAvailable: () => boolean;
-  registerSyncRequestHandler: (handler: (req: SyncRequest) => void) => void;
+  // napi ThreadsafeFunction(CalleeHandled) 以 error-first 形态回调 JS：第一个实参
+  // 是 err，第二个才是请求体。声明成两参以如实反映原生调用约定。
+  registerSyncRequestHandler: (
+    handler: (first: SyncRequest | null, second?: SyncRequest) => void,
+  ) => void;
   startSyncServer: () => SyncServerInfo;
   stopSyncServer: () => void;
   respondSyncRequest: (reqId: number, status: number, body: Uint8Array) => void;
@@ -229,7 +233,21 @@ export function isNativeSyncServerAvailable(): boolean {
 
 /** 注册每个入站同步请求的 handler。须在 nativeStartSyncServer 之前调用一次。 */
 export function addSyncRequestListener(handler: (req: SyncRequest) => void): void {
-  nativeRegisterSyncRequestHandler(handler);
+  // 关键：cryptocore/src/harmony.rs 的 SYNC_TSFN 是默认 CalleeHandled 策略的
+  // ThreadsafeFunction，反向回调以 error-first (err, req) 两参触发 JS，Rust 端恒以
+  // Ok(req) 调用 → err 恒为 null、真正的请求体是第二个实参。
+  // 若把单参 handler 直接透传，handler 的 req 会绑定到 err(null)，导致每个入站请求都
+  // 拿不到 body、never 调用 respondSyncRequest，Rust worker park 至 504，对端表现为
+  // 「开启服务端后无法连接」。这里取真正的请求对象再转交上层。
+  // second 缺省的兜底分支同时兼容潜在的单参(Fatal)实现，避免约定再变时回归。
+  nativeRegisterSyncRequestHandler(
+    (first: SyncRequest | null, second?: SyncRequest) => {
+      const req: SyncRequest | null = second !== undefined ? second : first;
+      if (req !== null && req !== undefined) {
+        handler(req);
+      }
+    },
+  );
 }
 
 /** 启动同步服务端，返回绑定端口与可路由 LAN IPv4。原生为同步，包成 Promise。 */
