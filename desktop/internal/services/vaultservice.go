@@ -1883,6 +1883,23 @@ func (s *VaultService) softDeleteRowLocked(id string, existingRow *VaultItemRow)
 //
 // 调用方负责保证 payload.DeletedAt == nil（tombstone 走 DeleteItem 路径）。
 func (s *VaultService) IngestForeignPayload(id string, payload *ItemPayload, createdAt, updatedAt int64) (applied bool, err error) {
+	return s.ingestForeignPayload(id, payload, createdAt, updatedAt, false)
+}
+
+// IngestForeignPayloadForced 与 IngestForeignPayload 相同，但跳过 LWW
+// （updatedAt）守卫，无条件用 remote payload 覆盖本端。
+//
+// 专供显式冲突解决「保留云端」：concurrent_edit 冲突的成立前提就是两端
+// updatedAt 逐字相同，普通 LWW 守卫会把用户选中的 remote 版本当成「不比本端
+// 新」而静默跳过（applied=false），导致用户每次「保留云端」都是空操作、冲突
+// 每轮同步原样复发。与「保留本机」走的无条件 force-push 对称。
+func (s *VaultService) IngestForeignPayloadForced(id string, payload *ItemPayload, createdAt, updatedAt int64) (applied bool, err error) {
+	return s.ingestForeignPayload(id, payload, createdAt, updatedAt, true)
+}
+
+// ingestForeignPayload 是上面两个公开方法的共享实现。force=true 时跳过 LWW
+// 早退（其余 insert / restore / update 分支不变）。
+func (s *VaultService) ingestForeignPayload(id string, payload *ItemPayload, createdAt, updatedAt int64, force bool) (applied bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.dek == nil {
@@ -1947,7 +1964,7 @@ func (s *VaultService) IngestForeignPayload(id string, payload *ItemPayload, cre
 		}
 		return true, nil
 	}
-	if existing.UpdatedAt >= updatedAt {
+	if !force && existing.UpdatedAt >= updatedAt {
 		return false, nil // LWW: 本端更新或一样新，不覆盖
 	}
 	// db.RestoreItem / db.UpdateItem 都不改 space_id 列；上面已令 spaceID =

@@ -464,9 +464,12 @@ func (s *CloudService) syncVaultOnce(ctx context.Context, spaceID, vaultID strin
 		}
 		remoteByID[id] = it
 		remote = append(remote, SyncManifestEntry{
-			ID:          id,
-			UpdatedAt:   it.UpdatedAt,
-			ContentHash: it.ContentHash,
+			ID:        id,
+			UpdatedAt: it.UpdatedAt,
+			// Recompute from the ciphertext (already in hand) rather than trusting
+			// the server-stored hash — see remoteContentHash. This is what makes a
+			// vault converge across clients with incompatible hash conventions.
+			ContentHash: s.remoteContentHash(id, it.Ciphertext, it.ContentHash, vaultKey),
 			Revision:    it.Revision,
 		})
 	}
@@ -579,9 +582,12 @@ func cloudDecide(local, remote []SyncManifestEntry) (pulls, pushes []string, con
 			pulls = append(pulls, l.ID) // remote newer → pull
 		case bothHashed:
 			// equal updatedAt, both hashes known and differing → a true
-			// simultaneous edit. (When either side has no content_hash — e.g. a
-			// web_vault item, which stores null — equal updatedAt is treated as
-			// converged rather than a spurious conflict.)
+			// simultaneous edit. r.ContentHash here is the locally-recomputed
+			// canonical hash (see remoteContentHash), not the raw server-stored
+			// value, so a format mismatch can no longer masquerade as divergence.
+			// (When either side has no content_hash — e.g. a web_vault item, which
+			// stores null — equal updatedAt is treated as converged rather than a
+			// spurious conflict.)
 			conflicts = append(conflicts, syncMergeConflict{
 				ID: l.ID, Kind: "concurrent_edit", Local: l, Remote: r,
 				SuggestedRemote: r.Revision > l.Revision,
@@ -660,6 +666,30 @@ func (s *CloudService) decryptRemote(localID string, it cloud.SnapshotItem, vaul
 		return nil, fmt.Errorf("cloud: parse item %s: %w", localID, err)
 	}
 	return payload, nil
+}
+
+// remoteContentHash returns the desktop-canonical content hash for a remote item
+// by decrypting its ciphertext and rehashing with the local vault key, rather
+// than trusting the server-stored hash. The stored hash is unreliable across the
+// fleet: web_vault writes null, skeleton-cli hashes the raw plaintext, and a
+// pre-fix desktop wrote an older (with-empties) canonical form — so comparing a
+// freshly recomputed local hash against a stored remote hash would surface
+// phantom conflicts for identical content. Recomputing both sides with
+// cloudContentHash makes the comparison format-agnostic and self-healing.
+//
+// The empty-stored case is preserved deliberately: cloudDecide treats an empty
+// remote hash + equal updatedAt as converged (the web_vault null path). Returning
+// "" there keeps that behavior instead of minting a hash web_vault never had.
+// On any decrypt/parse failure it falls back to the server-stored hash.
+func (s *CloudService) remoteContentHash(localID, ciphertext, stored string, vaultKey []byte) string {
+	if stored == "" || ciphertext == "" {
+		return stored
+	}
+	payload, err := s.decryptRemote(localID, cloud.SnapshotItem{ItemID: localID, Ciphertext: ciphertext}, vaultKey)
+	if err != nil || payload == nil {
+		return stored
+	}
+	return cloudContentHash(vaultKey, payload)
 }
 
 // pushItem encrypts a local item (or tombstone) with the vault key and pushes it
@@ -769,8 +799,11 @@ func (s *CloudService) bridgePushConflict(spaceID, vaultID, id string, local Syn
 		return nil
 	}
 
-	// Server side is live.
-	if local.ContentHash != "" && local.ContentHash == server.ContentHash {
+	// Server side is live. Recompute the server hash from its ciphertext (same
+	// reason as the snapshot path: the stored hash may be a foreign/older format
+	// that no longer matches the local canonical form for identical content).
+	serverHash := s.remoteContentHash(id, server.Ciphertext, server.ContentHash, vaultKey)
+	if local.ContentHash != "" && local.ContentHash == serverHash {
 		return nil // same content, only seq differs — converged
 	}
 	switch {
@@ -784,7 +817,7 @@ func (s *CloudService) bridgePushConflict(spaceID, vaultID, id string, local Syn
 			ID: id, Kind: "concurrent_edit", Local: local,
 			Remote: SyncManifestEntry{
 				ID: id, UpdatedAt: server.UpdatedAt,
-				ContentHash: server.ContentHash, Revision: server.Revision,
+				ContentHash: serverHash, Revision: server.Revision,
 			},
 			SuggestedRemote: server.Revision > local.Revision,
 		}, server, vaultKey)
@@ -1015,7 +1048,9 @@ func (s *CloudService) applyResolution(ctx context.Context, client *cloud.Client
 		}
 		payload := *c.remote
 		payload.SpaceID = c.spaceID
-		_, err := s.vault.IngestForeignPayload(c.conflict.ID, &payload, payload.CreatedAt, c.conflict.RemoteManifest.UpdatedAt)
+		// Forced: a concurrent_edit conflict is equal-timestamp by definition, so a
+		// plain LWW ingest would no-op and the conflict would recur every sync.
+		_, err := s.vault.IngestForeignPayloadForced(c.conflict.ID, &payload, payload.CreatedAt, c.conflict.RemoteManifest.UpdatedAt)
 		return err
 	case "local":
 		if client == nil {
@@ -1150,16 +1185,29 @@ func (s *CloudService) localManifest(spaceID string, vaultKey []byte) ([]SyncMan
 // means the zero-knowledge server sees an opaque token it cannot compute or
 // correlate across users/vaults, while members of one vault (who share the key)
 // still compute an identical hash for identical content (needed for dedup/merge).
-// The canonical content is the same {type,name,fields} stable JSON the LAN
-// contentHashOf uses.
+//
+// The canonical fields are reduced exactly as payloadToWebVaultRecord seals them
+// (envelope keys + empty values dropped). This MUST match the sealed record: the
+// ciphertext carries only the reduced field set, so a remote item decrypted and
+// rehashed has to land on the same digest as the local payload it came from. If
+// this hashed the full payload (empties included) while the ciphertext dropped
+// them, identical content would read as divergent (equal updatedAt, mismatched
+// hash) and loop forever as a phantom concurrent-edit conflict.
 func cloudContentHash(vaultKey []byte, p *ItemPayload) string {
 	if p == nil {
 		return ""
 	}
+	fields := make(map[string]any, len(p.Fields))
+	for k, v := range p.Fields {
+		if webVaultEnvelopeKeys[k] || isEmptyFieldValue(v) {
+			continue
+		}
+		fields[k] = v
+	}
 	stable := map[string]any{
 		"type":   string(p.Type),
 		"name":   p.Name,
-		"fields": p.Fields,
+		"fields": fields,
 	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)

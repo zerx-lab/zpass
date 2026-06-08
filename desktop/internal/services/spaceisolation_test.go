@@ -411,6 +411,47 @@ func TestIngestForeignPayload_EmptySpaceFallsBackToCurrent(t *testing.T) {
 	}
 }
 
+// TestIngestForeignPayloadForced_OverwritesAtEqualTimestamp 锁定 Layer-1 修复：
+// concurrent_edit 冲突两端 updatedAt 相同，普通 LWW ingest 会静默跳过（=「保留
+// 云端」空操作、冲突复发），强制变体必须无条件覆盖。
+func TestIngestForeignPayloadForced_OverwritesAtEqualTimestamp(t *testing.T) {
+	svc := unlockedServiceInSpace(t, "A")
+	created, err := svc.CreateItem(loginItemFixture("orig"))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	ts := created.UpdatedAt
+
+	// 同 updatedAt 的普通 ingest 必须是 no-op（LWW 守卫）。
+	noop := loginItemFixture("should-not-apply")
+	noop.ID = created.ID
+	applied, err := svc.IngestForeignPayload(created.ID, &noop, created.CreatedAt, ts)
+	if err != nil {
+		t.Fatalf("plain ingest: %v", err)
+	}
+	if applied {
+		t.Fatal("plain ingest at equal timestamp should no-op, but reported applied")
+	}
+	if got, _ := svc.GetItem(created.ID); got == nil || got.Name != "orig" {
+		t.Fatalf("plain ingest unexpectedly changed content: %+v", got)
+	}
+
+	// 同 updatedAt 的强制 ingest（=「保留云端」）必须覆盖。
+	remote := loginItemFixture("from-cloud")
+	remote.ID = created.ID
+	applied, err = svc.IngestForeignPayloadForced(created.ID, &remote, created.CreatedAt, ts)
+	if err != nil || !applied {
+		t.Fatalf("forced ingest: applied=%v err=%v", applied, err)
+	}
+	got, err := svc.GetItem(created.ID)
+	if err != nil || got == nil {
+		t.Fatalf("get after forced ingest: err=%v got=%v", err, got)
+	}
+	if got.Name != "from-cloud" {
+		t.Fatalf("forced ingest did not overwrite: name=%q, want %q", got.Name, "from-cloud")
+	}
+}
+
 // TestIngestForeignPayload_ExistingItemKeepsSpace 同步更新一条本端已有条目时，
 // 保持本端原空间归属（sync 不改变 item 的空间），即便对端 payload 声称别的空间。
 func TestIngestForeignPayload_ExistingItemKeepsSpace(t *testing.T) {

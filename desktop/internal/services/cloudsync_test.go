@@ -3,6 +3,8 @@ package services
 import (
 	"sort"
 	"testing"
+
+	"github.com/zerx-lab/zpass/internal/cloudcrypto"
 )
 
 func ent(id string, updated int64, hash string, deleted int64) SyncManifestEntry {
@@ -92,6 +94,100 @@ func TestCloudDecide(t *testing.T) {
 			assertIDs(t, "pushes", pushes, tc.want.pushes)
 			assertIDs(t, "conflicts", cIDs, tc.want.conflicts)
 		})
+	}
+}
+
+// TestCloudContentHash_SealRoundTripInvariant pins the Layer-2 fix: the content
+// hash must survive the seal -> wire -> open round trip a remote peer performs.
+// payloadToWebVaultRecord drops empty fields when sealing, so a hash that counted
+// those empties could never be reproduced by decrypting the ciphertext — which is
+// exactly what made identical content loop forever as a phantom concurrent_edit.
+func TestCloudContentHash_SealRoundTripInvariant(t *testing.T) {
+	key := []byte("0123456789abcdef0123456789abcdef")
+	p := &ItemPayload{
+		Type: ItemTypeLogin,
+		Name: "zero",
+		Fields: map[string]any{
+			"username": "zero",
+			"password": "hunter2",
+			"url":      "", // empty values the seal codec drops
+			"notes":    "",
+			"favorite": false,
+		},
+	}
+	local := cloudContentHash(key, p)
+	if local == "" {
+		t.Fatal("hash is empty")
+	}
+
+	// Decrypt-side: what a peer (or this client after a pull) recomputes.
+	rec, err := payloadToWebVaultRecord(p)
+	if err != nil {
+		t.Fatalf("seal-encode: %v", err)
+	}
+	decoded, err := webVaultRecordToPayload(rec)
+	if err != nil {
+		t.Fatalf("open-decode: %v", err)
+	}
+	if remote := cloudContentHash(key, decoded); remote != local {
+		t.Fatalf("hash not round-trip invariant: local=%s remote=%s", local, remote)
+	}
+
+	// The empties must be irrelevant to the digest (the actual divergence cause).
+	lean := &ItemPayload{Type: ItemTypeLogin, Name: "zero", Fields: map[string]any{
+		"username": "zero", "password": "hunter2",
+	}}
+	if h := cloudContentHash(key, lean); h != local {
+		t.Fatalf("empty fields changed the hash: with-empties=%s without=%s", local, h)
+	}
+}
+
+// TestRemoteContentHash_IgnoresStaleServerHash pins the Layer-2 self-heal (Fix B)
+// that actually clears the user's phantom conflicts: remoteContentHash must
+// recompute from the ciphertext and ignore whatever the server stored (an older
+// with-empties desktop hash, a skeleton-cli plaintext hash, …). Without this, a
+// stale stored hash keeps reading as divergence for identical content forever.
+func TestRemoteContentHash_IgnoresStaleServerHash(t *testing.T) {
+	key := make([]byte, cloudcrypto.KeySize)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	const localID = "0123456789abcdef0123456789abcdef"
+
+	p := &ItemPayload{
+		Type: ItemTypeLogin,
+		Name: "zero",
+		Fields: map[string]any{
+			"username": "zero",
+			"password": "hunter2",
+			"url":      "", // empties dropped on seal — the divergence trap
+			"notes":    "",
+		},
+	}
+	pt, err := payloadToWebVaultRecord(p)
+	if err != nil {
+		t.Fatalf("seal-encode: %v", err)
+	}
+	ct, err := cloudcrypto.SealAEAD(key, pt, []byte(cloudItemID(localID)))
+	if err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	ctB64 := cloudB64.EncodeToString(ct)
+
+	// remoteContentHash needs no CloudService state — a zero value suffices.
+	s := &CloudService{}
+
+	// A deliberately-wrong stored hash must be ignored; the recomputed value wins.
+	want := cloudContentHash(key, p)
+	got := s.remoteContentHash(localID, ctB64, "deadbeefdeadbeef", key)
+	if got != want {
+		t.Fatalf("stale server hash not ignored: got=%s want=%s", got, want)
+	}
+
+	// The web_vault null path is preserved: empty stored hash stays empty (so
+	// cloudDecide treats equal-updatedAt as converged, not a spurious conflict).
+	if h := s.remoteContentHash(localID, ctB64, "", key); h != "" {
+		t.Fatalf("empty stored hash should stay empty, got %s", h)
 	}
 }
 
