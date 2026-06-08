@@ -27,7 +27,8 @@ import {
   type OtpMeta,
 } from '../lib/Totp';
 import { copyEphemeral } from '../lib/Clipboard';
-import { faviconColor, faviconInitials } from '../lib/Format';
+import { faviconSourceForItem } from '../lib/Favicon';
+import { Favicon } from '../components/Favicon';
 import { promptAction, router } from '@kit.ArkUI';
 import { safeAreaState, SafeAreaState } from '../state/SafeArea';
 
@@ -242,18 +243,13 @@ struct TotpDetail {
           Column() {
             // 服务 chip
             Row({ space: ZSpacing.sm }) {
-              Column() {
-                Text(faviconInitials(this.item.name))
-                  .fontSize(10)
-                  .fontWeight(FontWeight.Bold)
-                  .fontColor(this.zc.faviconInk);
-              }
-              .width(22)
-              .height(22)
-              .borderRadius(ZRadius.sm)
-              .backgroundColor(faviconColor(this.item.name))
-              .justifyContent(FlexAlign.Center)
-              .alignItems(HorizontalAlign.Center);
+              Favicon({
+                name: this.item.name,
+                host: faviconSourceForItem(this.item.type, this.item.fields),
+                boxSize: 22,
+                radius: ZRadius.sm,
+                fontSize: 10,
+              });
 
               Text(this.item.name)
                 .fontSize(ZType.subheadSize)

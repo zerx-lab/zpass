@@ -15,7 +15,7 @@
 
 import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType, alpha1f } from '../theme/Tokens';
 import { vaultStore, type VaultStore } from '../state/VaultStore';
-import type { UpdateItemPatch, VaultItemType } from '../lib/VaultService';
+import type { ItemPayload, UpdateItemPatch, VaultItemType } from '../lib/VaultService';
 import { typeLabel } from '../lib/Format';
 import { promptAction, router } from '@kit.ArkUI';
 import { safeAreaState, SafeAreaState } from '../state/SafeArea';
@@ -141,9 +141,17 @@ struct ItemEdit {
     const id = params.id;
     if (typeof id === 'string') {
       this.editId = id;
-      // 仅 edit 模式且非 'new' 哨兵才加载既有条目
+      // 仅 edit 模式且非 'new' 哨兵才加载既有条目。
+      // 优先同步从内存预填（首帧即有数据）；未命中才走异步 getItem。
+      // （@Builder 按值传参的 TextInput.text 不会因 async 后续赋值而刷新，
+      //   故必须在首次 build 前填好状态。）
       if (this.mode === 'edit' && id && id !== 'new') {
-        this.loadExisting();
+        const cached = this.store.peekItem(id);
+        if (cached) {
+          this.populateFromItem(cached);
+        } else {
+          this.loadExisting();
+        }
       }
     }
     // 生成器交接：预填 login 密码
@@ -176,6 +184,10 @@ struct ItemEdit {
       this.errorText = '条目不存在';
       return;
     }
+    this.populateFromItem(item);
+  }
+
+  private populateFromItem(item: ItemPayload): void {
     this.itemType = item.type;
     this.itemName = item.name;
     const f = item.fields;
@@ -442,6 +454,16 @@ struct ItemEdit {
     return LINKABLE_FIELDS_BY_TYPE.get(this.itemType) ?? [];
   }
 
+  // 横向滑动切换类型 tab（仅创建模式）：delta>0 下一类型，delta<0 上一类型
+  private switchTypeByDelta(delta: number): void {
+    if (this.mode === 'edit') return;
+    const i = TYPE_OPTIONS.findIndex((o: TypeOption) => o.key === this.itemType);
+    const cur = i < 0 ? 0 : i;
+    const next = cur + delta;
+    if (next < 0 || next >= TYPE_OPTIONS.length) return;
+    this.itemType = TYPE_OPTIONS[next].key;
+  }
+
   build() {
     Column() {
       Row().height(this.safeArea.top).width('100%');
@@ -586,7 +608,15 @@ struct ItemEdit {
       .scrollBar(BarState.Off)
       .layoutWeight(1)
       .width('100%')
-      .align(Alignment.TopStart);
+      .align(Alignment.TopStart)
+      .gesture(
+        PanGesture({ direction: PanDirection.Horizontal, distance: 24 })
+          .onActionEnd((event: GestureEvent) => {
+            if (this.mode === 'edit') return;
+            if (event.offsetX <= -48) this.switchTypeByDelta(1);
+            else if (event.offsetX >= 48) this.switchTypeByDelta(-1);
+          }),
+      );
 
       Row().height(this.safeArea.bottom).width('100%');
     }

@@ -3,10 +3,13 @@
     "pages/Index",
     "pages/ItemDetail",
     "pages/ItemEdit",
+    "pages/VaultList",
+    "pages/Authenticator",
     "pages/TotpScan",
     "pages/TotpDetail",
     "pages/Sync",
     "pages/SyncHost",
-    "pages/SyncConflicts"
+    "pages/SyncConflicts",
+    "pages/Trash"
   ]
 }

@@ -1,4 +1,5 @@
 import { motion } from '@kit.MultimodalAwarenessKit';
+import { loadSettings, saveGripEnabled } from '../lib/AppSettings';
 
 type HoldingCb = (s: motion.HoldingHandStatus) => void;
 
@@ -12,10 +13,20 @@ export class MotionStore {
 
   setGripEnabled(v: boolean): void {
     this.gripEnabled = v;
+    saveGripEnabled(v); // 持久化，重启后恢复
     if (v) {
       this.subscribe();
     } else {
       this.unsubscribe();
+    }
+  }
+
+  /** 启动时从持久化恢复（不回写）；filesDir 须已由 EntryAbility 注入 AppStorage */
+  async hydrate(): Promise<void> {
+    const s = await loadSettings();
+    this.gripEnabled = s.gripEnabled;
+    if (s.gripEnabled) {
+      this.subscribe();
     }
   }
 

@@ -24,6 +24,8 @@ export default class EntryAbility extends UIAbility {
     try {
       const ctx = this.context;
       AppStorage.setOrCreate<string>('filesDir', ctx.filesDir);
+      // cacheDir 供 Favicon 等可重建的派生数据落盘（系统清缓存时随之回收）。
+      AppStorage.setOrCreate<string>('cacheDir', ctx.cacheDir);
       hilog.info(DOMAIN, TAG, 'filesDir=%{public}s', ctx.filesDir);
     } catch (e) {
       hilog.error(

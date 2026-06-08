@@ -19,6 +19,7 @@ import { SecurityTab } from '../views/SecurityTab';
 import { MeTab } from '../views/MeTab';
 import { LockOverlay } from '../views/LockOverlay';
 import { OnboardingOverlay } from '../views/OnboardingOverlay';
+import { motionStore } from '../state/MotionStore';
 
 interface TabSpec {
   key: string;
@@ -45,6 +46,8 @@ struct Index {
     // 启动时刷新一次状态；refresh() 完成后 store.hydrated 置 true
     // 之后由各 Tab / Overlay 自己驱动 refresh
     this.store.refresh();
+    // 恢复设备本地偏好（握姿开关），filesDir 已由 EntryAbility.onCreate 注入
+    motionStore.hydrate();
   }
 
   private currentTabIndex(): number {
@@ -88,8 +91,8 @@ struct Index {
             .barMode(BarMode.Fixed)
             .barHeight(56 + this.safeArea.bottom)
             .barBackgroundColor(this.zc.bg)
-            .scrollable(false)
-            .animationDuration(0)
+            .scrollable(true)
+            .animationDuration(200)
             .onChange((idx: number) => {
               if (idx >= 0 && idx < TABS.length) {
                 this.activeTab = TABS[idx].key;

@@ -13,7 +13,9 @@
 import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType } from '../theme/Tokens';
 import { vaultStore } from '../state/VaultStore';
 import type { ItemPayload } from '../lib/VaultService';
-import { typeLabel, relativeTime, faviconColor, faviconInitials } from '../lib/Format';
+import { typeLabel, relativeTime } from '../lib/Format';
+import { faviconSourceForItem } from '../lib/Favicon';
+import { Favicon } from '../components/Favicon';
 import { copyEphemeral, copyText } from '../lib/Clipboard';
 import { generateTotp, formatTotpCode, totpRemaining, TOTP_PERIOD } from '../lib/Totp';
 import { estimateStrength, strengthLabel, crackTime } from '../lib/Password';
@@ -547,18 +549,13 @@ struct ItemDetail {
   @Builder
   heroSection() {
     Column({ space: ZSpacing.sm }) {
-      Column() {
-        Text(faviconInitials(this.itemName))
-          .fontSize(24)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.zc.faviconInk);
-      }
-      .width(64)
-      .height(64)
-      .borderRadius(ZRadius.xl)
-      .backgroundColor(faviconColor(this.itemName))
-      .justifyContent(FlexAlign.Center)
-      .alignItems(HorizontalAlign.Center);
+      Favicon({
+        name: this.itemName,
+        host: this.item ? faviconSourceForItem(this.item.type, this.item.fields) : null,
+        boxSize: 64,
+        radius: ZRadius.xl,
+        fontSize: 24,
+      });
 
       Text(this.itemName)
         .fontSize(ZType.titleSize)

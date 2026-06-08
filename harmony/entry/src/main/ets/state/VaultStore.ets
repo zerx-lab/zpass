@@ -12,12 +12,13 @@
 
 import {
   vaultService,
+  itemHasTotp,
   type ItemPayload,
   type UpdateItemPatch,
   type VaultItemType,
   type VaultStatus,
 } from '../lib/VaultService';
-import type { Space } from '../lib/Spaces';
+import { DEFAULT_SPACE_ID, type Space } from '../lib/Spaces';
 import { clearBreachCache } from '../lib/Breach';
 
 /* ----------------------------------------------------------------------------
@@ -25,6 +26,17 @@ import { clearBreachCache } from '../lib/Breach';
  * -------------------------------------------------------------------------- */
 
 export type VaultFilterType = VaultItemType | 'all';
+
+/**
+ * 仪表盘首页各入口的归类维度。一个 scope 一个谓词(matchesScope)，
+ * 计数(countScope)与列表(scopedItems)共用同一谓词，避免计数与内容口径不一致。
+ *   - 'all'   全部条目
+ *   - 'fav'   收藏
+ *   - 'totp'  验证器(独立 totp + 携带 totp 的 login)
+ *   - 'type'  指定 VaultItemType(value = 类型名)
+ *   - 'space' 指定空间(value = spaceId)
+ */
+export type ScopeKind = 'all' | 'fav' | 'totp' | 'type' | 'space';
 
 /* ----------------------------------------------------------------------------
  * VaultStore
@@ -87,7 +99,12 @@ export class VaultStore {
     const fav = this.onlyFavorites;
     const space = this.activeSpaceId;
     return this.items.filter((it) => {
-      if (t !== 'all' && it.type !== t) return false;
+      if (t === 'totp') {
+        // 「验证码」tab：纳入独立 totp 条目 + 携带 totp 的 login(2FA/MFA)
+        if (!itemHasTotp(it)) return false;
+      } else if (t !== 'all' && it.type !== t) {
+        return false;
+      }
       const itemSpace = (it.fields.spaceId as string | undefined) ?? '';
       if (space && itemSpace && itemSpace !== space) return false;
       if (fav) {
@@ -111,6 +128,59 @@ export class VaultStore {
       }
       return true;
     });
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* 仪表盘 scope —— 谓词 / 计数 / 列表(三者共用同一谓词)                       */
+  /* ------------------------------------------------------------------------ */
+
+  /** item 归属空间：无 spaceId 一律视为默认空间，保证文件夹计数 sum == 总数 */
+  private static effectiveSpaceId(it: ItemPayload): string {
+    const s = it.fields.spaceId;
+    return typeof s === 'string' && s.length > 0 ? s : DEFAULT_SPACE_ID;
+  }
+
+  /** 单一 scope 谓词 —— 计数与列表共用 */
+  matchesScope(it: ItemPayload, kind: ScopeKind, value: string): boolean {
+    if (kind === 'fav') return it.fields.favorite === true;
+    if (kind === 'totp') return itemHasTotp(it);
+    if (kind === 'type') return it.type === value;
+    if (kind === 'space') return VaultStore.effectiveSpaceId(it) === value;
+    return true; // 'all'
+  }
+
+  /** scope 计数(全量，跨空间) */
+  countScope(kind: ScopeKind, value: string): number {
+    let n = 0;
+    for (const it of this.items) {
+      if (this.matchesScope(it, kind, value)) n++;
+    }
+    return n;
+  }
+
+  /** scope + 搜索 过滤后的条目 —— VaultList 直接 ForEach */
+  scopedItems(kind: ScopeKind, value: string, query: string): ItemPayload[] {
+    const q = query.trim().toLowerCase();
+    return this.items.filter((it) => {
+      if (!this.matchesScope(it, kind, value)) return false;
+      if (q.length > 0 && !this.itemMatchesQuery(it, q)) return false;
+      return true;
+    });
+  }
+
+  /** 与 filteredItems 同口径的简化搜索匹配 */
+  private itemMatchesQuery(it: ItemPayload, q: string): boolean {
+    const parts: string[] = [it.name];
+    const fields = it.fields;
+    const candidates: string[] = ['username', 'email', 'url', 'rpId', 'issuer', 'account', 'first', 'last'];
+    for (const k of candidates) {
+      const v = fields[k];
+      if (typeof v === 'string') parts.push(v);
+    }
+    if (Array.isArray(fields.tags)) {
+      for (const tag of fields.tags as string[]) parts.push(tag);
+    }
+    return parts.join(' ').toLowerCase().includes(q);
   }
 
   /* ------------------------------------------------------------------------ */
@@ -307,6 +377,31 @@ export class VaultStore {
 
   async getItem(id: string): Promise<ItemPayload | null> {
     return vaultService.getItem(id);
+  }
+
+  /**
+   * 同步从内存中已解密的 items 取条目（当前激活空间内）。
+   * 供编辑页首帧预填，避免 async 解密造成表单首次构建为空。
+   * 未命中（如跨空间）返回 null，调用方应回退到异步 getItem。
+   */
+  peekItem(id: string): ItemPayload | null {
+    if (!id) return null;
+    return this.items.find((it) => it.id === id) ?? null;
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* 回收站                                                                    */
+  /* ------------------------------------------------------------------------ */
+
+  /** 列出回收站条目（软删除 tombstone） */
+  async listDeleted(): Promise<ItemPayload[]> {
+    return vaultService.listDeleted();
+  }
+
+  /** 从回收站恢复，刷新活跃条目使首页计数同步 */
+  async restoreItem(id: string): Promise<void> {
+    await vaultService.restoreItem(id);
+    await this.refreshItems();
   }
 }
 

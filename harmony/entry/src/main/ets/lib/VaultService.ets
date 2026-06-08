@@ -126,6 +126,25 @@ const VALID_TYPES: ReadonlySet<VaultItemType> = new Set<VaultItemType>([
   'totp',
 ]);
 
+/**
+ * 是否应归入「验证码」视图。
+ *
+ * 两类来源（与 phone data/vault.ts itemHasTotp 对齐）：
+ *   - 独立 totp 条目（fields.secret）
+ *   - 携带 totp 密钥的 login 条目（fields.totp，即 2FA / MFA 二次验证码）
+ */
+export function itemHasTotp(it: ItemPayload): boolean {
+  if (it.type === 'totp') {
+    const s = it.fields.secret;
+    return typeof s === 'string' && s.trim().length > 0;
+  }
+  if (it.type === 'login') {
+    const t = it.fields.totp;
+    return typeof t === 'string' && t.trim().length > 0;
+  }
+  return false;
+}
+
 /* ----------------------------------------------------------------------------
  * VaultService —— 单例
  * -------------------------------------------------------------------------- */
@@ -757,6 +776,52 @@ export class VaultService {
     };
     file.items[idx] = this.encryptPayload(tombstone);
     await writeVaultFile(file);
+  }
+
+  /** 列出回收站（软删除 tombstone）条目，按删除时间倒序 */
+  async listDeleted(): Promise<ItemPayload[]> {
+    this.requireUnlocked();
+    const file = await readVaultFile();
+    const out: ItemPayload[] = [];
+    for (const row of file.items) {
+      const deletedRow = typeof row.deletedAt === 'number' && row.deletedAt > 0;
+      try {
+        const payload = this.decryptRow(row);
+        const deleted = deletedRow || (typeof payload.deletedAt === 'number' && payload.deletedAt > 0);
+        if (deleted) out.push(payload);
+      } catch {
+        // 解密失败的损坏行跳过
+      }
+    }
+    out.sort((a, b) => (b.deletedAt ?? 0) - (a.deletedAt ?? 0));
+    return out;
+  }
+
+  /**
+   * 从回收站恢复 —— 清除 deletedAt 并 LWW bump（updatedAt 单调递增 + revision++）。
+   *
+   * 不做物理 purge：sync 模型下其它端仍保有 tombstone，本地物理删除会在下次
+   * 同步时被对端 tombstone 复活，purge 名不副实，故只提供「恢复」。
+   */
+  async restoreItem(id: string): Promise<ItemPayload> {
+    this.requireUnlocked();
+    const file = await readVaultFile();
+    const idx = file.items.findIndex((r) => r.id === id);
+    if (idx === -1) throw new VaultError('not-found', '条目不存在');
+    const existing = this.decryptRow(file.items[idx]);
+    const restored: ItemPayload = {
+      id: existing.id,
+      type: existing.type,
+      name: existing.name,
+      fields: existing.fields,
+      createdAt: existing.createdAt,
+      updatedAt: this.nowMs(),
+      revision: (existing.revision ?? 0) + 1,
+      deletedAt: null,
+    };
+    file.items[idx] = this.encryptPayload(restored);
+    await writeVaultFile(file);
+    return restored;
   }
 
   /** sync 合并 LWW bump 用的单调时钟（ms）—— 保证 > 上次发放，且与本机写入同源 */
