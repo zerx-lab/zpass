@@ -515,7 +515,7 @@ export struct MeTab {
               );
               this.divider();
               this.rowAction(
-                '让别人连我',
+                '接受设备连接',
                 $r('app.media.ic_users'),
                 this.zc.bgElev,
                 this.zc.text,
