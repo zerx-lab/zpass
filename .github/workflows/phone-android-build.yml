@@ -179,8 +179,21 @@ jobs:
 
       # --no-install 跳过 expo 装 cocoapods / npm install 的额外开销，
       # 这里 npm ci 已经装过依赖.
+      #
+      # --clean 关键：先删掉仓库里已提交的 phone/android/ 再从 app.json 重新
+      # 生成，确保 app 图标 / splash 等原生资源每次都从 assets/images/ 重新
+      # 渲染。否则 prebuild 走增量模式，不会覆盖已存在的 ic_launcher*.webp，
+      # 导致「改了源图标但打包出来还是旧图标」。with-cryptocore plugin 在
+      # prebuild 的 android 阶段复制 .so，--clean 重建时同样会触发，故安全。
       - name: Expo prebuild (generate phone/android/)
-        run: bunx expo prebuild --platform android --no-install
+        run: bunx expo prebuild --platform android --no-install --clean
+
+      # --clean 会连同仓库里故意提交的 android/app/debug.keystore 一起删掉，
+      # prebuild 重生的是模板自带 keystore。为保证 release APK 签名指纹
+      # 跨构建稳定（用户能覆盖升级），这里从 git 还原被跟踪的那份.
+      - name: Restore tracked debug.keystore (prevent signature drift after --clean)
+        working-directory: phone
+        run: git checkout -- android/app/debug.keystore
 
       # 把 ABI splits 配置注入到 app/build.gradle 的 android {} 块顶部.
       # 用 python re.sub 保证只在 android { 后插一次，且失败可见.
