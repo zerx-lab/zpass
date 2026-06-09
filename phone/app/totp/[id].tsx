@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+} from "react";
 import {
   View,
   Text,
@@ -13,10 +19,7 @@ import * as Haptics from "expo-haptics";
 
 import { useTheme } from "@/contexts/theme-context";
 import { Fonts, Radius, Spacing, Type } from "@/constants/theme";
-import {
-  Button,
-  IconButton,
-} from "@/components/ui/primitives";
+import { Button, IconButton } from "@/components/ui/primitives";
 import { useVault } from "@/contexts/vault-context";
 import { faviconColor, faviconInitials } from "@/lib/format";
 import {
@@ -54,11 +57,7 @@ export default function TotpDetailScreen() {
     item?.type === "login"
       ? item.username
       : item?.type === "totp"
-        ? meta?.account ||
-          item.account ||
-          meta?.issuer ||
-          item.issuer ||
-          ""
+        ? meta?.account || item.account || meta?.issuer || item.issuer || ""
         : "";
 
   const period = meta?.period && meta.type !== "hotp" ? meta.period : 30;
@@ -68,9 +67,7 @@ export default function TotpDetailScreen() {
     meta && meta.type !== "hotp" ? otpRemaining(meta) : period,
   );
   const [periodKey, setPeriodKey] = useState(() =>
-    meta && meta.type !== "hotp"
-      ? Math.floor(Date.now() / 1000 / period)
-      : 0,
+    meta && meta.type !== "hotp" ? Math.floor(Date.now() / 1000 / period) : 0,
   );
   const isUrgent = meta?.type !== "hotp" && remaining <= 5;
 
@@ -134,7 +131,10 @@ export default function TotpDetailScreen() {
 
   if (!item || !secret) {
     return (
-      <SafeAreaView style={[styles.safe, { backgroundColor: C.bg }]} edges={["top"]}>
+      <SafeAreaView
+        style={[styles.safe, { backgroundColor: C.bg }]}
+        edges={["top"]}
+      >
         <NavBar c={C} title="验证码" onBack={() => router.back()} />
         <View style={styles.notFound}>
           <Text style={{ color: C.text3, ...Type.body }}>
@@ -167,7 +167,10 @@ export default function TotpDetailScreen() {
         {/* 服务标签 */}
         <View style={[styles.chip, { backgroundColor: C.bgElev }]}>
           <View
-            style={[styles.chipFavicon, { backgroundColor: faviconColor(item.name) }]}
+            style={[
+              styles.chipFavicon,
+              { backgroundColor: faviconColor(item.name) },
+            ]}
           >
             <Text style={styles.chipFaviconText}>
               {faviconInitials(item.name)}
@@ -177,16 +180,17 @@ export default function TotpDetailScreen() {
             {item.name}
           </Text>
           {usernameDisplay ? (
-            <Text style={[styles.chipUsername, { color: C.text3 }]} numberOfLines={1}>
+            <Text
+              style={[styles.chipUsername, { color: C.text3 }]}
+              numberOfLines={1}
+            >
               {usernameDisplay}
             </Text>
           ) : null}
         </View>
 
         {/* 大号代码 */}
-        <Text
-          style={[styles.codeText, { color: codeColor, fontFamily: MONO }]}
-        >
+        <Text style={[styles.codeText, { color: codeColor, fontFamily: MONO }]}>
           {formatTotpCode(code)}
         </Text>
 
@@ -221,7 +225,7 @@ export default function TotpDetailScreen() {
           variant="primary"
           size="lg"
           onPress={handleCopy}
-          style={{ marginBottom: Spacing.xxl }}
+          style={{ alignSelf: "center", marginBottom: Spacing.xxl }}
         />
 
         {/* 元信息卡 */}
@@ -235,9 +239,7 @@ export default function TotpDetailScreen() {
               <MetaRow label="账号" value={usernameDisplay} c={C} />
             </>
           ) : null}
-          <View
-            style={[styles.metaDivider, { backgroundColor: C.lineSoft }]}
-          />
+          <View style={[styles.metaDivider, { backgroundColor: C.lineSoft }]} />
           <MetaRow label="算法" value={algoLine} c={C} mono />
         </View>
 
@@ -407,5 +409,9 @@ const styles = StyleSheet.create({
   },
   metaDivider: { height: StyleSheet.hairlineWidth, width: "100%" },
 
-  hint: { ...Type.footnote, textAlign: "center", paddingHorizontal: Spacing.lg },
+  hint: {
+    ...Type.footnote,
+    textAlign: "center",
+    paddingHorizontal: Spacing.lg,
+  },
 });

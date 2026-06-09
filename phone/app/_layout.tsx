@@ -100,7 +100,9 @@ function RootLayoutNav() {
         <Stack.Screen name="sync" options={{ headerShown: false }} />
         <Stack.Screen name="sync-host" options={{ headerShown: false }} />
         <Stack.Screen name="sync-conflicts" options={{ headerShown: false }} />
+        <Stack.Screen name="vault/list" options={{ headerShown: false }} />
         <Stack.Screen name="vault/[id]" options={{ headerShown: false }} />
+        <Stack.Screen name="totp/index" options={{ headerShown: false }} />
         <Stack.Screen name="totp/[id]" options={{ headerShown: false }} />
         <Stack.Screen
           name="item/[id]"
@@ -118,11 +120,7 @@ function RootLayoutNav() {
           }}
         />
       </Stack>
-      {!initialized ? (
-        <OnboardingOverlay />
-      ) : locked ? (
-        <LockOverlay />
-      ) : null}
+      {!initialized ? <OnboardingOverlay /> : locked ? <LockOverlay /> : null}
       <DialogHost />
       <StatusBar style={scheme === "dark" ? "light" : "dark"} />
     </NavThemeProvider>

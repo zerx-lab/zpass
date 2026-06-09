@@ -1,393 +1,112 @@
-import React, {
-  useState,
-  useMemo,
-  useCallback,
-  useRef,
-  type ComponentProps,
-} from "react";
-import {
-  View,
-  Text,
-  TextInput,
-  FlatList,
-  ScrollView,
-  StyleSheet,
-  Platform,
-} from "react-native";
+// 密码库主屏 —— 看板 / 启动器式首页（参考 harmony VaultTab 布局）
+//
+// 不再是「搜索框 + chip 筛选 + 平铺列表」，而是分区入口看板，点击各入口
+// 跳到 app/vault/list 对应筛选列表：
+//
+//   顶栏：当前空间头像 + 名称 + 计数；右侧 同步 / 锁定 / 新建 图标按钮
+//   全部项目 大卡（总数）
+//   验证器 / 收藏 并排卡
+//   空间 分区（>1 空间时；点击切换激活空间，与「我的」空间切换同一模型）
+//   类型 分区（有数量的类型分组卡）
+//   右下角搜索 FAB（跳全部项目列表并聚焦搜索框）
+//
+// 计数与列表共用同一谓词（itemHasTotp / type / favorite），口径一致。
+// 说明：phone 为硬删除、无回收站，故不含「回收站」卡；空间在 phone 中
+// 作为全局激活范围，故空间分区做「切换激活空间」而非跨空间导航。
+
+import React, { useMemo, useCallback } from "react";
+import { View, Text, ScrollView, StyleSheet } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
-import ReanimatedSwipeable, {
-  type SwipeableMethods,
-} from "react-native-gesture-handler/ReanimatedSwipeable";
 
 import { Radius, Spacing, Type, type ColorPalette } from "@/constants/theme";
 import { useTheme } from "@/contexts/theme-context";
 import { IconSymbol } from "@/components/ui/icon-symbol";
-import {
-  Badge,
-  Chip,
-  IconButton,
-  PressableScale,
-} from "@/components/ui/primitives";
-import { dialog } from "@/components/ui/dialog";
+import { IconButton, PressableScale } from "@/components/ui/primitives";
 import { SpaceAvatar } from "@/components/space-avatar";
 import { useVault } from "@/contexts/vault-context";
-import { itemHasTotp, type VaultItem, type VaultItemType } from "@/data/vault";
-import {
-  faviconColor,
-  faviconInitials,
-  itemSubtitle,
-  itemSearchText,
-  relativeTime,
-} from "@/lib/format";
+import { itemHasTotp, type VaultItemType } from "@/data/vault";
+import { DEFAULT_SPACE_ID, sortSpaces, type Space } from "@/lib/spaces";
 
-type FilterKey = "all" | "fav" | VaultItemType;
+type IconName = React.ComponentProps<typeof IconSymbol>["name"];
 
-const FILTER_CHIPS: { key: FilterKey; label: string }[] = [
-  { key: "all", label: "全部" },
-  { key: "fav", label: "收藏" },
-  { key: "login", label: "登录" },
-  { key: "totp", label: "验证码" },
-  { key: "card", label: "卡片" },
-  { key: "note", label: "笔记" },
-  { key: "identity", label: "身份" },
-  { key: "ssh", label: "SSH" },
-  { key: "passkey", label: "密钥" },
+interface TypeSpec {
+  type: VaultItemType;
+  label: string;
+  icon: IconName;
+}
+
+// 类型分区候选（顺序对齐 harmony）；'totp' 不在此，独立验证器卡承载
+const TYPE_SPECS: TypeSpec[] = [
+  { type: "login", label: "登录", icon: "key.fill" },
+  { type: "card", label: "支付卡", icon: "creditcard.fill" },
+  { type: "identity", label: "身份", icon: "person.fill" },
+  { type: "note", label: "安全笔记", icon: "note.text" },
+  { type: "ssh", label: "SSH Key", icon: "terminal.fill" },
+  { type: "passkey", label: "通行密钥", icon: "lock.fill" },
 ];
 
-const MONO = Platform.select({ ios: "Menlo", default: "monospace" });
-
-function strengthColor(s: number, c: ColorPalette) {
-  if (s >= 80) return c.ok;
-  if (s >= 50) return c.warn;
-  return c.danger;
+function colorForType(t: VaultItemType, c: ColorPalette): string {
+  if (t === "identity") return c.ok;
+  if (t === "note") return c.warn;
+  if (t === "ssh") return c.text2;
+  return c.info; // login / card / passkey / totp
 }
 
-function Favicon({ item }: { item: VaultItem }) {
-  return (
-    <View
-      style={[
-        styles.favicon,
-        { backgroundColor: faviconColor(item.name) },
-      ]}
-    >
-      <Text style={styles.faviconText} numberOfLines={1}>
-        {faviconInitials(item.name)}
-      </Text>
-    </View>
-  );
-}
-
-function VaultRow({
-  item,
-  c,
-  isLast,
-}: {
-  item: VaultItem;
-  c: ColorPalette;
-  isLast: boolean;
-}) {
-  const onPress = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push(`/vault/${item.id}` as any);
-  }, [item.id]);
-
-  const isLogin = item.type === "login";
-  const strength = isLogin ? item.strength : undefined;
-  const hasTotp = isLogin && !!item.totp;
-  const breached = isLogin && !!item.breached;
-
-  return (
-    <PressableScale
-      onPress={onPress}
-      scale={0.985}
-      haptic="none"
-      pressedBg={c.bgHover}
-      style={styles.row}
-    >
-      <Favicon item={item} />
-
-      <View style={styles.rowMid}>
-        <View style={styles.rowNameLine}>
-          <Text
-            style={[styles.rowName, { color: c.text }]}
-            numberOfLines={1}
-            ellipsizeMode="tail"
-          >
-            {item.name}
-          </Text>
-          {item.favorite && (
-            <IconSymbol name="star.fill" size={11} color={c.warn} />
-          )}
-          {hasTotp && <Badge label="2FA" tone="info" />}
-          {breached && (
-            <Badge
-              icon="exclamationmark.triangle.fill"
-              tone="danger"
-            />
-          )}
-        </View>
-        <Text
-          style={[styles.rowSub, { color: c.text3, fontFamily: MONO }]}
-          numberOfLines={1}
-          ellipsizeMode="tail"
-        >
-          {itemSubtitle(item)}
-        </Text>
-      </View>
-
-      <View style={styles.rowRight}>
-        <Text style={[styles.rowTime, { color: c.text3, fontFamily: MONO }]}>
-          {relativeTime(item.modified)}
-        </Text>
-        {strength !== undefined && (
-          <View style={styles.barWrap}>
-            <View style={[styles.barTrack, { backgroundColor: c.lineSoft }]}>
-              <View
-                style={[
-                  styles.barFill,
-                  {
-                    width: `${strength}%` as any,
-                    backgroundColor: strengthColor(strength, c),
-                  },
-                ]}
-              />
-            </View>
-          </View>
-        )}
-      </View>
-
-      {!isLast && (
-        <View
-          style={[
-            styles.hairline,
-            { backgroundColor: c.lineSoft, left: Spacing.lg + 38 + Spacing.md },
-          ]}
-        />
-      )}
-    </PressableScale>
-  );
-}
-
-/* ── 左滑动作 ──────────────────────────────────────────────────── */
-
-const SWIPE_ACTION_WIDTH = 76;
-
-/**
- * 全局单例:同一时间只允许一行展开。
- * 新行展开时关闭上一行,符合 iOS 邮件/微信滑动删除的习惯。
- */
-const openSwipeableRef: { current: SwipeableMethods | null } = {
-  current: null,
-};
-
-function SwipeAction({
-  icon,
-  label,
-  bg,
-  onPress,
-}: {
-  icon: ComponentProps<typeof IconSymbol>["name"];
-  label: string;
-  bg: string;
-  onPress: () => void;
-}) {
-  return (
-    <PressableScale
-      onPress={onPress}
-      scale={0.94}
-      haptic="light"
-      style={[styles.swipeAction, { backgroundColor: bg }]}
-    >
-      <IconSymbol name={icon} size={20} color="#fff" />
-      <Text style={styles.swipeActionLabel}>{label}</Text>
-    </PressableScale>
-  );
-}
-
-function SwipeableVaultRow({
-  item,
-  c,
-  isLast,
-}: {
-  item: VaultItem;
-  c: ColorPalette;
-  isLast: boolean;
-}) {
-  const { deleteItem, toggleFavorite } = useVault();
-  const swipeRef = useRef<SwipeableMethods>(null);
-
-  const handleSwipeableWillOpen = useCallback(() => {
-    if (
-      openSwipeableRef.current &&
-      openSwipeableRef.current !== swipeRef.current
-    ) {
-      openSwipeableRef.current.close();
-    }
-    openSwipeableRef.current = swipeRef.current;
-  }, []);
-
-  const handleSwipeableClose = useCallback(() => {
-    if (openSwipeableRef.current === swipeRef.current) {
-      openSwipeableRef.current = null;
-    }
-  }, []);
-
-  React.useEffect(() => {
-    return () => {
-      if (openSwipeableRef.current === swipeRef.current) {
-        openSwipeableRef.current = null;
-      }
-    };
-  }, []);
-
-  const handleEdit = useCallback(() => {
-    swipeRef.current?.close();
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push(`/item/${item.id}` as any);
-  }, [item.id]);
-
-  const handleFavorite = useCallback(async () => {
-    swipeRef.current?.close();
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    await toggleFavorite(item.id);
-  }, [item.id, toggleFavorite]);
-
-  const handleDelete = useCallback(async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    const ok = await dialog.confirm(
-      "删除条目",
-      `确定要删除"${item.name}"吗?此操作无法撤销。`,
-      { okLabel: "删除", destructive: true },
-    );
-    if (ok) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      await deleteItem(item.id);
-    } else {
-      swipeRef.current?.close();
-    }
-  }, [item.id, item.name, deleteItem]);
-
-  const renderRightActions = useCallback(
-    () => (
-      <View style={styles.swipeActionsRow}>
-        <SwipeAction
-          icon="square.and.pencil"
-          label="编辑"
-          bg={c.info}
-          onPress={handleEdit}
-        />
-        <SwipeAction
-          icon={item.favorite ? "star" : "star.fill"}
-          label={item.favorite ? "取消" : "收藏"}
-          bg={c.warn}
-          onPress={handleFavorite}
-        />
-        <SwipeAction
-          icon="trash.fill"
-          label="删除"
-          bg={c.danger}
-          onPress={handleDelete}
-        />
-      </View>
-    ),
-    [
-      c.info,
-      c.warn,
-      c.danger,
-      item.favorite,
-      handleEdit,
-      handleFavorite,
-      handleDelete,
-    ],
-  );
-
-  return (
-    <ReanimatedSwipeable
-      ref={swipeRef}
-      friction={1}
-      rightThreshold={SWIPE_ACTION_WIDTH * 3 * 0.7}
-      dragOffsetFromRightEdge={24}
-      overshootRight={false}
-      enableTrackpadTwoFingerGesture
-      renderRightActions={renderRightActions}
-      onSwipeableWillOpen={handleSwipeableWillOpen}
-      onSwipeableClose={handleSwipeableClose}
-    >
-      <VaultRow item={item} c={c} isLast={isLast} />
-    </ReanimatedSwipeable>
-  );
+function go(scope: string, value: string, title: string, focus?: boolean) {
+  router.push({
+    pathname: "/vault/list",
+    params: { scope, value, title, ...(focus ? { focus: "1" } : {}) },
+  } as any);
 }
 
 export default function VaultScreen() {
   const { scheme, colors: c } = useTheme();
-  const { items, activeSpace } = useVault();
+  const {
+    items,
+    allItems,
+    spaces,
+    activeSpace,
+    activeSpaceId,
+    setActiveSpace,
+    lock,
+  } = useVault();
 
-  const [search, setSearch] = useState("");
-  const [activeFilter, setActiveFilter] = useState<FilterKey>("all");
-
-  const sorted = useMemo(
-    () => [...items].sort((a, b) => b.modified - a.modified),
-    [items],
-  );
-
-  const filtered = useMemo(() => {
-    let list = sorted;
-    if (activeFilter === "fav") list = list.filter((i) => i.favorite);
-    else if (activeFilter === "totp")
-      list = list.filter(itemHasTotp);
-    else if (activeFilter !== "all")
-      list = list.filter((i) => i.type === activeFilter);
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      list = list.filter((i) => itemSearchText(i).includes(q));
-    }
-    return list;
-  }, [sorted, search, activeFilter]);
-
+  // 计数（当前激活空间口径，与 list 页一致）
   const counts = useMemo(() => {
-    const result: Record<string, number> = {
-      all: items.length,
-      fav: items.filter((i) => i.favorite).length,
-    };
-    for (const t of [
-      "login",
-      "totp",
-      "card",
-      "note",
-      "identity",
-      "ssh",
-      "passkey",
-    ]) {
-      result[t] =
-        t === "totp"
-          ? items.filter(itemHasTotp).length
-          : items.filter((i) => i.type === t).length;
+    const byType = new Map<VaultItemType, number>();
+    let fav = 0;
+    let totp = 0;
+    for (const it of items) {
+      byType.set(it.type, (byType.get(it.type) ?? 0) + 1);
+      if (it.favorite) fav++;
+      if (itemHasTotp(it)) totp++;
     }
-    return result;
+    return { total: items.length, fav, totp, byType };
   }, [items]);
 
-  const renderItem = useCallback(
-    ({ item, index }: { item: VaultItem; index: number }) => {
-      const isFirst = index === 0;
-      const isLast = index === filtered.length - 1;
-      return (
-        <View
-          style={[
-            styles.rowCard,
-            { backgroundColor: c.bgElev },
-            isFirst && styles.rowCardFirst,
-            isLast && styles.rowCardLast,
-          ]}
-        >
-          <SwipeableVaultRow item={item} c={c} isLast={isLast} />
-        </View>
-      );
-    },
-    [c, filtered.length],
+  // 各空间条目数（跨空间，用 allItems）
+  const bySpace = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const it of allItems) {
+      const sid = it.spaceId ?? DEFAULT_SPACE_ID;
+      m.set(sid, (m.get(sid) ?? 0) + 1);
+    }
+    return m;
+  }, [allItems]);
+
+  const orderedSpaces = useMemo(() => sortSpaces(spaces), [spaces]);
+  const visibleTypes = useMemo(
+    () => TYPE_SPECS.filter((s) => (counts.byType.get(s.type) ?? 0) > 0),
+    [counts],
   );
+
+  const onLock = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    lock();
+  }, [lock]);
 
   return (
     <SafeAreaView
@@ -396,7 +115,7 @@ export default function VaultScreen() {
     >
       <StatusBar style={scheme === "dark" ? "light" : "dark"} />
 
-      {/* 顶部大标题（iOS HIG largeTitle 风格） */}
+      {/* 顶栏：空间身份 + 操作按钮 */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <SpaceAvatar
@@ -412,90 +131,314 @@ export default function VaultScreen() {
               {activeSpace?.name ?? "ZPass"}
             </Text>
             <Text style={[styles.headerSub, { color: c.text3 }]}>
-              {filtered.length} / {items.length} 项
+              {counts.total} 个项目
             </Text>
           </View>
         </View>
-      </View>
 
-      {/* 搜索框（fill 风格，无 border） */}
-      <View style={styles.searchRow}>
-        <View style={[styles.searchBox, { backgroundColor: c.bgElev }]}>
-          <IconSymbol name="magnifyingglass" size={16} color={c.text3} />
-          <TextInput
-            style={[styles.searchInput, { color: c.text }]}
-            placeholder="搜索"
-            placeholderTextColor={c.text3}
-            value={search}
-            onChangeText={setSearch}
-            returnKeyType="search"
-            clearButtonMode="while-editing"
-            autoCorrect={false}
-            autoCapitalize="none"
+        <View style={styles.headerActions}>
+          <IconButton
+            icon="arrow.clockwise"
+            size={38}
+            iconSize={18}
+            variant="tinted"
+            onPress={() => router.push("/sync" as any)}
+          />
+          <IconButton
+            icon="lock.fill"
+            size={38}
+            iconSize={18}
+            variant="tinted"
+            onPress={onLock}
+          />
+          <IconButton
+            icon="plus"
+            size={38}
+            iconSize={18}
+            variant="tinted"
+            onPress={() => router.push("/item/new" as any)}
           />
         </View>
       </View>
 
-      {/* Filter chips */}
+      {/* 看板内容 */}
       <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.chips}
-        style={{ flexGrow: 0, flexShrink: 0 }}
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
       >
-        {FILTER_CHIPS.map((chip) => (
-          <Chip
-            key={chip.key}
-            label={chip.label}
-            active={activeFilter === chip.key}
-            count={counts[chip.key] ?? 0}
-            onPress={() => setActiveFilter(chip.key)}
+        {/* 全部项目 大卡 */}
+        <BigCard
+          icon="square.grid.2x2.fill"
+          iconBg={c.info}
+          title="全部项目"
+          subtitle={`${counts.total} 个项目`}
+          c={c}
+          onPress={() => go("all", "", "全部项目")}
+        />
+
+        {/* 验证器 / 收藏 并排 */}
+        <View style={styles.dualRow}>
+          <DualCard
+            icon="lock.shield.fill"
+            iconBg={c.text2}
+            title="验证器"
+            subtitle={`${counts.totp} 个令牌`}
+            c={c}
+            onPress={() => router.push("/totp" as any)}
           />
-        ))}
+          <DualCard
+            icon="star.fill"
+            iconBg={c.warn}
+            title="收藏"
+            subtitle={`${counts.fav} 项`}
+            c={c}
+            onPress={() => go("fav", "", "收藏")}
+          />
+        </View>
+
+        {/* 空间 分区 —— 点击切换激活空间 */}
+        {orderedSpaces.length > 1 && (
+          <>
+            <Text style={[styles.sectionTitle, { color: c.text3 }]}>空间</Text>
+            <View style={[styles.group, { backgroundColor: c.bgElev }]}>
+              {orderedSpaces.map((sp, idx) => (
+                <SpaceRow
+                  key={sp.id}
+                  space={sp}
+                  count={bySpace.get(sp.id) ?? 0}
+                  active={sp.id === activeSpaceId}
+                  withDivider={idx < orderedSpaces.length - 1}
+                  c={c}
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    void setActiveSpace(sp.id);
+                  }}
+                />
+              ))}
+            </View>
+          </>
+        )}
+
+        {/* 类型 分区 */}
+        {visibleTypes.length > 0 && (
+          <>
+            <Text style={[styles.sectionTitle, { color: c.text3 }]}>类型</Text>
+            <View style={[styles.group, { backgroundColor: c.bgElev }]}>
+              {visibleTypes.map((s, idx) => (
+                <TypeRow
+                  key={s.type}
+                  spec={s}
+                  count={counts.byType.get(s.type) ?? 0}
+                  withDivider={idx < visibleTypes.length - 1}
+                  c={c}
+                  onPress={() => go("type", s.type, s.label)}
+                />
+              ))}
+            </View>
+          </>
+        )}
       </ScrollView>
 
-      {/* 列表组（insetGrouped 风格：bgElev2 大块 + hairline 分隔） */}
-      <FlatList
-        data={filtered}
-        keyExtractor={(item) => item.id}
-        renderItem={renderItem}
-        style={styles.list}
-        contentContainerStyle={styles.listContent}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <View style={[styles.emptyIcon, { backgroundColor: c.bgElev }]}>
-              <IconSymbol name="key.fill" size={28} color={c.text3} />
-            </View>
-            <Text style={[styles.emptyTitle, { color: c.text }]}>
-              {search.trim() || activeFilter !== "all"
-                ? "无匹配项"
-                : "保险库为空"}
-            </Text>
-            <Text style={[styles.emptyDesc, { color: c.text3 }]}>
-              {search.trim() || activeFilter !== "all"
-                ? "调整搜索或筛选条件"
-                : "点击右下角按钮新建条目"}
-            </Text>
-          </View>
-        }
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-      />
-
-      {/* FAB —— 用真图标，不是 Unicode */}
+      {/* 搜索 FAB */}
       <View style={styles.fabWrap} pointerEvents="box-none">
         <IconButton
-          icon="plus"
+          icon="magnifyingglass"
           size={56}
           iconSize={22}
           variant="solid"
           haptic="medium"
-          onPress={() => router.push("/item/new" as any)}
+          onPress={() => go("all", "", "全部项目", true)}
           style={styles.fab}
         />
       </View>
     </SafeAreaView>
+  );
+}
+
+/* ── 子组件 ───────────────────────────────────────────────────── */
+
+function IconCircle({
+  icon,
+  bg,
+  size,
+}: {
+  icon: IconName;
+  bg: string;
+  size: number;
+}) {
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        backgroundColor: bg,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <IconSymbol name={icon} size={Math.round(size * 0.5)} color="#fff" />
+    </View>
+  );
+}
+
+function BigCard({
+  icon,
+  iconBg,
+  title,
+  subtitle,
+  c,
+  onPress,
+}: {
+  icon: IconName;
+  iconBg: string;
+  title: string;
+  subtitle: string;
+  c: ColorPalette;
+  onPress: () => void;
+}) {
+  return (
+    <PressableScale
+      onPress={onPress}
+      scale={0.985}
+      haptic="light"
+      pressedBg={c.bgHover}
+      style={[styles.bigCard, { backgroundColor: c.bgElev }]}
+    >
+      <IconCircle icon={icon} bg={iconBg} size={48} />
+      <View style={styles.cardMid}>
+        <Text style={[styles.cardTitle, { color: c.text }]}>{title}</Text>
+        <Text style={[styles.cardSub, { color: c.text3 }]}>{subtitle}</Text>
+      </View>
+      <IconSymbol name="chevron.right" size={18} color={c.text4} />
+    </PressableScale>
+  );
+}
+
+function DualCard({
+  icon,
+  iconBg,
+  title,
+  subtitle,
+  c,
+  onPress,
+}: {
+  icon: IconName;
+  iconBg: string;
+  title: string;
+  subtitle: string;
+  c: ColorPalette;
+  onPress: () => void;
+}) {
+  return (
+    <PressableScale
+      onPress={onPress}
+      scale={0.97}
+      haptic="light"
+      pressedBg={c.bgHover}
+      style={[styles.dualCard, { backgroundColor: c.bgElev }]}
+    >
+      <IconCircle icon={icon} bg={iconBg} size={44} />
+      <View style={styles.dualText}>
+        <Text style={[styles.cardTitle, { color: c.text }]}>{title}</Text>
+        <Text style={[styles.cardSub, { color: c.text3 }]}>{subtitle}</Text>
+      </View>
+    </PressableScale>
+  );
+}
+
+function SpaceRow({
+  space,
+  count,
+  active,
+  withDivider,
+  c,
+  onPress,
+}: {
+  space: Space;
+  count: number;
+  active: boolean;
+  withDivider: boolean;
+  c: ColorPalette;
+  onPress: () => void;
+}) {
+  return (
+    <PressableScale
+      onPress={onPress}
+      scale={0.99}
+      haptic="none"
+      pressedBg={c.bgHover}
+      style={styles.groupRow}
+    >
+      <SpaceAvatar
+        space={space}
+        size={30}
+        background={c.info}
+        foreground="#fff"
+        fontSize={14}
+        borderRadius={Radius.md}
+      />
+      <Text style={[styles.groupRowLabel, { color: c.text }]} numberOfLines={1}>
+        {space.name}
+      </Text>
+      {active && <IconSymbol name="checkmark" size={15} color={c.text2} />}
+      <Text style={[styles.groupRowCount, { color: c.text3 }]}>{count}</Text>
+      <IconSymbol name="chevron.right" size={16} color={c.text4} />
+      {withDivider && (
+        <View
+          style={[
+            styles.divider,
+            { backgroundColor: c.lineSoft, left: Spacing.lg + 30 + Spacing.md },
+          ]}
+        />
+      )}
+    </PressableScale>
+  );
+}
+
+function TypeRow({
+  spec,
+  count,
+  withDivider,
+  c,
+  onPress,
+}: {
+  spec: TypeSpec;
+  count: number;
+  withDivider: boolean;
+  c: ColorPalette;
+  onPress: () => void;
+}) {
+  return (
+    <PressableScale
+      onPress={onPress}
+      scale={0.99}
+      haptic="none"
+      pressedBg={c.bgHover}
+      style={styles.groupRow}
+    >
+      <View style={styles.typeIcon}>
+        <IconSymbol
+          name={spec.icon}
+          size={22}
+          color={colorForType(spec.type, c)}
+        />
+      </View>
+      <Text style={[styles.groupRowLabel, { color: c.text }]} numberOfLines={1}>
+        {spec.label}
+      </Text>
+      <Text style={[styles.groupRowCount, { color: c.text3 }]}>{count}</Text>
+      <IconSymbol name="chevron.right" size={16} color={c.text4} />
+      {withDivider && (
+        <View
+          style={[
+            styles.divider,
+            { backgroundColor: c.lineSoft, left: Spacing.lg + 22 + Spacing.md },
+          ]}
+        />
+      )}
+    </PressableScale>
   );
 }
 
@@ -510,12 +453,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.xs,
     paddingBottom: Spacing.sm,
+    gap: Spacing.sm,
   },
   headerLeft: {
     flexDirection: "row",
     alignItems: "center",
     gap: Spacing.md,
     flexShrink: 1,
+  },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.xs,
+    flexShrink: 0,
   },
   appName: {
     ...Type.title,
@@ -526,113 +476,76 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
 
-  /* Search */
-  searchRow: {
+  /* Scroll */
+  scroll: { flex: 1 },
+  scrollContent: {
     paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.xs,
-    paddingBottom: Spacing.xs,
-  },
-  searchBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderRadius: Radius.lg,
-    paddingHorizontal: Spacing.md,
-    height: 38,
-    gap: Spacing.sm,
-  },
-  searchInput: {
-    flex: 1,
-    ...Type.body,
-    paddingVertical: 0,
-    includeFontPadding: false,
+    paddingTop: Spacing.sm,
+    paddingBottom: 120,
+    gap: Spacing.lg,
   },
 
-  /* Chips */
-  chips: {
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.sm,
-    gap: Spacing.sm,
+  /* Cards */
+  bigCard: {
     flexDirection: "row",
     alignItems: "center",
+    gap: Spacing.md,
+    padding: Spacing.lg,
+    borderRadius: Radius.xl,
   },
+  cardMid: { flex: 1, gap: 3 },
+  cardTitle: { ...Type.headline, fontWeight: "700" },
+  cardSub: { ...Type.footnote },
 
-  /* List */
-  list: { flex: 1 },
-  listContent: { paddingBottom: 120 },
-  rowCard: {
-    marginHorizontal: Spacing.lg,
-    overflow: "hidden",
-  },
-  rowCardFirst: {
-    marginTop: Spacing.sm,
-    borderTopLeftRadius: Radius.xl,
-    borderTopRightRadius: Radius.xl,
-  },
-  rowCardLast: {
-    borderBottomLeftRadius: Radius.xl,
-    borderBottomRightRadius: Radius.xl,
-  },
-
-  /* Row */
-  row: {
+  dualRow: {
     flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: 12,
     gap: Spacing.md,
   },
-  hairline: {
+  dualCard: {
+    flex: 1,
+    padding: Spacing.lg,
+    borderRadius: Radius.xl,
+    gap: Spacing.sm,
+  },
+  dualText: { gap: 2 },
+
+  /* Section */
+  sectionTitle: {
+    ...Type.subhead,
+    marginTop: -Spacing.xs,
+    marginLeft: Spacing.xs,
+    marginBottom: -Spacing.sm,
+  },
+  group: {
+    borderRadius: Radius.xl,
+    overflow: "hidden",
+  },
+  groupRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+  },
+  groupRowLabel: {
+    ...Type.bodyEmph,
+    flex: 1,
+    minWidth: 0,
+  },
+  groupRowCount: {
+    ...Type.subhead,
+    fontVariant: ["tabular-nums"],
+  },
+  typeIcon: {
+    width: 30,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  divider: {
     position: "absolute",
     bottom: 0,
     right: 0,
     height: StyleSheet.hairlineWidth,
-  },
-  favicon: {
-    width: 38,
-    height: 38,
-    borderRadius: Radius.lg,
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-  },
-  faviconText: { color: "#fff", fontSize: 13, fontWeight: "600" },
-  rowMid: { flex: 1, gap: 2, minWidth: 0 },
-  rowNameLine: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.xs + 1,
-    flexShrink: 1,
-  },
-  rowName: { ...Type.bodyEmph, flexShrink: 1 },
-  rowSub: { ...Type.footnote },
-  rowRight: {
-    alignItems: "flex-end",
-    gap: 5,
-    flexShrink: 0,
-    minWidth: 52,
-  },
-  rowTime: { ...Type.caption, fontSize: 10 },
-  barWrap: { width: 36 },
-  barTrack: { height: 3, borderRadius: 2, overflow: "hidden" },
-  barFill: { height: 3, borderRadius: 2 },
-
-  /* Swipe actions */
-  swipeActionsRow: {
-    flexDirection: "row",
-    alignItems: "stretch",
-  },
-  swipeAction: {
-    width: SWIPE_ACTION_WIDTH,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 4,
-    paddingVertical: Spacing.sm,
-  },
-  swipeActionLabel: {
-    ...Type.caption,
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#fff",
   },
 
   /* FAB */
@@ -648,22 +561,4 @@ const styles = StyleSheet.create({
     shadowRadius: 14,
     elevation: 8,
   },
-
-  /* Empty */
-  empty: {
-    paddingTop: 80,
-    paddingHorizontal: Spacing.xl,
-    alignItems: "center",
-    gap: Spacing.sm,
-  },
-  emptyIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: Radius.xl,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: Spacing.sm,
-  },
-  emptyTitle: { ...Type.title2 },
-  emptyDesc: { ...Type.footnote },
 });
