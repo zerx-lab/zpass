@@ -1,12 +1,12 @@
-// MeTab —— "我的"页：用户卡 / 空间 / 安全与隐私 / 外观 / 数据 / 条目统计
+// MeTab —— “我的”页：用户卡 / 空间 / 应用保护 / 同步 / 外观与交互 / 数据管理 / 关于
 //
-// 与 phone/(tabs)/me.tsx 行为对齐：
-//   - UserCard：SpaceAvatar + 当前空间名 + 条目数
+// 分组策略对齐主流密码管理器：
+//   - 用户卡：SpaceAvatar + 当前空间名
 //   - 空间：当前空间展示行
-//   - 安全与隐私：改主密码 / 生物解锁 / 同步 / 立即锁定
-//   - 外观：主题（跟随系统 / 深色 / 浅色）
-//   - 数据：导入 / 导出 / 清空 / 重置
-//   - 条目统计：按 type 数量分类
+//   - 应用保护：改主密码 / 生物解锁 / 后台模糊 / 防窥 / 切后台锁定 / 立即锁定
+//   - 同步：局域网同步 / 接受设备连接
+//   - 外观与交互：主题 / 语言 / 智感握姿
+//   - 数据管理：导入 / 导出 / 清空 / 重置
 //
 // 主密码修改：弹出全屏 sheet，三段输入（当前 / 新 / 确认），提交走
 // vaultStore.changeMasterPassword(old, new)。
@@ -23,27 +23,11 @@ import { safeAreaState, SafeAreaState } from '../state/SafeArea';
 import { themeStore, type ThemeMode } from '../state/ThemeStore';
 import { SpaceAvatar } from '../components/SpaceAvatar';
 import type { ItemPayload } from '../lib/VaultService';
-import type { VaultItemType } from '../lib/VaultService';
+import { securityStore, SecurityStore } from '../state/SecurityStore';
 import { sortSpaces, type Space } from '../lib/Spaces';
-
-interface TypeRow {
-  label: string;
-  type: VaultItemType;
-  icon: Resource;
-}
 
 /** 与 AppScope/app.json5 的 versionName 保持一致 —— 跨 release 时手动同步 */
 const APP_VERSION: string = '1.0.0';
-
-const TYPE_ROWS: TypeRow[] = [
-  { label: '登录凭据', type: 'login', icon: $r('app.media.ic_key') },
-  { label: '验证码', type: 'totp', icon: $r('app.media.ic_clock') },
-  { label: '支付卡', type: 'card', icon: $r('app.media.ic_credit_card') },
-  { label: '安全笔记', type: 'note', icon: $r('app.media.ic_note_text') },
-  { label: '身份信息', type: 'identity', icon: $r('app.media.ic_person') },
-  { label: 'SSH 密钥', type: 'ssh', icon: $r('app.media.ic_terminal') },
-  { label: '通行密钥', type: 'passkey', icon: $r('app.media.ic_lock') },
-];
 
 @ComponentV2
 export struct MeTab {
@@ -51,6 +35,7 @@ export struct MeTab {
   @Local zc: ZColorsClass = ZColors;
   @Local store: VaultStore = vaultStore;
   @Local ms: MotionStore = motionStore;
+  @Local sec: SecurityStore = securityStore;
 
   /** 启用信任设备时的密码确认浮层 */
   @Local showConfirmPw: boolean = false;
@@ -86,16 +71,6 @@ export struct MeTab {
     const id = this.store.activeSpaceId;
     if (!id) return '—';
     return this.store.spaces.find((s) => s.id === id)?.name ?? '—';
-  }
-
-  @Computed
-  get typeCounts(): Map<VaultItemType, number> {
-    const m = new Map<VaultItemType, number>();
-    for (const it of this.store.items as ItemPayload[]) {
-      const n = m.get(it.type) ?? 0;
-      m.set(it.type, n + 1);
-    }
-    return m;
   }
 
   @Computed
@@ -492,8 +467,8 @@ export struct MeTab {
             .borderRadius(ZRadius.xl)
             .clip(true);
 
-            // 安全与隐私
-            this.sectionHeader('安全与隐私');
+            // 应用保护
+            this.sectionHeader('应用保护');
             Column() {
               this.rowAction(
                 '修改主密码',
@@ -505,6 +480,45 @@ export struct MeTab {
               this.divider();
               this.rowTrustedSwitch();
               this.divider();
+              this.rowToggle(
+                '后台模糊保护',
+                '切到后台时遮挡界面，防多任务卡片泄露',
+                $r('app.media.ic_grid'),
+                () => this.sec.bgBlurEnabled,
+                () => this.sec.setBgBlurEnabled(!this.sec.bgBlurEnabled),
+              );
+              this.divider();
+              this.rowToggle(
+                '防窥保护',
+                '开启隐私模式，阻止截屏与录屏',
+                $r('app.media.ic_lock_shield'),
+                () => this.sec.antiPeepEnabled,
+                () => this.sec.setAntiPeepEnabled(!this.sec.antiPeepEnabled),
+              );
+              this.divider();
+              this.rowToggle(
+                '切到后台锁定',
+                '离开 ZPass 即刻锁定保险库',
+                $r('app.media.ic_lock'),
+                () => this.sec.lockOnBackground,
+                () => this.sec.setLockOnBackground(!this.sec.lockOnBackground),
+              );
+              this.divider();
+              this.rowDanger(
+                '立即锁定',
+                $r('app.media.ic_lock_shield'),
+                this.zc.danger,
+                () => this.onLock(),
+              );
+            }
+            .width('100%')
+            .backgroundColor(this.zc.bgElev)
+            .borderRadius(ZRadius.xl)
+            .clip(true);
+
+            // 同步
+            this.sectionHeader('同步');
+            Column() {
               this.rowValue(
                 '局域网同步',
                 '连接桌面端',
@@ -521,21 +535,14 @@ export struct MeTab {
                 this.zc.text,
                 () => this.onSyncHost(),
               );
-              this.divider();
-              this.rowDanger(
-                '立即锁定',
-                $r('app.media.ic_lock_shield'),
-                this.zc.danger,
-                () => this.onLock(),
-              );
             }
             .width('100%')
             .backgroundColor(this.zc.bgElev)
             .borderRadius(ZRadius.xl)
             .clip(true);
 
-            // 外观
-            this.sectionHeader('外观');
+            // 外观与交互
+            this.sectionHeader('外观与交互');
             Column() {
               this.rowValue(
                 '主题',
@@ -556,15 +563,7 @@ export struct MeTab {
                   // 当前仅 zh，与 phone 一致；占位入口不可点
                 },
               );
-            }
-            .width('100%')
-            .backgroundColor(this.zc.bgElev)
-            .borderRadius(ZRadius.xl)
-            .clip(true);
-
-            // 交互
-            this.sectionHeader('交互');
-            Column() {
+              this.divider();
               this.rowGripSwitch();
             }
             .width('100%')
@@ -572,8 +571,8 @@ export struct MeTab {
             .borderRadius(ZRadius.xl)
             .clip(true);
 
-            // 数据
-            this.sectionHeader('数据');
+            // 数据管理
+            this.sectionHeader('数据管理');
             Column() {
               this.rowValue(
                 '导入数据',
@@ -606,19 +605,6 @@ export struct MeTab {
                 this.zc.danger,
                 () => this.onReset(),
               );
-            }
-            .width('100%')
-            .backgroundColor(this.zc.bgElev)
-            .borderRadius(ZRadius.xl)
-            .clip(true);
-
-            // 条目统计
-            this.sectionHeader('条目统计');
-            Column() {
-              ForEach(TYPE_ROWS, (row: TypeRow, idx: number) => {
-                this.rowCount(row.label, row.icon, this.typeCounts.get(row.type) ?? 0);
-                if (idx < TYPE_ROWS.length - 1) this.divider();
-              }, (row: TypeRow) => row.type);
             }
             .width('100%')
             .backgroundColor(this.zc.bgElev)
@@ -832,14 +818,23 @@ export struct MeTab {
     .onClick(() => onTap());
   }
 
+  /**
+   * rowToggle: 左图标 + 标题/副标题 + 右侧开关（仿 rowGripSwitch，参数化）
+   */
   @Builder
-  rowCount(label: string, icon: Resource, count: number) {
+  rowToggle(
+    title: string,
+    subtitle: string,
+    icon: Resource,
+    value: () => boolean,
+    onTap: () => void,
+  ) {
     Row({ space: ZSpacing.md }) {
       Row() {
         Image(icon)
           .width(18)
           .height(18)
-          .fillColor(this.zc.text2);
+          .fillColor(this.zc.text);
       }
       .width(32)
       .height(32)
@@ -848,13 +843,34 @@ export struct MeTab {
       .justifyContent(FlexAlign.Center)
       .alignItems(VerticalAlign.Center);
 
-      Text(label)
-        .fontSize(ZType.bodySize)
-        .fontColor(this.zc.text)
-        .layoutWeight(1);
-      Text(`${count} 项`)
-        .fontSize(ZType.subheadSize)
-        .fontColor(this.zc.text3);
+      Column({ space: 2 }) {
+        Text(title)
+          .fontSize(ZType.bodySize)
+          .fontColor(this.zc.text);
+        Text(subtitle)
+          .fontSize(ZType.captionSize)
+          .fontColor(this.zc.text3)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis });
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1);
+
+      Stack({ alignContent: Alignment.Start }) {
+        Row()
+          .width(50)
+          .height(30)
+          .backgroundColor(value() ? this.zc.accent : this.zc.text3)
+          .borderRadius(15);
+        Row()
+          .width(26)
+          .height(26)
+          .backgroundColor('#FFFFFF')
+          .borderRadius(13)
+          .margin({ left: value() ? 22 : 2 });
+      }
+      .width(50)
+      .height(30);
     }
     .width('100%')
     .padding({
@@ -862,7 +878,8 @@ export struct MeTab {
       right: ZSpacing.lg,
       top: ZSpacing.md,
       bottom: ZSpacing.md,
-    });
+    })
+    .onClick(() => onTap());
   }
 
   /**

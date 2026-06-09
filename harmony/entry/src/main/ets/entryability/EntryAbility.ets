@@ -4,6 +4,8 @@ import { display, mediaquery, window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { safeAreaState } from '../state/SafeArea';
 import { themeStore, type ColorMode } from '../state/ThemeStore';
+import { securityStore } from '../state/SecurityStore';
+import { vaultStore } from '../state/VaultStore';
 
 const DOMAIN = 0xFF00;
 const TAG = 'EntryAbility';
@@ -51,6 +53,7 @@ export default class EntryAbility extends UIAbility {
       hilog.info(DOMAIN, TAG, 'loadContent ok');
       this.applyImmersive(windowStage);
       this.bindSystemColorMode();
+      this.bindWindowStageEvent(windowStage);
     });
   }
 
@@ -117,6 +120,24 @@ export default class EntryAbility extends UIAbility {
     themeStore.setOnEffectiveChange((m: ColorMode) => {
       this.applySystemBar(m);
     });
+
+    // 防窥偏好变化时即时重应用窗口隐私模式（hydrate 完成 / 用户切换开关）
+    securityStore.setOnPrivacyChange(() => {
+      this.applyPrivacyMode();
+    });
+    this.applyPrivacyMode();
+  }
+
+  /**
+   * 防窥保护：开启窗口隐私模式后，截屏 / 录屏 / 多任务预览均不可见。
+   * 需系统级 ohos.permission.PRIVACY_WINDOW；三方签名拿不到时静默降级。
+   */
+  private applyPrivacyMode(): void {
+    if (!this.mainWin) return;
+    this.mainWin.setWindowPrivacyMode(securityStore.antiPeepEnabled)
+      .catch((err: BusinessError) => {
+        hilog.warn(DOMAIN, TAG, 'setWindowPrivacyMode failed: %{public}s', JSON.stringify(err));
+      });
   }
 
   private applySystemBar(effective: ColorMode): void {
@@ -156,11 +177,49 @@ export default class EntryAbility extends UIAbility {
     hilog.info(DOMAIN, TAG, 'onWindowStageDestroy');
   }
 
+  /**
+   * 后台模糊保护（对齐华为官方「退后台新增蒙层保护隐私」方案）：
+   * 监听 windowStageEvent，退到后台（PAUSED）时置 blurActive，Index 对内容做
+   * foregroundBlurStyle 模糊；PAUSED 是官方推荐信号，早于多任务卡片快照。
+   */
+  private bindWindowStageEvent(windowStage: window.WindowStage): void {
+    try {
+      windowStage.on('windowStageEvent', (event: window.WindowStageEventType) => {
+        if (event === window.WindowStageEventType.PAUSED) {
+          securityStore.blurActive = securityStore.bgBlurEnabled;
+        } else {
+          securityStore.blurActive = false;
+        }
+      });
+    } catch (e) {
+      hilog.error(DOMAIN, TAG, 'windowStageEvent bind failed: %{public}s', JSON.stringify(e));
+    }
+  }
+
   onForeground(): void {
     hilog.info(DOMAIN, TAG, 'onForeground');
+    // 切后台锁定后回到前台：此时才尝试生物解锁（避免切后台瞬间弹人脸）
+    if (securityStore.lockedByBackground) {
+      securityStore.lockedByBackground = false;
+      if (
+        vaultStore.status.initialized &&
+        !vaultStore.isUnlocked() &&
+        vaultStore.trustedSupported &&
+        vaultStore.trustedEnabled
+      ) {
+        vaultStore.tryAutoUnlock().catch(() => {
+          // tryAutoUnlock 内部已吞错
+        });
+      }
+    }
   }
 
   onBackground(): void {
     hilog.info(DOMAIN, TAG, 'onBackground');
+    // 切后台锁定：立即锁定；标记由后台触发，供回前台再解锁并抑制锁屏页即时弹生物识别
+    if (securityStore.lockOnBackground && vaultStore.isUnlocked()) {
+      securityStore.lockedByBackground = true;
+      vaultStore.lock();
+    }
   }
 }

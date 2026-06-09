@@ -20,6 +20,7 @@ import { MeTab } from '../views/MeTab';
 import { LockOverlay } from '../views/LockOverlay';
 import { OnboardingOverlay } from '../views/OnboardingOverlay';
 import { motionStore } from '../state/MotionStore';
+import { securityStore, SecurityStore } from '../state/SecurityStore';
 
 interface TabSpec {
   key: string;
@@ -40,6 +41,7 @@ struct Index {
   @Local safeArea: SafeAreaState = safeAreaState;
   @Local zc: ZColorsClass = ZColors;
   @Local store: VaultStore = vaultStore;
+  @Local sec: SecurityStore = securityStore;
   @Local activeTab: string = 'vault';
 
   aboutToAppear(): void {
@@ -48,6 +50,8 @@ struct Index {
     this.store.refresh();
     // 恢复设备本地偏好（握姿开关），filesDir 已由 EntryAbility.onCreate 注入
     motionStore.hydrate();
+    // 恢复应用保护偏好（后台模糊 / 防窥 / 切后台锁定）
+    securityStore.hydrate();
   }
 
   private currentTabIndex(): number {
@@ -113,7 +117,12 @@ struct Index {
       .justifyContent(FlexAlign.Start)
       .alignItems(HorizontalAlign.Start)
       .align(Alignment.TopStart)
-      .backgroundColor(this.zc.bg);
+      .backgroundColor(this.zc.bg)
+      // 后台模糊保护：退到后台（PAUSED）时对内容做前景模糊，避免多任务卡片泄露（华为官方方案）
+      .foregroundBlurStyle(
+        this.sec.blurActive ? BlurStyle.Thick : BlurStyle.NONE,
+        { colorMode: ThemeColorMode.SYSTEM, adaptiveColor: AdaptiveColor.DEFAULT },
+      );
     }
     .width('100%')
     .height('100%')

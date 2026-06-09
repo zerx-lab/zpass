@@ -29,6 +29,11 @@
       {
         "name": "ohos.permission.DETECT_GESTURE"
       },
+      {
+        // 防窥保护：窗口隐私模式（防截屏 / 录屏）。系统级权限，
+        // 三方签名安装时系统会忽略；系统签名 / ACL 下方可生效。
+        "name": "ohos.permission.PRIVACY_WINDOW"
+      },
     ],
     "abilities": [
       {

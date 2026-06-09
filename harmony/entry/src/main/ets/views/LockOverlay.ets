@@ -14,6 +14,7 @@ import { vaultStore, type VaultStore } from '../state/VaultStore';
 import { promptAction } from '@kit.ArkUI';
 import { safeAreaState, SafeAreaState } from '../state/SafeArea';
 import { SpaceAvatar } from '../components/SpaceAvatar';
+import { securityStore } from '../state/SecurityStore';
 
 @ComponentV2
 export struct LockOverlay {
@@ -34,7 +35,8 @@ export struct LockOverlay {
   }
 
   aboutToAppear(): void {
-    if (this.store.trustedSupported && this.store.trustedEnabled) {
+    // 仅冷启动 / 手动锁定时自动生物解锁；「切后台锁定」由 onForeground 回前台后才触发
+    if (this.store.trustedSupported && this.store.trustedEnabled && !securityStore.lockedByBackground) {
       this.trustedTrying = true;
       this.store.tryAutoUnlock()
         .catch(() => {
