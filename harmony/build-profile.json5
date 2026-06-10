@@ -1,6 +1,33 @@
 {
   "app": {
-    "signingConfigs": [],
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "C:\\Users\\zero\\.ohos\\config\\default_harmony_rQzWoehyNH0lEM7tLI25T5GiUuepRxaX6nDcoODjMAk=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001B7AB85B0A2F48BFE2658AE4F476B999037C55B6AE4B58F79410B55E38250D23021B583FD0BC855A",
+          "profile": "C:\\Users\\zero\\.ohos\\config\\default_harmony_rQzWoehyNH0lEM7tLI25T5GiUuepRxaX6nDcoODjMAk=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:\\Users\\zero\\.ohos\\config\\default_harmony_rQzWoehyNH0lEM7tLI25T5GiUuepRxaX6nDcoODjMAk=.p12",
+          "storePassword": "0000001B6D74FB0EA8A6EFA1996F0E78D88105E632D559D1D092B48FFCA53BD008B3CDC7351E9D85577A4F"
+        }
+      },
+      {
+        "name": "release",
+        "type": "HarmonyOS",
+        "material": {
+          "storeFile": "C:/Users/zero/Documents/zpass_release.p12",
+          "storePassword": "0000001C7DE904151319B72D7D47A6A870D031DA6EE73C0427E08CBC35C8A35B65A483824C13D9721EF34A90",
+          "keyAlias": "zpass_release",
+          "keyPassword": "0000001CBA7138CD218F6656AA8E42D4C1277543BCE9C60AEE5186C0D78291E04FDB3B664A251C7A7D1C3C24",
+          "signAlg": "SHA256withECDSA",
+          "profile": "C:/Users/zero/Documents/zpass_release_profileRelease.p7b",
+          "certpath": "C:/Users/zero/Documents/zpass_release.cer"
+        }
+      }
+    ],
     "products": [
       {
         "name": "default",
@@ -17,8 +44,12 @@
       }
     ],
     "buildModeSet": [
-      { "name": "debug" },
-      { "name": "release" }
+      {
+        "name": "debug"
+      },
+      {
+        "name": "release"
+      }
     ]
   },
   "modules": [
@@ -26,7 +57,12 @@
       "name": "entry",
       "srcPath": "./entry",
       "targets": [
-        { "name": "default", "applyToProducts": ["default"] }
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
       ]
     }
   ]
