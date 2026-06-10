@@ -5,13 +5,13 @@
         "name": "default",
         "type": "HarmonyOS",
         "material": {
-          "certpath": "C:\\Users\\zero\\.ohos\\config\\default_harmony_rQzWoehyNH0lEM7tLI25T5GiUuepRxaX6nDcoODjMAk=.cer",
-          "keyAlias": "debugKey",
-          "keyPassword": "0000001B7AB85B0A2F48BFE2658AE4F476B999037C55B6AE4B58F79410B55E38250D23021B583FD0BC855A",
-          "profile": "C:\\Users\\zero\\.ohos\\config\\default_harmony_rQzWoehyNH0lEM7tLI25T5GiUuepRxaX6nDcoODjMAk=.p7b",
+          "storeFile": "C:/Users/zero/Documents/zpass_release.p12",
+          "storePassword": "0000001C8E86D63D30F162E4E1A084D43E2A77C6E5E53BACA930E8CDF8DC98E7FBEBB71585F2330EB10F14C9",
+          "keyAlias": "zpass_release",
+          "keyPassword": "0000001CC2088A3ACBDFC568475853F3622334BB3530355B378B7A16070F43F9BB929DDE569801DC631B4F3C",
           "signAlg": "SHA256withECDSA",
-          "storeFile": "C:\\Users\\zero\\.ohos\\config\\default_harmony_rQzWoehyNH0lEM7tLI25T5GiUuepRxaX6nDcoODjMAk=.p12",
-          "storePassword": "0000001B6D74FB0EA8A6EFA1996F0E78D88105E632D559D1D092B48FFCA53BD008B3CDC7351E9D85577A4F"
+          "profile": "C:/Users/zero/Documents/zpass_release_profileRelease.p7b",
+          "certpath": "C:/Users/zero/Documents/zpass_release.cer"
         }
       },
       {
@@ -31,7 +31,7 @@
     "products": [
       {
         "name": "default",
-        "signingConfig": "default",
+        "signingConfig": "release",
         "compatibleSdkVersion": "5.0.0(12)",
         "targetSdkVersion": "6.0.0(20)",
         "runtimeOS": "HarmonyOS",
