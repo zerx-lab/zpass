@@ -172,7 +172,8 @@ struct Authenticator {
             // 点击快速复制验证码；长按进详情大屏
             .onClick(() => this.copyCode(e))
             .gesture(LongPressGesture().onAction(() => this.onTapItem(e.item)));
-          }, (e: AuthEntry) => e.item.id);
+          // key 编入 revision：同 key 复用不重绘，编辑保存后返回需刷新行内容
+          }, (e: AuthEntry) => `${e.item.id}:${e.item.revision ?? 0}`);
 
           ListItem() {
             Row().height(ZSpacing.xl + this.safeArea.bottom).width('100%');

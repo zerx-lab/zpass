@@ -454,6 +454,18 @@ struct ItemEdit {
     return LINKABLE_FIELDS_BY_TYPE.get(this.itemType) ?? [];
   }
 
+  /**
+   * 自定义字段 ForEach key —— cf 是普通对象（非 @ObservedV2），同 key 复用不重绘，
+   * 所以 type / boolValue / linked 选中值这些驱动行内视觉的状态必须编进 key，
+   * 变更时整行重建。name / 文本 value 故意不进 key：打字重建会丢输入焦点。
+   */
+  private customFieldKey(cf: CustomField): string {
+    let k = `${cf.id}:${cf.type}`;
+    if (cf.type === 'boolean') k += `:${cf.boolValue ?? false}`;
+    if (cf.type === 'linked') k += `:${cf.value}`;
+    return k;
+  }
+
   // 横向滑动切换类型 tab（仅创建模式）：delta>0 下一类型，delta<0 上一类型
   private switchTypeByDelta(delta: number): void {
     if (this.mode === 'edit') return;
@@ -824,7 +836,7 @@ struct ItemEdit {
         Column({ space: ZSpacing.sm }) {
           ForEach(this.customFields, (cf: CustomField) => {
             this.customFieldRow(cf);
-          }, (cf: CustomField) => cf.id);
+          }, (cf: CustomField) => this.customFieldKey(cf));
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start);
@@ -1026,7 +1038,19 @@ struct ItemEdit {
         .fontColor(this.zc.text)
         .layoutWeight(1);
 
-      this.switchTrack(this.isFavorite);
+      // 开关直接读 this.isFavorite 内联渲染 —— 不复用 switchTrack(on)：
+      // @Builder 按值传参不响应状态变化，切换收藏后开关不会重绘。
+      Row() {
+        Row()
+          .width(14).height(14)
+          .borderRadius(7)
+          .backgroundColor(this.isFavorite ? this.zc.accentInk : this.zc.text3)
+          .margin({ left: this.isFavorite ? 14 : 2 });
+      }
+      .width(32).height(18)
+      .borderRadius(9)
+      .backgroundColor(this.isFavorite ? this.zc.accent : this.zc.bgActive)
+      .alignItems(VerticalAlign.Center);
     }
     .width('100%')
     .padding({

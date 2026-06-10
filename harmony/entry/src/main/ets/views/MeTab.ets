@@ -1408,7 +1408,8 @@ export struct MeTab {
                     .color(this.zc.lineSoft)
                     .margin({ left: ZSpacing.lg + 32 + ZSpacing.md });
                 }
-              }, (sp: Space) => sp.id);
+              // key 编入 name + 激活态：同 key 复用不重绘，重命名 / 切换空间后行需刷新
+              }, (sp: Space) => `${sp.id}:${sp.name}:${sp.id === this.store.activeSpaceId}`);
             }
           }
           .width('100%')

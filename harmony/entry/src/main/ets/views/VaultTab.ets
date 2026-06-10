@@ -224,7 +224,8 @@ export struct VaultTab {
               Column() {
                 ForEach(this.store.spaces, (sp: Space, idx: number) => {
                   this.folderRow(sp, idx < this.store.spaces.length - 1);
-                }, (sp: Space) => sp.id);
+                // key 编入 name：同 key 复用不重绘，重命名后行内名称需刷新
+                }, (sp: Space) => `${sp.id}:${sp.name}`);
               }
               .width('100%')
               .backgroundColor(this.zc.bgElev)

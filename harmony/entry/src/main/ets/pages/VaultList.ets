@@ -137,6 +137,15 @@ struct VaultList {
     return (it.fields.favorite as boolean | undefined) === true;
   }
 
+  /**
+   * ForEach key —— 必须编入 revision：ArkUI ForEach 同 key 复用旧行不重绘，
+   * 只用 it.id 会导致编辑保存 / 切收藏后返回列表行内容不刷新（需退出重进）。
+   * 每次写入 revision++，key 变化触发整行重建。
+   */
+  private rowKey(it: ItemPayload): string {
+    return `${it.id}:${it.revision ?? 0}`;
+  }
+
   build() {
     Stack({ alignContent: Alignment.BottomEnd }) {
       Column() {
@@ -232,7 +241,7 @@ struct VaultList {
                 }
                 .onClick(() => this.onTapItem(it))
                 .swipeAction({ end: this.swipeActions(it) });
-              }, (it: ItemPayload) => it.id);
+              }, (it: ItemPayload) => this.rowKey(it));
 
               ListItem() {
                 Row().height(ZSpacing.xl + 8 + this.safeArea.bottom).width('100%');
