@@ -452,7 +452,7 @@ struct SyncPage {
         this.statCell(
           '冲突',
           `${this.result!.conflicts.length}`,
-          this.result!.conflicts.length > 0 ? this.zc.warn : this.zc.text,
+          this.result!.conflicts.length > 0 ? this.zc.warnText : this.zc.text,
         );
       }
       .width('100%')
@@ -467,7 +467,7 @@ struct SyncPage {
           Text(`${this.result!.conflicts.length} 项冲突待在桌面端解决`)
             .fontSize(ZType.footnoteSize)
             .fontWeight(FontWeight.Medium)
-            .fontColor(this.zc.warn)
+            .fontColor(this.zc.warnText)
             .layoutWeight(1);
         }
         .width('100%')

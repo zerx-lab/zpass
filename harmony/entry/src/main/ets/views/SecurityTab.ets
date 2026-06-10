@@ -673,7 +673,7 @@ export struct SecurityTab {
       if (this.breachErrorCount > 0) {
         Text(`另有 ${this.breachErrorCount} 条扫描失败，建议重试`)
           .fontSize(ZType.footnoteSize)
-          .fontColor(this.zc.warn)
+          .fontColor(this.zc.warnText)
           .width('100%');
       }
 
@@ -766,7 +766,7 @@ export struct SecurityTab {
           Text(`${this.actionItems.length}`)
             .fontSize(ZType.captionSize)
             .fontWeight(FontWeight.Medium)
-            .fontColor(this.actionItems.length > 5 ? this.zc.danger : this.zc.warn)
+            .fontColor(this.actionItems.length > 5 ? this.zc.danger : this.zc.warnText)
             .backgroundColor(alpha1f(this.actionItems.length > 5 ? this.zc.danger : this.zc.warn))
             .borderRadius(ZRadius.md)
             .padding({ left: 6, right: 6, top: 2, bottom: 2 });

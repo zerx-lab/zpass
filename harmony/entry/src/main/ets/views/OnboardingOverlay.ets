@@ -85,11 +85,19 @@ export struct OnboardingOverlay {
     return this.zc.text3;
   }
 
+  /** 强度标签文字色 —— 文字用高对比变体，进度条填充仍用鲜亮原色 */
+  private strengthTextColor(score: number): string {
+    if (score >= 80) return this.zc.okText;
+    if (score >= 50) return this.zc.warnText;
+    if (score > 0) return this.zc.danger;
+    return this.zc.text3;
+  }
+
   private kdfHintText(): string {
     if (isNativeKDF()) {
-      return '原生加速 · 派生约 0.3 秒';
+      return '';
     }
-    return '派生需要数秒，请稍候';
+    return '生成需要数秒，请稍候';
   }
 
   @Computed
@@ -401,7 +409,7 @@ export struct OnboardingOverlay {
         Row({ space: ZSpacing.sm }) {
           Text(this.strength.label)
             .fontSize(ZType.footnoteSize)
-            .fontColor(this.strengthColor(this.strength.score))
+            .fontColor(this.strengthTextColor(this.strength.score))
             .layoutWeight(1);
           Text(`${this.strength.entropy} bit`)
             .fontSize(ZType.footnoteSize)

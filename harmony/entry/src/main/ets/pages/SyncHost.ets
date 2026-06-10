@@ -311,7 +311,7 @@ struct SyncHostPage {
       Text(`${this.srv.pendingConflicts.length} 项冲突待解决`)
         .fontSize(ZType.bodySize)
         .fontWeight(FontWeight.Medium)
-        .fontColor(this.zc.warn)
+        .fontColor(this.zc.warnText)
         .layoutWeight(1);
       Image($r('app.media.ic_chevron_right'))
         .width(16)

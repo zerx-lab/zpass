@@ -244,7 +244,7 @@ struct TotpScan {
                 .fillColor(this.zc.ok);
               Text('识别成功')
                 .fontSize(ZType.footnoteSize)
-                .fontColor(this.zc.ok);
+                .fontColor(this.zc.okText);
             }
             .height(28)
             .padding({ left: ZSpacing.sm, right: ZSpacing.sm })

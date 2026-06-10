@@ -327,6 +327,15 @@ struct ItemDetail {
     return this.zc.danger;
   }
 
+  /** 强度文字色 —— 文字用高对比变体，进度条填充仍用鲜亮原色 */
+  @Computed
+  get strengthTextColor(): string {
+    const s = this.strengthScore;
+    if (s >= 80) return this.zc.okText;
+    if (s >= 50) return this.zc.warnText;
+    return this.zc.danger;
+  }
+
   @Computed
   get parsedCustomFields(): CustomField[] {
     return this.item ? parseCustomFields(this.item.fields as Record<string, string>) : [];
@@ -759,7 +768,7 @@ struct ItemDetail {
             .fontSize(44)
             .fontWeight(FontWeight.Bold)
             .fontFamily('HarmonyOS Sans Condensed')
-            .fontColor(this.strengthColor);
+            .fontColor(this.strengthTextColor);
           Text('/100')
             .fontSize(16)
             .fontColor(this.zc.text3)
@@ -767,7 +776,7 @@ struct ItemDetail {
           Text(strengthLabel(this.strengthScore))
             .fontSize(ZType.footnoteSize)
             .fontWeight(FontWeight.Bold)
-            .fontColor(this.strengthColor)
+            .fontColor(this.strengthTextColor)
             .padding({ left: 8, right: 8, top: 3, bottom: 3 })
             .backgroundColor(this.zc.bgActive)
             .borderRadius(ZRadius.sm)

@@ -158,6 +158,15 @@ export struct GeneratorTab {
     return this.zc.text3;
   }
 
+  /** 强度标签文字色 —— 文字用高对比变体，进度条填充仍用鲜亮原色 */
+  private strengthTextColor(): string {
+    const s = this.genStrength.score;
+    if (s >= 70) return this.zc.okText;
+    if (s >= 40) return this.zc.warnText;
+    if (s > 0) return this.zc.danger;
+    return this.zc.text3;
+  }
+
   // 逐字符分类（私有方法，build() 内通过 @Builder 间接调用）
   private tokenize(): CharToken[] {
     const out: CharToken[] = [];
@@ -243,7 +252,7 @@ export struct GeneratorTab {
 
                   Text(this.genStrength.label)
                     .fontSize(ZType.captionSize)
-                    .fontColor(this.strengthColor())
+                    .fontColor(this.strengthTextColor())
                     .constraintSize({ minWidth: 28 })
                     .textAlign(TextAlign.End);
 

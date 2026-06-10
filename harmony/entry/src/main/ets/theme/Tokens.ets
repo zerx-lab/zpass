@@ -31,11 +31,17 @@ interface Palette {
   danger: string;
   warn: string;
   ok: string;
+  /** warn / ok 的文字专用变体 —— 填充/图标用 warn/ok，文字用这两个（对比度 ≥ 3:1） */
+  warnText: string;
+  okText: string;
   info: string;
   overlay: string;
 }
 
 /** 暗色调色板 —— 与 phone dark 对齐 */
+// 注：text4 相对 phone(#45454a) 调亮 —— 华为上架检测要求文字与背景对比度 ≥ 3:1，
+// 原值在 bgElev2(#16161a) 上仅约 2.2，自动化检测不通过。#66666c ≈ 3.25，
+// 且仍暗于 text3(#6e6e73)，层级不倒置。
 const DARK_PALETTE: Palette = {
   bg: '#0c0c0d',
   bgElev: '#111113',
@@ -47,18 +53,23 @@ const DARK_PALETTE: Palette = {
   text: '#ececec',
   text2: '#a8a8ac',
   text3: '#6e6e73',
-  text4: '#45454a',
+  text4: '#66666c',
   accent: '#ececec',
   accentInk: '#0c0c0d',
   accentGlow: 'rgba(255,255,255,0.04)',
   danger: '#e55a4a',
   warn: '#c8934a',
   ok: '#5ea47a',
+  warnText: '#c8934a',
+  okText: '#5ea47a',
   info: '#6b9cc4',
   overlay: 'rgba(0,0,0,0.55)',
 };
 
-/** 浅色调色板 —— 与 phone/constants/theme.ts light 字节级对齐（iOS HIG 系统色） */
+/** 浅色调色板 —— 基于 phone/constants/theme.ts light（iOS HIG 系统色） */
+// 注：text3 / text4 相对 phone 调暗 —— 华为上架检测要求文字与背景对比度 ≥ 3:1，
+// 原 text4(#c7c7cc) 在 bgElev(#f7f7f9) 上仅 1.57（审核被拒实测值）。
+// 现 text4=#7a7a80 ≈ 4.0，text3=#6e6e73 ≈ 4.7，层级保持 text3 深于 text4。
 const LIGHT_PALETTE: Palette = {
   bg: '#ffffff',
   bgElev: '#f7f7f9',
@@ -69,14 +80,18 @@ const LIGHT_PALETTE: Palette = {
   lineSoft: '#ececef',
   text: '#000000',
   text2: '#3c3c43',
-  text3: '#8e8e93',
-  text4: '#c7c7cc',
+  text3: '#6e6e73',
+  text4: '#7a7a80',
   accent: '#000000',
   accentInk: '#ffffff',
   accentGlow: 'rgba(0,0,0,0.04)',
   danger: '#ff3b30',
   warn: '#ff9500',
   ok: '#34c759',
+  // 文字专用变体：#ff9500 / #34c759 作文字色在浅色背景上对比度仅 ≈ 2.1，
+  // 过不了华为上架检测的 3:1 门槛；背景填充 / 图标仍用鲜亮原色。
+  warnText: '#c77700',
+  okText: '#1e8e4a',
   info: '#007aff',
   overlay: 'rgba(0,0,0,0.32)',
 };
@@ -120,6 +135,8 @@ export class ZColorsClass {
   @Trace danger: string = DARK_PALETTE.danger;
   @Trace warn: string = DARK_PALETTE.warn;
   @Trace ok: string = DARK_PALETTE.ok;
+  @Trace warnText: string = DARK_PALETTE.warnText;
+  @Trace okText: string = DARK_PALETTE.okText;
   @Trace info: string = DARK_PALETTE.info;
   @Trace overlay: string = DARK_PALETTE.overlay;
 
@@ -162,6 +179,8 @@ export class ZColorsClass {
     this.danger = p.danger;
     this.warn = p.warn;
     this.ok = p.ok;
+    this.warnText = p.warnText;
+    this.okText = p.okText;
     this.info = p.info;
     this.overlay = p.overlay;
     this.faviconColors = fav;

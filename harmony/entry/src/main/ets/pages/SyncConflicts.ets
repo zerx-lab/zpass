@@ -478,7 +478,7 @@ struct SyncConflictsPage {
       Text(label)
         .fontSize(ZType.captionSize)
         .fontWeight(FontWeight.Medium)
-        .fontColor(tone === 'info' ? this.zc.info : this.zc.ok);
+        .fontColor(tone === 'info' ? this.zc.info : this.zc.okText);
     }
     .padding({ left: ZSpacing.xs, right: ZSpacing.xs, top: 2, bottom: 2 })
     .borderRadius(ZRadius.sm)
