@@ -248,6 +248,10 @@ export class InlineMenuController {
     // login 模式仍要求归属于一个 login form(防止在搜索框等输入框误弹);
     // totp 模式只要是被 isTotpCandidate 识别的 OTP input 即可, 不强求
     // 同 form 内有 password(常见站点 2FA 单独一页, 只有 OTP input)。
+    //
+    // findLoginFormForInput 现在也识别 identifier-first 登录页的第一页(如
+    // Google):该页只有 email/账号框、没有可见 password 框,会返回
+    // { username: input, password: null } —— 非 null 即放行,菜单照常在用户名框上弹。
     if (kind === "login") {
       const form = findLoginFormForInput(input);
       if (!form) return;

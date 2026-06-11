@@ -13,3 +13,4 @@ phone/.hvigor/outputs/build-logs/
 # 锚定到仓库根:只忽略顶层 cloud/,不误伤嵌套的同名目录
 # (如 desktop/internal/cloud —— 桌面端云同步 HTTP 客户端,需入库)
 /cloud/
+harmony/.appanalyzer/appanalyzerCardConfig/

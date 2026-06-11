@@ -12,7 +12,7 @@ import {
 	Upload,
 	X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/Button";
 import {
@@ -22,6 +22,8 @@ import {
 	importBitwardenText,
 } from "@/lib/import-bitwarden";
 import type { VaultItemInput } from "@/lib/vault-api";
+import { vaultApi } from "@/lib/vault-api";
+import { useSpacesStore } from "@/stores/spaces";
 import { useUIStore } from "@/stores/ui";
 import { useVaultStore } from "@/stores/vault";
 
@@ -49,6 +51,7 @@ export function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
 	const pushToast = useUIStore((s) => s.pushToast);
 	const items = useVaultStore((s) => s.items);
 	const importMany = useVaultStore((s) => s.importMany);
+	const activeSpaceId = useSpacesStore((s) => s.activeSpaceId);
 
 	const [fileName, setFileName] = useState("");
 	const [result, setResult] = useState<ImportResult | ImportError | null>(null);
@@ -56,7 +59,20 @@ export function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
 	const [busy, setBusy] = useState(false);
 	const [submitting, setSubmitting] = useState(false);
 	const [dragOver, setDragOver] = useState(false);
+	// 导入失败明细（来自 importMany.errors）—— fail>0 时不关对话框，原地展示
+	const [failErrors, setFailErrors] = useState<string[]>([]);
 	const fileRef = useRef<HTMLInputElement>(null);
+
+	// skip-dupe 策略下将被跳过的重名条目（同 type+name）。dedupeByName 是纯函数，
+	// 导入前就能算出名单 —— 在对话框里提前预览，而不是导入成功后才记录（成功路径
+	// 会立即关闭对话框，事后记录用户永远看不到，只剩 toast 数字）。
+	const droppedDupeNames = useMemo(
+		() =>
+			strategy === "skip-dupe" && result?.ok
+				? dedupeByName(items, result.items).dropped.map((d) => d.name)
+				: [],
+		[strategy, result, items],
+	);
 
 	// 关闭时重置状态，避免下次打开仍残留上一次的预览
 	useEffect(() => {
@@ -67,6 +83,7 @@ export function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
 			setBusy(false);
 			setSubmitting(false);
 			setDragOver(false);
+			setFailErrors([]);
 		}
 	}, [open]);
 
@@ -102,25 +119,44 @@ export function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
 
 	const apply = async () => {
 		if (!result || !result.ok) return;
+		// C3：导入必须落到某个空间。空间未选（onboarding 前或 hydrate 未完成）时
+		// 写库会落到错误/空空间，先拦截给出明确提示。
+		if (!activeSpaceId) {
+			pushToast({ text: t("import_no_space"), icon: "x", duration: 4000 });
+			return;
+		}
+		// 兜底再推一次当前空间给后端（幂等；SpaceSync 已推过，但用户可能在打开
+		// 对话框后切过空间）。失败不阻断导入，后端 currentSpaceID 仍是上次值。
+		try {
+			await vaultApi.setActiveSpace(activeSpaceId);
+		} catch (err) {
+			console.error("[ImportDialog] setActiveSpace failed:", err);
+		}
+
 		let toAdd: VaultItemInput[] = result.items;
-		let droppedDupes = 0;
+		let droppedCount = 0;
 		if (strategy === "skip-dupe") {
 			const r = dedupeByName(items, toAdd);
 			toAdd = r.kept;
-			droppedDupes = r.dropped.length;
+			droppedCount = r.dropped.length;
 		}
+		setFailErrors([]);
 		setSubmitting(true);
 		try {
-			const { ok, fail } = await importMany(toAdd);
+			const { ok, fail, errors } = await importMany(toAdd);
 			if (fail > 0) {
+				// 失败时保留对话框，把错误样本渲染成"失败明细"列表供用户排查
+				setFailErrors(errors);
 				pushToast({
 					text: t("import_partial_fail", { ok, fail }),
 					icon: "x",
-					duration: 3000,
+					duration: 6000,
 				});
-			} else if (droppedDupes > 0) {
+				return; // 不关闭对话框
+			}
+			if (droppedCount > 0) {
 				pushToast({
-					text: t("import_done_some", { ok, skip: droppedDupes }),
+					text: t("import_done_some", { ok, skip: droppedCount }),
 					icon: "check",
 					duration: 2500,
 				});
@@ -134,6 +170,20 @@ export function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
 			onOpenChange(false);
 		} finally {
 			setSubmitting(false);
+		}
+	};
+
+	// skipped reason → i18n key 映射，未知原因回退原始字符串
+	const skipReasonText = (reason: string): string => {
+		switch (reason) {
+			case "unsupported_type":
+				return t("import_skip_reason_unsupported_type");
+			case "passkey_incomplete":
+				return t("import_skip_reason_passkey_incomplete");
+			case "map_error":
+				return t("import_skip_reason_map_error");
+			default:
+				return reason;
 		}
 	};
 
@@ -355,9 +405,41 @@ export function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
 											/>
 										)}
 									</div>
-									{skippedN > 0 && (
-										<div className="rounded-(--radius-sm) border border-(--warn)/30 bg-(--warn)/8 px-3 py-2 text-[12px] text-(--warn)">
-											{t("import_warning_skipped", { n: skippedN })}
+									{result.ok && result.skipped.length > 0 && (
+										<div className="flex flex-col gap-1.5 rounded-(--radius-sm) border border-(--warn)/30 bg-(--warn)/8 px-3 py-2">
+											<div className="flex items-center gap-1.5 text-[12px] font-medium text-(--warn)">
+												<AlertTriangle
+													size={12}
+													strokeWidth={1.5}
+													className="shrink-0"
+												/>
+												<span>{t("import_skip_detail_title")}</span>
+												<span className="font-mono text-(--warn)/80">
+													{result.skipped.length}
+												</span>
+											</div>
+											{/* >5 条时限高滚动，避免长列表撑爆对话框 */}
+											<ul
+												className={clsx(
+													"flex flex-col gap-0.5 text-[11.5px] text-(--text-2)",
+													result.skipped.length > 5 &&
+														"max-h-28 overflow-y-auto pr-1",
+												)}
+											>
+												{result.skipped.map((s, i) => (
+													<li
+														key={`skip-${s.name}-${i}`}
+														className="flex items-baseline justify-between gap-3"
+													>
+														<span className="truncate" title={s.name}>
+															{s.name}
+														</span>
+														<span className="shrink-0 font-mono text-[10.5px] text-(--text-3)">
+															{skipReasonText(s.reason)}
+														</span>
+													</li>
+												))}
+											</ul>
 										</div>
 									)}
 								</section>
@@ -424,6 +506,63 @@ export function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
 										</label>
 									</div>
 								</section>
+
+								{/* skip-dupe 将跳过的重名条目：导入前预览具体名称（非仅数字） */}
+								{droppedDupeNames.length > 0 && (
+									<section className="flex flex-col gap-1.5">
+										<div className="font-mono text-[10px] uppercase tracking-[0.06em] text-(--text-3)">
+											{t("import_dropped_dupe_title")}
+											<span className="ml-1.5 text-(--text-2)">
+												{droppedDupeNames.length}
+											</span>
+										</div>
+										<ul
+											className={clsx(
+												"flex flex-col gap-0.5 rounded-(--radius-sm) border border-(--line) bg-(--bg-elev) px-3 py-2 text-[11.5px] text-(--text-2)",
+												droppedDupeNames.length > 5 &&
+													"max-h-28 overflow-y-auto",
+											)}
+										>
+											{droppedDupeNames.map((n, i) => (
+												<li
+													key={`dupe-${n}-${i}`}
+													className="truncate"
+													title={n}
+												>
+													{n}
+												</li>
+											))}
+										</ul>
+									</section>
+								)}
+
+								{/* 入库失败明细：fail>0 时对话框不关闭，原地展示错误样本 */}
+								{failErrors.length > 0 && (
+									<section className="flex flex-col gap-1.5">
+										<div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.06em] text-(--danger)">
+											<AlertTriangle size={12} strokeWidth={1.5} />
+											<span>{t("import_fail_detail_title")}</span>
+											<span className="text-(--danger)/80">
+												{failErrors.length}
+											</span>
+										</div>
+										<ul
+											className={clsx(
+												"flex flex-col gap-1 rounded-(--radius-sm) border border-(--danger)/40 bg-(--danger)/8 px-3 py-2 text-[11.5px] text-(--danger)",
+												failErrors.length > 5 && "max-h-32 overflow-y-auto",
+											)}
+										>
+											{failErrors.map((e, i) => (
+												<li
+													key={`fail-${i}-${e.slice(0, 16)}`}
+													className="break-words font-mono leading-snug"
+												>
+													{e}
+												</li>
+											))}
+										</ul>
+									</section>
+								)}
 							</>
 						)}
 					</div>

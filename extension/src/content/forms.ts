@@ -3,7 +3,9 @@ import { isTotpField } from "./totp-fields";
 
 export interface LoginForm {
   username: HTMLInputElement | null;
-  password: HTMLInputElement;
+  // password 为 null 表示 identifier-first 登录页的第一页(如 Google):该页只有
+  // email/账号框、没有可见 password 框,本轮只填 username,下一页再填密码。
+  password: HTMLInputElement | null;
 }
 
 const USERNAME_TYPES = new Set(["", "text", "email", "tel", "url"]);
@@ -21,7 +23,14 @@ export function fillLoginForm(form: LoginForm, secret: LoginSecret): void {
   if (form.username && secret.username) {
     simulateUserFill(form.username, secret.username);
   }
-  simulateUserFill(form.password, secret.password);
+  // password 与 username 一样都要「有框且有值」才填:
+  //   - form.password 为 null = identifier-first 第一页,本轮只填 username;
+  //   - secret.password 为空串(只存了 username 的 login / 独立 TOTP 条目)时
+  //     不应去填空,否则会用空串覆盖用户/上一页已经输入的密码。
+  // 这同时修复了「空密码覆盖已有输入」的隐患。
+  if (form.password && secret.password) {
+    simulateUserFill(form.password, secret.password);
+  }
 }
 
 /**
@@ -45,11 +54,70 @@ export function findLoginFormForInput(
     }
   }
   const password = findPasswordNear(input);
-  if (!password) return null;
+  if (!password) {
+    // 标准路径(同 form / 邻近作用域里有可见 password 框)全失败。
+    // 最后再判一次 identifier-first 第一页:Google 这类登录页第一步只有
+    // email/账号框、没有 password 框,此时把 input 当作 username 槽位单独返回,
+    // 让内联菜单与填充链路得以放行(password=null,fillLoginForm 不会去碰密码)。
+    if (isUsernameOnlyCandidate(input)) {
+      return { username: input, password: null };
+    }
+    return null;
+  }
   return {
     username: input === password ? findUsernameInput(password) : input,
     password,
   };
+}
+
+/**
+ * 判定 input 是否是 identifier-first 登录页(如 Google)第一页里「只填用户名」
+ * 的候选框 —— 该页第一步没有可见 password 框,只有 email/账号框。
+ *
+ * 思路对齐 Bitwarden inline-menu-field-qualification.service.ts 的
+ * isUsernameFieldForLoginForm:先排除明显不是 username 的场景(密码框、附近就有
+ * 密码框 → 走标准带密码路径、搜索框),再用 autocomplete 与字段名词法正向识别。
+ * 只在「确实找不到密码框」的兜底分支里调用,所以这里对「有密码框」一律否决。
+ */
+export function isUsernameOnlyCandidate(input: HTMLInputElement): boolean {
+  // 先复用既有 login 候选门槛(可见、未禁用、非 TOTP、type 合法等)。
+  if (!isLoginCandidate(input)) return false;
+  // password 框本身永远走标准路径,不是「只填用户名」的第一页候选。
+  if ((input.getAttribute("type") ?? "").toLowerCase() === "password")
+    return false;
+  // 只要 input 同 form / 邻近作用域里存在可见 password 框,就一律走标准带密码
+  // 路径(有密码框 → 不是 identifier-first 第一页)。
+  if (findPasswordNear(input)) return false;
+  const scope = input.form ?? nearestContainer(input) ?? document;
+  if (scope.querySelector('input[type="password"]')) return false;
+
+  // autocomplete 明确声明为用户名/邮箱/webauthn → 直接判定为 username 候选。
+  const autocomplete = (input.getAttribute("autocomplete") ?? "")
+    .toLowerCase()
+    .trim();
+  if (
+    autocomplete === "username" ||
+    autocomplete === "email" ||
+    autocomplete === "webauthn"
+  ) {
+    return true;
+  }
+
+  // 否则退到字段名词法判定。拼 name/id/placeholder/aria-label 统一小写。
+  const haystack = [
+    input.name,
+    input.id,
+    input.placeholder,
+    input.getAttribute("aria-label"),
+  ]
+    .filter((value): value is string => !!value)
+    .join(" ")
+    .toLowerCase();
+
+  // 先排除搜索框(防止把站内搜索/查询框误当登录用户名,Bitwarden 同样先排搜索)。
+  if (/search|q\b|搜索|query/.test(haystack)) return false;
+  // 正向命中常见用户名/账号/邮箱/手机号语义词 → username 候选。
+  return /user|email|account|login|账号|邮箱|手机|phone|tel/.test(haystack);
 }
 
 export function isLoginCandidate(
@@ -195,6 +263,13 @@ function dispatchInputEvents(input: HTMLInputElement, value: string): void {
     }),
   );
   input.dispatchEvent(new view.Event("change", { bubbles: true }));
+  // 末尾补一对合成 keydown/keyup(bubbles，不带具体 key 值)。部分
+  // identifier-first 登录页(如 Google)的「下一步」按钮靠 keyup 监听才会从
+  // disabled 点亮 —— 仅 input/change 事件不足以触发其内部校验。不带 key 值是为了
+  // 避免被站点当成真实击键(如回车提交)误触发额外行为。Bitwarden 自动填充同样
+  // 在填值后派发 keydown/keyup 模拟「用户敲过键」。
+  input.dispatchEvent(new view.KeyboardEvent("keydown", { bubbles: true }));
+  input.dispatchEvent(new view.KeyboardEvent("keyup", { bubbles: true }));
   // 不再 dispatch blur：部分受控表单会在 blur 时重置 dirty/touched 状态，
   // 导致「填了又被重置」。保留 focus 足以让验证逻辑 trigger。
   input.focus({ preventScroll: true });

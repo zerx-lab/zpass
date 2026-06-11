@@ -181,12 +181,14 @@ export interface VaultState {
 	 * 路径，避免后端再加一个批量接口；代价是 N 次 IPC，但对 1k 内的导入
 	 * 完全可接受）。最后只 load 一次，避免每条都重拉列表。
 	 *
-	 * 返回 { ok, fail }：成功条目数 + 失败条目数。失败条目会把错误塞到
-	 * state.error 但不会中断后续导入 —— 让用户最大化保留可入库的数据。
+	 * 返回 { ok, fail, errors }：成功条目数 + 失败条目数 + 错误样本数组
+	 * （最多前 5 条，"<name>: <message>" 形式）。失败条目会把错误塞到
+	 * state.error 但不会中断后续导入 —— 让用户最大化保留可入库的数据；
+	 * errors 同时回传给调用方，便于在 UI 上直接展示失败明细而非只有数字。
 	 */
 	importMany: (
 		inputs: VaultItemInput[],
-	) => Promise<{ ok: number; fail: number }>;
+	) => Promise<{ ok: number; fail: number; errors: string[] }>;
 
 	/**
 	 * 整体覆盖现有条目；成功后重新 load 整个列表
@@ -407,7 +409,7 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
 	},
 
 	importMany: async (inputs) => {
-		if (inputs.length === 0) return { ok: 0, fail: 0 };
+		if (inputs.length === 0) return { ok: 0, fail: 0, errors: [] };
 		const errors: string[] = [];
 		let ok = 0;
 		let fail = 0;
@@ -445,7 +447,7 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
 			);
 		}
 		set({ error: errors.length > 0 ? errors.join("\n") : null });
-		return { ok, fail };
+		return { ok, fail, errors };
 	},
 
 	update: async (input) => {

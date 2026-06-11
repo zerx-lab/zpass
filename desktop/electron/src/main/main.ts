@@ -137,10 +137,10 @@ backendPromise.then(
   },
 );
 
-// macOS 浏览器 native messaging host manifest 静默自检 / 更新。
-// 跑在 backend spawn 之后、whenReady 之前 —— 与 Go sidecar 启动并行,纯文件 IO,
-// 不阻塞窗口创建。非 darwin 平台内部 early return。任何失败都不能让 GUI 起不来,
-// 所以 catch 兜底,异常只走 stderr。
+// macOS / Windows 浏览器 native messaging host 静默自检 / 更新。
+// 跑在 backend spawn 之后、whenReady 之前 —— 与 Go sidecar 启动并行,纯文件 IO
+// (Windows 额外走 reg.exe 写 HKCU),不阻塞窗口创建。不支持的平台内部 early
+// return。任何失败都不能让 GUI 起不来,所以 catch 兜底,异常只走 stderr。
 void installNativeMessagingHosts().catch((err) => {
   process.stderr.write(`[nmh] install task failed: ${String(err)}\n`);
 });
@@ -232,7 +232,9 @@ ipcMain.handle(
         w.showSystemMenu(point);
         return;
       } catch (err) {
-        process.stderr.write(`[sysmenu] showSystemMenu failed: ${String(err)}\n`);
+        process.stderr.write(
+          `[sysmenu] showSystemMenu failed: ${String(err)}\n`,
+        );
       }
     }
   },

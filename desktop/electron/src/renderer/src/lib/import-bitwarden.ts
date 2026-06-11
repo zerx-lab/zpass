@@ -199,16 +199,20 @@ function newCfId(itemSeed: string): string {
 	return `cf-${itemSeed}-${_seq}`;
 }
 
-/** 从 uris 数组中取第 1 个并提取 host（兼容非完整 URL） */
+/**
+ * 取 uris 数组的第 1 个 URI，**保留完整原始值**（协议 / path / query / 端口）。
+ *
+ * 为什么不再提取 host：
+ *   - 自动填充的来源/origin 匹配在 Go 侧 urlMatchesOrigin() 已统一按 Hostname()
+ *     归一，详情页 firstDisplayURL() 显示时也只取 Hostname()，所以存完整 URI 对
+ *     匹配/展示零回归。
+ *   - 反之提取 host 会丢掉 androidapp:// 这类自定义协议前缀（new URL 对
+ *     `androidapp://com.qiyi.video` 能解析出 host=com.qiyi.video，旧实现因此
+ *     只剩裸 host、协议语义不可恢复）以及深链 path/query/端口。
+ */
 function pickPrimaryUri(uris?: BitwardenLogin["uris"]): string {
 	if (!Array.isArray(uris) || uris.length === 0) return "";
-	const u = uris[0]?.uri || "";
-	try {
-		const parsed = new URL(u);
-		return parsed.host || u;
-	} catch {
-		return u;
-	}
+	return safeStr(uris[0]?.uri).trim();
 }
 
 // ── fields[] → customFields ─────────────────────────────────────
@@ -670,18 +674,25 @@ function convertBitwarden(obj: BitwardenExport): ImportResult {
 	};
 }
 
-/** 名称去重（用于 skip-duplicates 策略） */
+/**
+ * 名称去重（用于 skip-duplicates 策略）。
+ *
+ * 去重键带上 type 维度（`type\0name`），避免跨类型同名误杀 —— 真实数据里
+ * 存在 note 与 login 同名（如 "anytype"），它们本是不同条目，按纯 name 去重会
+ * 多丢一条。\0 作分隔符是因为它不可能出现在 type/name 文本里，不会拼接歧义。
+ * 同类型真实同名（如 2 个 Microsoft passkey）仍按预期保留去重。
+ */
 export function dedupeByName<
-	T extends { name: string },
-	U extends { name: string },
+	T extends { name: string; type: string },
+	U extends { name: string; type: string },
 >(existing: T[], incoming: U[]): { kept: U[]; dropped: U[] } {
-	const have = new Set(
-		(existing || []).map((i) => (i.name || "").toLowerCase()),
-	);
+	const keyOf = (i: { name?: string; type?: string }) =>
+		`${i.type ?? ""}\0${(i.name || "").toLowerCase()}`;
+	const have = new Set((existing || []).map(keyOf));
 	const kept: U[] = [];
 	const dropped: U[] = [];
 	for (const it of incoming) {
-		const key = (it.name || "").toLowerCase();
+		const key = keyOf(it);
 		if (have.has(key)) {
 			dropped.push(it);
 		} else {

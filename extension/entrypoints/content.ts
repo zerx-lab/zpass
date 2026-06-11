@@ -282,8 +282,11 @@ function installExtensionContextWatchdog(): void {
  * 这里只取 form / 上层 fieldset 里 autocomplete=one-time-code 的第一个，
  * 或 name/id 含 "otp"/"code"/"verify" 的 type=text。找不到返回 null。
  */
-function findOtpInput(form: { password: HTMLInputElement }): HTMLInputElement | null {
-  const root = form.password.form ?? document;
+function findOtpInput(form: {
+  password: HTMLInputElement | null;
+}): HTMLInputElement | null {
+  // password 可能为 null(identifier-first 第一页),此时退到整页 document 扫描。
+  const root = form.password?.form ?? document;
   const explicit = root.querySelector<HTMLInputElement>(
     'input[autocomplete="one-time-code"]',
   );

@@ -383,6 +383,13 @@ export const en = {
 	import_done_some: "Imported {{ok}}, skipped {{skip}}",
 	import_partial_fail: "Imported {{ok}}, {{fail}} failed",
 	import_preview: "Preview (first 5)",
+	import_fail_detail_title: "Failure details",
+	import_skip_detail_title: "Skipped details",
+	import_skip_reason_unsupported_type: "Unsupported type",
+	import_skip_reason_passkey_incomplete: "Incomplete passkey fields",
+	import_skip_reason_map_error: "Field mapping error",
+	import_dropped_dupe_title: "Duplicates to skip",
+	import_no_space: "Please select a space first",
 
 	// ── Export dialog ──
 	export_title: "Export vault",

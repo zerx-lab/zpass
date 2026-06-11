@@ -388,6 +388,13 @@ export const zh: Strings = {
 	import_done_some: "已导入 {{ok}} 个，跳过 {{skip}} 个",
 	import_partial_fail: "已导入 {{ok}} 个，失败 {{fail}} 个",
 	import_preview: "预览（前 5 个）",
+	import_fail_detail_title: "失败明细",
+	import_skip_detail_title: "跳过明细",
+	import_skip_reason_unsupported_type: "类型不支持",
+	import_skip_reason_passkey_incomplete: "通行密钥字段不完整",
+	import_skip_reason_map_error: "字段映射出错",
+	import_dropped_dupe_title: "将跳过的重名条目",
+	import_no_space: "请先选择空间",
 
 	// ── 导出对话框 ──
 	export_title: "导出保险库",

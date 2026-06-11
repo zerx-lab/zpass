@@ -431,7 +431,10 @@ export class InlineMenuBridge {
     } catch {
       return;
     }
-    if (!secret.password) return; // 空密码条目, 不动表单
+    // 账密全空才放弃;空密码条目仍可在 identifier-first 页(如 Google 第一步,
+    // 只有 email 框无 password 框)填用户名。fillLoginForm 对空 password 有守卫,
+    // 不会去清空表单,所以放行只填 username 的条目是安全的。
+    if (!secret.password && !secret.username) return;
     try {
       await browser.tabs.sendMessage(tabId, {
         type: "zpass.fillLogin",
