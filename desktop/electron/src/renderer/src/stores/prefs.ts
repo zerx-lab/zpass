@@ -108,6 +108,11 @@ export interface PrefsState {
 	 * 开发者的系统登录项。
 	 */
 	launchAtLogin: boolean;
+	/**
+	 * 开机免打扰启动：登录项拉起时不显示窗口，直接驻留系统托盘。
+	 * 仅在 `launchAtLogin` 开启时有意义；随 launchAtLogin 一起推送给主进程。
+	 */
+	launchHidden: boolean;
 	/** 自定义正文字体（空串 = 使用内置 Geist） */
 	fontSans: string;
 	/** 自定义等宽字体（空串 = 使用内置 Geist Mono） */
@@ -140,6 +145,7 @@ export interface PrefsState {
 	setLockOnClose: (v: boolean) => void;
 	setCloseBehavior: (v: CloseBehavior) => void;
 	setLaunchAtLogin: (v: boolean) => void;
+	setLaunchHidden: (v: boolean) => void;
 	setFontSans: (font: string) => void;
 	setFontMono: (font: string) => void;
 }
@@ -214,6 +220,8 @@ export function getPrefsDefaults() {
 		// 新装默认开机启动。老用户的迁移走保守策略（见 migrate v7→v8），
 		// 不会因升级被静默写入系统登录项。
 		launchAtLogin: true,
+		// 免打扰启动默认关闭：开机弹窗是传统语义，想静默驻留托盘的用户自行开启。
+		launchHidden: false,
 		fontSans: "",
 		fontMono: "",
 	};
@@ -249,6 +257,7 @@ export const usePrefsStore = create<PrefsState>()(
 			setLockOnClose: (lockOnClose) => set({ lockOnClose }),
 			setCloseBehavior: (closeBehavior) => set({ closeBehavior }),
 			setLaunchAtLogin: (launchAtLogin) => set({ launchAtLogin }),
+			setLaunchHidden: (launchHidden) => set({ launchHidden }),
 			setFontSans: (fontSans) => set({ fontSans }),
 			setFontMono: (fontMono) => set({ fontMono }),
 		}),
@@ -261,7 +270,7 @@ export const usePrefsStore = create<PrefsState>()(
 			// 等浏览器沙盒存储（产品硬性约束，详见 src/lib/config-storage.ts
 			// 头部注释）
 			storage: createTauriConfigStorage<Partial<PrefsState>>(),
-			version: 8,
+			version: 9,
 			// 仅持久化纯数据字段，action 方法不入库
 			partialize: (state) => ({
 				theme: state.theme,
@@ -276,6 +285,7 @@ export const usePrefsStore = create<PrefsState>()(
 				lockOnClose: state.lockOnClose,
 				closeBehavior: state.closeBehavior,
 				launchAtLogin: state.launchAtLogin,
+				launchHidden: state.launchHidden,
 				fontSans: state.fontSans,
 				fontMono: state.fontMono,
 			}),
@@ -355,6 +365,11 @@ export const usePrefsStore = create<PrefsState>()(
 					// 新增开机启动偏好。老用户保守置 false：不因升级被静默写入
 					// 系统登录项（新装才默认 true）。
 					next = { ...next, launchAtLogin: false };
+				}
+				if (version < 9) {
+					// 新增开机免打扰启动（直接进托盘）。默认 false，保持原有
+					// "开机弹窗"行为不变。
+					next = { ...next, launchHidden: false };
 				}
 
 				return next as PrefsState;

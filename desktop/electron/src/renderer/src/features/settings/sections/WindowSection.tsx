@@ -31,24 +31,36 @@ function ToggleRow({
 	label,
 	checked,
 	onChange,
+	disabled = false,
 }: {
 	label: string;
 	checked: boolean;
 	onChange: (v: boolean) => void;
+	disabled?: boolean;
 }) {
 	return (
-		<div className="flex items-center justify-between border-b border-(--line-soft) px-5 py-3">
+		<div
+			className={
+				"flex items-center justify-between border-b border-(--line-soft) px-5 py-3" +
+				(disabled ? " opacity-40" : "")
+			}
+		>
 			<span className="text-[13px] text-(--text-2)">{label}</span>
 			<div
 				className={
-					"relative h-5 w-8.5 shrink-0 cursor-pointer rounded-full transition-colors " +
+					"relative h-5 w-8.5 shrink-0 rounded-full transition-colors " +
+					(disabled ? "cursor-not-allowed " : "cursor-pointer ") +
 					(checked ? "bg-(--text)" : "bg-(--line)")
 				}
 				role="switch"
 				aria-checked={checked}
-				tabIndex={0}
-				onClick={() => onChange(!checked)}
+				aria-disabled={disabled}
+				tabIndex={disabled ? -1 : 0}
+				onClick={() => {
+					if (!disabled) onChange(!checked);
+				}}
 				onKeyDown={(e) => {
+					if (disabled) return;
 					if (e.key === "Enter" || e.key === " ") {
 						e.preventDefault();
 						onChange(!checked);
@@ -72,6 +84,8 @@ export function WindowSection() {
 	const setCloseBehavior = usePrefsStore((s) => s.setCloseBehavior);
 	const launchAtLogin = usePrefsStore((s) => s.launchAtLogin);
 	const setLaunchAtLogin = usePrefsStore((s) => s.setLaunchAtLogin);
+	const launchHidden = usePrefsStore((s) => s.launchHidden);
+	const setLaunchHidden = usePrefsStore((s) => s.setLaunchHidden);
 
 	return (
 		<Section
@@ -88,9 +102,17 @@ export function WindowSection() {
 					checked={launchAtLogin}
 					onChange={setLaunchAtLogin}
 				/>
+				<ToggleRow
+					label={t("settings_launch_hidden")}
+					checked={launchHidden}
+					onChange={setLaunchHidden}
+					disabled={!launchAtLogin}
+				/>
 			</div>
 			<div className="px-5 pt-3 pb-1 text-[11.5px] leading-relaxed text-(--text-4)">
 				{t("settings_launch_at_login_desc")}
+				<br />
+				{t("settings_launch_hidden_desc")}
 			</div>
 			<div className="flex flex-col">
 				<div className="border-b border-(--line-soft) px-5 py-2.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-(--text-3)">

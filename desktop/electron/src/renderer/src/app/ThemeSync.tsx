@@ -112,6 +112,7 @@ export function ThemeSync() {
 	const fontMono = usePrefsStore((s) => s.fontMono);
 	const closeBehavior = usePrefsStore((s) => s.closeBehavior);
 	const launchAtLogin = usePrefsStore((s) => s.launchAtLogin);
+	const launchHidden = usePrefsStore((s) => s.launchHidden);
 
 	// 主题 —— dark / light
 	useEffect(() => {
@@ -224,10 +225,10 @@ export function ThemeSync() {
 	useEffect(() => {
 		const bridge = window.desktop;
 		if (!bridge?.app?.setLaunchAtLogin) return;
-		bridge.app.setLaunchAtLogin(launchAtLogin).catch((err) => {
+		bridge.app.setLaunchAtLogin(launchAtLogin, launchHidden).catch((err) => {
 			console.warn("[ThemeSync] failed to push launchAtLogin", err);
 		});
-	}, [launchAtLogin]);
+	}, [launchAtLogin, launchHidden]);
 
 	return null;
 }
