@@ -491,9 +491,9 @@ export struct OnboardingOverlay {
           .color(this.zc.lineSoft)
           .margin({ top: ZSpacing.sm, bottom: ZSpacing.xs });
 
-        this.securityPoint('数据仅保存在本设备，零知识端到端');
+        this.securityPoint('数据仅保存在本设备');
         this.securityPoint('Argon2id 派生主密码 → XChaCha20-Poly1305 加密');
-        this.securityPoint('主密码不会离开设备，丢失无法恢复');
+        this.securityPoint('主密码一旦丢失将无法恢复');
       }
       .alignItems(HorizontalAlign.Start)
       .width('100%');

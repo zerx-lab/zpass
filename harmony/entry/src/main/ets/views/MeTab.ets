@@ -1,56 +1,39 @@
-// MeTab —— “我的”页：用户卡 / 空间 / 应用保护 / 同步 / 外观与交互 / 数据管理 / 关于
+// MeTab —— “我的”页：用户卡 + 分组入口（不再平铺所有设置项）
 //
-// 分组策略对齐主流密码管理器：
-//   - 用户卡：SpaceAvatar + 当前空间名
+// 分组策略对齐主流密码管理器：主页只放分组入口，具体设置项在各自子页：
+//   - 用户卡：SpaceAvatar + 当前空间名（点击进空间管理）
 //   - 空间：当前空间展示行
-//   - 应用保护：改主密码 / 生物解锁 / 后台模糊 / 防窥 / 切后台锁定 / 立即锁定
-//   - 同步：局域网同步 / 接受设备连接
-//   - 外观与交互：主题 / 语言 / 智感握姿
-//   - 数据管理：导入 / 导出 / 清空 / 重置
+//   - 设置：应用保护（pages/MeProtection）/ 外观与交互（pages/MeAppearance）
+//          / 数据管理（pages/MeData）
+//   - 同步：局域网同步（pages/Sync）/ 接受设备连接（pages/SyncHost）
+//   - 关于：版本（纯展示）
 //
-// 主密码修改：弹出全屏 sheet，三段输入（当前 / 新 / 确认），提交走
-// vaultStore.changeMasterPassword(old, new)。
+// 空间管理浮层（列表 / 新建 / 重命名 / 删除）仍留在本页；其余业务逻辑
+// 已随设置项迁入对应子页。
 //
 // autoLock / clipboardClear 等高级设置 phone 端也未实现，本端同步不做。
 
 import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType, alpha1f } from '../theme/Tokens';
 import { vaultStore, type VaultStore } from '../state/VaultStore';
-import { motionStore, MotionStore } from '../state/MotionStore';
 import { promptAction, router } from '@kit.ArkUI';
-import { exportVaultToFile, importVaultFromFile } from '../lib/Transfer';
-import { common } from '@kit.AbilityKit';
 import { safeAreaState, SafeAreaState } from '../state/SafeArea';
-import { themeStore, type ThemeMode } from '../state/ThemeStore';
 import { SpaceAvatar } from '../components/SpaceAvatar';
-import type { ItemPayload } from '../lib/VaultService';
-import { securityStore, SecurityStore } from '../state/SecurityStore';
 import { sortSpaces, type Space } from '../lib/Spaces';
-
-/** 与 AppScope/app.json5 的 versionName 保持一致 —— 跨 release 时手动同步 */
-const APP_VERSION: string = '1.0.0';
+import { appVersionName } from '../lib/AppInfo';
+import {
+  SettingsErrorBox,
+  SettingsRowNav,
+  SettingsSectionHeader,
+} from '../components/SettingsRows';
 
 @ComponentV2
 export struct MeTab {
   @Local safeArea: SafeAreaState = safeAreaState;
   @Local zc: ZColorsClass = ZColors;
   @Local store: VaultStore = vaultStore;
-  @Local ms: MotionStore = motionStore;
-  @Local sec: SecurityStore = securityStore;
 
-  /** 启用信任设备时的密码确认浮层 */
-  @Local showConfirmPw: boolean = false;
-  @Local confirmPw: string = '';
-  @Local confirmPwError: string = '';
-
-  /** 改主密码浮层 */
-  @Local showChangePw: boolean = false;
-  @Local cpOld: string = '';
-  @Local cpNew: string = '';
-  @Local cpConfirm: string = '';
-  @Local cpError: string = '';
-
-  /** 主题选择浮层 */
-  @Local showThemePicker: boolean = false;
+  /** 真实安装包版本号（bundleManager 读回，权威来源 AppScope/app.json5） */
+  @Local appVersion: string = appVersionName();
 
   /** 空间管理浮层 */
   @Local showSpacesModal: boolean = false;
@@ -60,12 +43,6 @@ export struct MeTab {
   @Local spacePromptTargetId: string = '';
   @Local spacePromptError: string = '';
 
-  aboutToAppear(): void {
-    this.store.refreshTrustedState().catch(() => {
-      // 静默吞 —— 探测失败时按"不支持"显示
-    });
-  }
-
   @Computed
   get activeSpaceName(): string {
     const id = this.store.activeSpaceId;
@@ -73,85 +50,13 @@ export struct MeTab {
     return this.store.spaces.find((s) => s.id === id)?.name ?? '—';
   }
 
-  @Computed
-  get themeLabel(): string {
-    if (themeStore.mode === 'system') {
-      return `跟随系统 · ${themeStore.effective === 'dark' ? '深色' : '浅色'}`;
-    }
-    return themeStore.mode === 'dark' ? '深色' : '浅色';
-  }
-
-  @Computed
-  get trustedValueLabel(): string {
-    if (!this.store.trustedSupported) return '不支持';
-    return this.store.trustedEnabled ? '已启用' : '未启用';
-  }
-
-  private async onLock(): Promise<void> {
-    const r = await promptAction.showDialog({
-      title: '锁定 ZPass',
-      message: '确认要锁定保险库吗？',
-      buttons: [
-        { text: '取消', color: this.zc.text2 },
-        { text: '锁定', color: this.zc.danger },
-      ],
-    });
-    if (r.index === 1) {
-      this.store.lock();
-      promptAction.showToast({ message: '已锁定', duration: 1200 });
-    }
-  }
-
-  private onChangePwOpen(): void {
-    if (!this.store.status.unlocked) {
-      promptAction.showToast({ message: '请先解锁后再修改', duration: 1500 });
-      return;
-    }
-    this.cpOld = '';
-    this.cpNew = '';
-    this.cpConfirm = '';
-    this.cpError = '';
-    this.showChangePw = true;
-  }
-
-  private onChangePwCancel(): void {
-    if (this.store.busy) return;
-    this.cpOld = '';
-    this.cpNew = '';
-    this.cpConfirm = '';
-    this.cpError = '';
-    this.showChangePw = false;
-  }
-
-  private async onChangePwSubmit(): Promise<void> {
-    this.cpError = '';
-    if (!this.cpOld) {
-      this.cpError = '请输入当前主密码';
-      return;
-    }
-    if (this.cpNew.length < 8) {
-      this.cpError = '新密码至少 8 位';
-      return;
-    }
-    if (this.cpNew !== this.cpConfirm) {
-      this.cpError = '两次输入不一致';
-      return;
-    }
+  /** 进入分组子页；未注册的 url 会抛 100002，吞掉并提示 */
+  private async openPage(url: string): Promise<void> {
     try {
-      await this.store.changeMasterPassword(this.cpOld, this.cpNew);
-      this.cpOld = '';
-      this.cpNew = '';
-      this.cpConfirm = '';
-      this.showChangePw = false;
-      promptAction.showToast({ message: '主密码已更新', duration: 1500 });
-    } catch (e) {
-      this.cpError = (e as Error).message;
+      await router.pushUrl({ url });
+    } catch (_e) {
+      promptAction.showToast({ message: '页面暂不可用', duration: 1500 });
     }
-  }
-
-  private onPickTheme(mode: ThemeMode): void {
-    themeStore.setMode(mode);
-    this.showThemePicker = false;
   }
 
   /* ---- 空间管理 ---- */
@@ -261,169 +166,6 @@ export struct MeTab {
     }
   }
 
-  private async onToggleTrustedDevice(target: boolean): Promise<void> {
-    if (target) {
-      if (!this.store.status.unlocked) {
-        promptAction.showToast({ message: '请先解锁后再启用', duration: 1500 });
-        return;
-      }
-      this.confirmPw = '';
-      this.confirmPwError = '';
-      this.showConfirmPw = true;
-      return;
-    }
-    const r = await promptAction.showDialog({
-      title: '关闭设备解锁',
-      message: '下次启动 ZPass 需要重新输入主密码。',
-      buttons: [
-        { text: '取消', color: this.zc.text2 },
-        { text: '关闭', color: this.zc.danger },
-      ],
-    });
-    if (r.index !== 1) return;
-    try {
-      await this.store.disableTrustedDevice();
-      promptAction.showToast({ message: '已关闭生物解锁', duration: 1200 });
-    } catch (e) {
-      promptAction.showToast({ message: (e as Error).message, duration: 1800 });
-    }
-  }
-
-  private async onConfirmEnable(): Promise<void> {
-    if (!this.confirmPw) {
-      this.confirmPwError = '请输入主密码';
-      return;
-    }
-    this.confirmPwError = '';
-    try {
-      await this.store.enableTrustedDevice(this.confirmPw);
-      this.confirmPw = '';
-      this.showConfirmPw = false;
-      promptAction.showToast({ message: '已启用生物解锁', duration: 1500 });
-    } catch (e) {
-      this.confirmPwError = (e as Error).message;
-      this.confirmPw = '';
-    }
-  }
-
-  private onCancelEnable(): void {
-    this.confirmPw = '';
-    this.confirmPwError = '';
-    this.showConfirmPw = false;
-  }
-
-  private async onReset(): Promise<void> {
-    const r = await promptAction.showDialog({
-      title: '重置 ZPass',
-      message:
-        '将永久删除主密码与所有条目，应用回到初始状态。此操作不可撤销。',
-      buttons: [
-        { text: '取消', color: this.zc.text2 },
-        { text: '重置', color: this.zc.danger },
-      ],
-    });
-    if (r.index === 1) {
-      await this.store.reset();
-      promptAction.showToast({ message: 'ZPass 已重置', duration: 1500 });
-    }
-  }
-
-  private async onClearAll(): Promise<void> {
-    if (this.store.items.length === 0) {
-      promptAction.showToast({ message: '保险库已为空', duration: 1500 });
-      return;
-    }
-    const r = await promptAction.showDialog({
-      title: '清空保险库',
-      message: `将永久删除全部 ${this.store.items.length} 个条目，主密码与加密元数据保留，此操作不可撤销。建议先导出备份。`,
-      buttons: [
-        { text: '取消', color: this.zc.text2 },
-        { text: '清空', color: this.zc.danger },
-      ],
-    });
-    if (r.index !== 1) return;
-    try {
-      // clearAll 是 sharedNeeds — 当前通过逐条 deleteItem 实现
-      const ids = (this.store.items as ItemPayload[]).map((it) => it.id);
-      for (const id of ids) {
-        await this.store.deleteItem(id);
-      }
-      promptAction.showToast({ message: '已清空所有条目', duration: 1500 });
-    } catch (e) {
-      promptAction.showToast({ message: (e as Error).message, duration: 1800 });
-    }
-  }
-
-  private async onSync(): Promise<void> {
-    try {
-      await router.pushUrl({ url: 'pages/Sync' });
-    } catch (_e) {
-      promptAction.showToast({ message: '同步功能未启用', duration: 1500 });
-    }
-  }
-
-  private async onSyncHost(): Promise<void> {
-    try {
-      await router.pushUrl({ url: 'pages/SyncHost' });
-    } catch (_e) {
-      promptAction.showToast({ message: '同步服务端未启用', duration: 1500 });
-    }
-  }
-
-  private async onExport(): Promise<void> {
-    if (this.store.items.length === 0) {
-      promptAction.showToast({ message: '保险库为空，暂无可导出的条目', duration: 1800 });
-      return;
-    }
-    const r = await promptAction.showDialog({
-      title: '导出明文备份',
-      message: `备份文件将包含全部 ${this.store.items.length} 个条目的明文内容（含密码、密钥、TOTP 等）。请妥善保管，切勿上传到不可信的位置。`,
-      buttons: [
-        { text: '取消', color: this.zc.text2 },
-        { text: '继续导出', color: this.zc.danger },
-      ],
-    });
-    if (r.index !== 1) return;
-    try {
-      const ctx = getContext(this) as common.Context;
-      const uri = await exportVaultToFile(ctx);
-      promptAction.showToast({ message: `已导出到 ${uri}`, duration: 2500 });
-    } catch (e) {
-      promptAction.showToast({ message: (e as Error).message, duration: 1800 });
-    }
-  }
-
-  private async onImport(): Promise<void> {
-    const confirm = await promptAction.showDialog({
-      title: '导入数据',
-      message: '导入将把文件中的条目合并到当前保险库，重复条目可能被覆盖。确认继续？',
-      buttons: [
-        { text: '取消', color: this.zc.text2 },
-        { text: '导入', color: this.zc.danger },
-      ],
-    });
-    if (confirm.index !== 1) return;
-    try {
-      const ctx = getContext(this) as common.Context;
-      const n = await importVaultFromFile(ctx);
-      await this.store.refreshItems();
-      const r = await promptAction.showDialog({
-        title: '导入完成',
-        message: `已成功导入 ${n} 个条目到当前保险库。`,
-        buttons: [
-          { text: '确定', color: this.zc.text },
-        ],
-      });
-      if (r.index === 0) {
-        // 确定关闭
-      }
-    } catch (e) {
-      const msg = (e as Error).message;
-      if (msg === '未选择文件') return;
-      promptAction.showToast({ message: msg, duration: 1800 });
-    }
-  }
-
   build() {
     Stack() {
       Column({ space: ZSpacing.sm }) {
@@ -451,65 +193,40 @@ export struct MeTab {
             this.userCard();
 
             // 空间
-            this.sectionHeader('空间');
+            SettingsSectionHeader({ label: '空间' });
             Column() {
-              this.rowValue(
-                '当前空间',
-                this.activeSpaceName,
-                $r('app.media.ic_grid'),
-                this.zc.bgElev,
-                this.zc.text,
-                () => this.openSpaces(),
-              );
+              SettingsRowNav({
+                label: '当前空间',
+                value: this.activeSpaceName,
+                icon: $r('app.media.ic_grid'),
+                onTap: () => this.openSpaces(),
+              });
             }
             .width('100%')
             .backgroundColor(this.zc.bgElev)
             .borderRadius(ZRadius.xl)
             .clip(true);
 
-            // 应用保护
-            this.sectionHeader('应用保护');
+            // 设置分组入口
+            SettingsSectionHeader({ label: '设置' });
             Column() {
-              this.rowAction(
-                '修改主密码',
-                $r('app.media.ic_lock'),
-                this.zc.bgElev,
-                this.zc.text,
-                () => this.onChangePwOpen(),
-              );
+              SettingsRowNav({
+                label: '应用保护',
+                icon: $r('app.media.ic_lock_shield'),
+                onTap: () => this.openPage('pages/MeProtection'),
+              });
               this.divider();
-              this.rowTrustedSwitch();
+              SettingsRowNav({
+                label: '外观与交互',
+                icon: $r('app.media.ic_settings'),
+                onTap: () => this.openPage('pages/MeAppearance'),
+              });
               this.divider();
-              this.rowToggle(
-                '后台模糊保护',
-                '切到后台时遮挡界面，防多任务卡片泄露',
-                $r('app.media.ic_grid'),
-                () => this.sec.bgBlurEnabled,
-                () => this.sec.setBgBlurEnabled(!this.sec.bgBlurEnabled),
-              );
-              this.divider();
-              this.rowToggle(
-                '防窥保护',
-                '开启隐私模式，阻止截屏与录屏',
-                $r('app.media.ic_lock_shield'),
-                () => this.sec.antiPeepEnabled,
-                () => this.sec.setAntiPeepEnabled(!this.sec.antiPeepEnabled),
-              );
-              this.divider();
-              this.rowToggle(
-                '切到后台锁定',
-                '离开 ZPass 即刻锁定保险库',
-                $r('app.media.ic_lock'),
-                () => this.sec.lockOnBackground,
-                () => this.sec.setLockOnBackground(!this.sec.lockOnBackground),
-              );
-              this.divider();
-              this.rowDanger(
-                '立即锁定',
-                $r('app.media.ic_lock_shield'),
-                this.zc.danger,
-                () => this.onLock(),
-              );
+              SettingsRowNav({
+                label: '数据管理',
+                icon: $r('app.media.ic_download'),
+                onTap: () => this.openPage('pages/MeData'),
+              });
             }
             .width('100%')
             .backgroundColor(this.zc.bgElev)
@@ -517,94 +234,20 @@ export struct MeTab {
             .clip(true);
 
             // 同步
-            this.sectionHeader('同步');
+            SettingsSectionHeader({ label: '同步' });
             Column() {
-              this.rowValue(
-                '局域网同步',
-                '连接桌面端',
-                $r('app.media.ic_antenna'),
-                this.zc.bgElev,
-                this.zc.text,
-                () => this.onSync(),
-              );
+              SettingsRowNav({
+                label: '局域网同步',
+                value: '连接桌面端',
+                icon: $r('app.media.ic_antenna'),
+                onTap: () => this.openPage('pages/Sync'),
+              });
               this.divider();
-              this.rowAction(
-                '接受设备连接',
-                $r('app.media.ic_users'),
-                this.zc.bgElev,
-                this.zc.text,
-                () => this.onSyncHost(),
-              );
-            }
-            .width('100%')
-            .backgroundColor(this.zc.bgElev)
-            .borderRadius(ZRadius.xl)
-            .clip(true);
-
-            // 外观与交互
-            this.sectionHeader('外观与交互');
-            Column() {
-              this.rowValue(
-                '主题',
-                this.themeLabel,
-                $r('app.media.ic_settings'),
-                this.zc.bgElev,
-                this.zc.text,
-                () => { this.showThemePicker = true; },
-              );
-              this.divider();
-              this.rowValue(
-                '语言',
-                '中文',
-                $r('app.media.ic_globe'),
-                this.zc.bgElev,
-                this.zc.text,
-                () => {
-                  // 当前仅 zh，与 phone 一致；占位入口不可点
-                },
-              );
-              this.divider();
-              this.rowGripSwitch();
-            }
-            .width('100%')
-            .backgroundColor(this.zc.bgElev)
-            .borderRadius(ZRadius.xl)
-            .clip(true);
-
-            // 数据管理
-            this.sectionHeader('数据管理');
-            Column() {
-              this.rowValue(
-                '导入数据',
-                'ZPass JSON',
-                $r('app.media.ic_download'),
-                this.zc.bgElev,
-                this.zc.text,
-                () => this.onImport(),
-              );
-              this.divider();
-              this.rowValue(
-                '导出明文备份',
-                `${this.store.items.length} 项`,
-                $r('app.media.ic_upload'),
-                this.zc.bgElev,
-                this.zc.text,
-                () => this.onExport(),
-              );
-              this.divider();
-              this.rowDangerWarn(
-                '清空所有条目',
-                $r('app.media.ic_trash'),
-                this.zc.warn,
-                () => this.onClearAll(),
-              );
-              this.divider();
-              this.rowDanger(
-                '重置 ZPass',
-                $r('app.media.ic_trash'),
-                this.zc.danger,
-                () => this.onReset(),
-              );
+              SettingsRowNav({
+                label: '接受设备连接',
+                icon: $r('app.media.ic_users'),
+                onTap: () => this.openPage('pages/SyncHost'),
+              });
             }
             .width('100%')
             .backgroundColor(this.zc.bgElev)
@@ -612,30 +255,19 @@ export struct MeTab {
             .clip(true);
 
             // 关于（版本与许可）
-            this.sectionHeader('关于');
+            SettingsSectionHeader({ label: '关于' });
             Column() {
-              this.rowValue(
-                '版本',
-                APP_VERSION,
-                $r('app.media.ic_info'),
-                this.zc.bgElev,
-                this.zc.text,
-                () => {
-                  // 占位入口，phone 端也不可点
-                },
-              );
+              SettingsRowNav({
+                label: '版本',
+                value: this.appVersion,
+                icon: $r('app.media.ic_info'),
+                navigable: false,
+              });
             }
             .width('100%')
             .backgroundColor(this.zc.bgElev)
             .borderRadius(ZRadius.xl)
             .clip(true);
-
-            Text('零知识本地密码管理器 · 数据永远只在你的设备上加密存储')
-              .fontSize(ZType.captionSize)
-              .fontColor(this.zc.text3)
-              .textAlign(TextAlign.Center)
-              .width('100%')
-              .padding({ top: ZSpacing.sm, left: ZSpacing.lg, right: ZSpacing.lg });
 
             Row().height(80).width('100%');
           }
@@ -657,15 +289,6 @@ export struct MeTab {
       .align(Alignment.TopStart)
       .backgroundColor(this.zc.bg);
 
-      if (this.showConfirmPw) {
-        this.confirmPwOverlay();
-      }
-      if (this.showChangePw) {
-        this.changePwOverlay();
-      }
-      if (this.showThemePicker) {
-        this.themePickerOverlay();
-      }
       if (this.showSpacesModal) {
         this.spacesModalOverlay();
       }
@@ -696,7 +319,7 @@ export struct MeTab {
           .fontColor(this.zc.text)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis });
-        Text(`${this.store.items.length} 条加密条目 · 零知识`)
+        Text(`${this.store.items.length} 条加密条目`)
           .fontSize(ZType.footnoteSize)
           .fontColor(this.zc.text3);
       }
@@ -715,650 +338,8 @@ export struct MeTab {
   }
 
   @Builder
-  sectionHeader(label: string) {
-    Text(label)
-      .fontSize(ZType.footnoteSize)
-      .fontWeight(FontWeight.Medium)
-      .fontColor(this.zc.text3)
-      .padding({ left: ZSpacing.sm, top: ZSpacing.sm, bottom: 6 });
-  }
-
-  /**
-   * rowAction: 左图标（可选 tint 背景）+ 标签 + 右箭头
-   * iconBg: icon 容器背景色（用于普通行传 zc.bgElev，危险行传 alpha1f(danger) 等）
-   * iconColor: icon 填色
-   */
-  @Builder
-  rowAction(
-    label: string,
-    icon: Resource,
-    iconBg: string,
-    iconColor: string,
-    onTap: () => void,
-  ) {
-    Row({ space: ZSpacing.md }) {
-      Row() {
-        Image(icon)
-          .width(18)
-          .height(18)
-          .fillColor(iconColor);
-      }
-      .width(32)
-      .height(32)
-      .borderRadius(ZRadius.md)
-      .backgroundColor(iconBg)
-      .justifyContent(FlexAlign.Center)
-      .alignItems(VerticalAlign.Center);
-
-      Text(label)
-        .fontSize(ZType.bodySize)
-        .fontColor(this.zc.text)
-        .layoutWeight(1);
-      Image($r('app.media.ic_chevron_right'))
-        .width(16)
-        .height(16)
-        .fillColor(this.zc.text4);
-    }
-    .width('100%')
-    .padding({
-      left: ZSpacing.lg,
-      right: ZSpacing.lg,
-      top: ZSpacing.md,
-      bottom: ZSpacing.md,
-    })
-    .onClick(() => onTap());
-  }
-
-  /**
-   * rowValue: 左图标 + 标签 + 右值文字 + 右箭头
-   */
-  @Builder
-  rowValue(
-    label: string,
-    value: string,
-    icon: Resource,
-    iconBg: string,
-    iconColor: string,
-    onTap: () => void,
-  ) {
-    Row({ space: ZSpacing.md }) {
-      Row() {
-        Image(icon)
-          .width(18)
-          .height(18)
-          .fillColor(iconColor);
-      }
-      .width(32)
-      .height(32)
-      .borderRadius(ZRadius.md)
-      .backgroundColor(iconBg)
-      .justifyContent(FlexAlign.Center)
-      .alignItems(VerticalAlign.Center);
-
-      Text(label)
-        .fontSize(ZType.bodySize)
-        .fontColor(this.zc.text)
-        .layoutWeight(1);
-      Text(value)
-        .fontSize(ZType.subheadSize)
-        .fontColor(this.zc.text3)
-        .margin({ right: ZSpacing.xs });
-      Image($r('app.media.ic_chevron_right'))
-        .width(16)
-        .height(16)
-        .fillColor(this.zc.text4);
-    }
-    .width('100%')
-    .padding({
-      left: ZSpacing.lg,
-      right: ZSpacing.lg,
-      top: ZSpacing.md,
-      bottom: ZSpacing.md,
-    })
-    .onClick(() => onTap());
-  }
-
-  /**
-   * rowToggle: 左图标 + 标题/副标题 + 右侧开关（仿 rowGripSwitch，参数化）
-   */
-  @Builder
-  rowToggle(
-    title: string,
-    subtitle: string,
-    icon: Resource,
-    value: () => boolean,
-    onTap: () => void,
-  ) {
-    Row({ space: ZSpacing.md }) {
-      Row() {
-        Image(icon)
-          .width(18)
-          .height(18)
-          .fillColor(this.zc.text);
-      }
-      .width(32)
-      .height(32)
-      .borderRadius(ZRadius.md)
-      .backgroundColor(this.zc.bgElev)
-      .justifyContent(FlexAlign.Center)
-      .alignItems(VerticalAlign.Center);
-
-      Column({ space: 2 }) {
-        Text(title)
-          .fontSize(ZType.bodySize)
-          .fontColor(this.zc.text);
-        Text(subtitle)
-          .fontSize(ZType.captionSize)
-          .fontColor(this.zc.text3)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis });
-      }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1);
-
-      Stack({ alignContent: Alignment.Start }) {
-        Row()
-          .width(50)
-          .height(30)
-          .backgroundColor(value() ? this.zc.accent : this.zc.text3)
-          .borderRadius(15);
-        Row()
-          .width(26)
-          .height(26)
-          .backgroundColor('#FFFFFF')
-          .borderRadius(13)
-          .margin({ left: value() ? 22 : 2 });
-      }
-      .width(50)
-      .height(30);
-    }
-    .width('100%')
-    .padding({
-      left: ZSpacing.lg,
-      right: ZSpacing.lg,
-      top: ZSpacing.md,
-      bottom: ZSpacing.md,
-    })
-    .onClick(() => onTap());
-  }
-
-  /**
-   * rowDanger: 标签用 danger 色，图标有 danger 色 tint 背景
-   */
-  @Builder
-  rowDanger(
-    label: string,
-    icon: Resource,
-    iconColor: string,
-    onTap: () => void,
-  ) {
-    Row({ space: ZSpacing.md }) {
-      Row() {
-        Image(icon)
-          .width(18)
-          .height(18)
-          .fillColor(iconColor);
-      }
-      .width(32)
-      .height(32)
-      .borderRadius(ZRadius.md)
-      .backgroundColor(alpha1f(iconColor))
-      .justifyContent(FlexAlign.Center)
-      .alignItems(VerticalAlign.Center);
-
-      Text(label)
-        .fontSize(ZType.bodySize)
-        .fontColor(this.zc.danger)
-        .layoutWeight(1);
-    }
-    .width('100%')
-    .padding({
-      left: ZSpacing.lg,
-      right: ZSpacing.lg,
-      top: ZSpacing.md,
-      bottom: ZSpacing.md,
-    })
-    .onClick(() => onTap());
-  }
-
-  /**
-   * rowDangerWarn: warn 色图标背景，danger 色标签（清空条目专用）
-   */
-  @Builder
-  rowDangerWarn(
-    label: string,
-    icon: Resource,
-    iconColor: string,
-    onTap: () => void,
-  ) {
-    Row({ space: ZSpacing.md }) {
-      Row() {
-        Image(icon)
-          .width(18)
-          .height(18)
-          .fillColor(iconColor);
-      }
-      .width(32)
-      .height(32)
-      .borderRadius(ZRadius.md)
-      .backgroundColor(alpha1f(iconColor))
-      .justifyContent(FlexAlign.Center)
-      .alignItems(VerticalAlign.Center);
-
-      Text(label)
-        .fontSize(ZType.bodySize)
-        .fontColor(this.zc.danger)
-        .layoutWeight(1);
-    }
-    .width('100%')
-    .padding({
-      left: ZSpacing.lg,
-      right: ZSpacing.lg,
-      top: ZSpacing.md,
-      bottom: ZSpacing.md,
-    })
-    .onClick(() => onTap());
-  }
-
-  @Builder
-  rowTrustedSwitch() {
-    Row({ space: ZSpacing.md }) {
-      Row() {
-        Image($r('app.media.ic_face'))
-          .width(18)
-          .height(18)
-          .fillColor(this.zc.text);
-      }
-      .width(32)
-      .height(32)
-      .borderRadius(ZRadius.md)
-      .backgroundColor(this.zc.bgElev)
-      .justifyContent(FlexAlign.Center)
-      .alignItems(VerticalAlign.Center);
-
-      Text('此设备自动解锁')
-        .fontSize(ZType.bodySize)
-        .fontColor(this.store.trustedSupported ? this.zc.text : this.zc.text3)
-        .layoutWeight(1);
-
-      Text(this.trustedValueLabel)
-        .fontSize(ZType.subheadSize)
-        .fontColor(this.zc.text3)
-        .margin({ right: ZSpacing.xs });
-
-      Stack({ alignContent: Alignment.Start }) {
-        Row()
-          .width(50)
-          .height(30)
-          .backgroundColor(this.store.trustedEnabled ? this.zc.accent : this.zc.text3)
-          .borderRadius(15);
-        Row()
-          .width(26)
-          .height(26)
-          .backgroundColor('#FFFFFF')
-          .borderRadius(13)
-          .margin({ left: this.store.trustedEnabled ? 22 : 2 });
-      }
-      .width(50)
-      .height(30)
-      .opacity((!this.store.trustedSupported || this.store.busy) ? 0.4 : 1);
-    }
-    .width('100%')
-    .padding({
-      left: ZSpacing.lg,
-      right: ZSpacing.lg,
-      top: ZSpacing.md,
-      bottom: ZSpacing.md,
-    })
-    .opacity(this.store.trustedSupported ? 1.0 : 0.4)
-    .onClick(() => {
-      if (!this.store.trustedSupported) {
-        promptAction.showToast({ message: '当前设备不支持生物解锁', duration: 1800 });
-        return;
-      }
-      if (this.store.busy) return;
-      this.onToggleTrustedDevice(!this.store.trustedEnabled);
-    });
-  }
-
-  @Builder
-  rowGripSwitch() {
-    Row({ space: ZSpacing.md }) {
-      Row() {
-        Image($r('app.media.ic_settings'))
-          .width(18)
-          .height(18)
-          .fillColor(this.zc.text);
-      }
-      .width(32)
-      .height(32)
-      .borderRadius(ZRadius.md)
-      .backgroundColor(this.zc.bgElev)
-      .justifyContent(FlexAlign.Center)
-      .alignItems(VerticalAlign.Center);
-
-      Column({ space: 2 }) {
-        Text('智感握姿')
-          .fontSize(ZType.bodySize)
-          .fontColor(this.zc.text);
-        Text('自动识别握持手，首页添加按钮随手移位')
-          .fontSize(ZType.captionSize)
-          .fontColor(this.zc.text3)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis });
-      }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1);
-
-      Stack({ alignContent: Alignment.Start }) {
-        Row()
-          .width(50)
-          .height(30)
-          .backgroundColor(this.ms.gripEnabled ? this.zc.accent : this.zc.text3)
-          .borderRadius(15);
-        Row()
-          .width(26)
-          .height(26)
-          .backgroundColor('#FFFFFF')
-          .borderRadius(13)
-          .margin({ left: this.ms.gripEnabled ? 22 : 2 });
-      }
-      .width(50)
-      .height(30);
-    }
-    .width('100%')
-    .padding({
-      left: ZSpacing.lg,
-      right: ZSpacing.lg,
-      top: ZSpacing.md,
-      bottom: ZSpacing.md,
-    })
-    .onClick(() => {
-      motionStore.setGripEnabled(!motionStore.gripEnabled);
-    });
-  }
-
-  @Builder
   divider() {
     Divider().strokeWidth(0.5).color(this.zc.line).margin({ left: ZSpacing.lg, right: ZSpacing.lg });
-  }
-
-  /** 错误框：danger+1f 背景 + error icon + 文本 */
-  @Builder
-  errorBox(errorText: string) {
-    Row({ space: ZSpacing.xs }) {
-      Image($r('app.media.ic_error'))
-        .width(14)
-        .height(14)
-        .fillColor(this.zc.danger);
-      Text(errorText)
-        .fontSize(ZType.footnoteSize)
-        .fontColor(this.zc.danger)
-        .layoutWeight(1);
-    }
-    .width('100%')
-    .padding({ left: ZSpacing.md, right: ZSpacing.md, top: ZSpacing.sm, bottom: ZSpacing.sm })
-    .backgroundColor(alpha1f(this.zc.danger))
-    .borderRadius(ZRadius.md);
-  }
-
-  /** 启用信任设备时的主密码确认浮层 */
-  @Builder
-  confirmPwOverlay() {
-    Column() {
-      Column({ space: ZSpacing.md }) {
-        Text('启用设备解锁')
-          .fontSize(ZType.title2Size)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.zc.text);
-        Text('启用后此设备可用生物识别 / 设备凭据解锁。请输入主密码以确认。')
-          .fontSize(ZType.footnoteSize)
-          .fontColor(this.zc.text3);
-
-        TextInput({ placeholder: '主密码', text: this.confirmPw })
-          .type(InputType.Password)
-          .placeholderColor(this.zc.text3)
-          .placeholderFont({ size: ZType.bodySize })
-          .fontColor(this.zc.text)
-          .fontSize(ZType.bodySize)
-          .backgroundColor(this.zc.bg)
-          .borderRadius(ZRadius.lg)
-          .padding({ left: ZSpacing.md, right: ZSpacing.md })
-          .height(48)
-          .width('100%')
-          .enabled(!this.store.busy)
-          .onChange((v: string) => {
-            this.confirmPw = v;
-            this.confirmPwError = '';
-          })
-          .onSubmit(() => this.onConfirmEnable());
-
-        if (this.confirmPwError) {
-          this.errorBox(this.confirmPwError);
-        }
-
-        Row({ space: ZSpacing.md }) {
-          Text('取消')
-            .fontSize(ZType.bodySize)
-            .fontColor(this.zc.text2)
-            .backgroundColor(this.zc.bg)
-            .borderRadius(ZRadius.lg)
-            .height(44)
-            .layoutWeight(1)
-            .textAlign(TextAlign.Center)
-            .enabled(!this.store.busy)
-            .onClick(() => this.onCancelEnable());
-          Text(this.store.busy ? '启用中…' : '启用')
-            .fontSize(ZType.bodySize)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(this.zc.accentInk)
-            .backgroundColor(this.store.busy ? this.zc.text3 : this.zc.accent)
-            .borderRadius(ZRadius.lg)
-            .height(44)
-            .layoutWeight(1)
-            .textAlign(TextAlign.Center)
-            .enabled(!this.store.busy)
-            .onClick(() => this.onConfirmEnable());
-        }
-        .width('100%');
-      }
-      .width('100%')
-      .padding(ZSpacing.xl)
-      .backgroundColor(this.zc.bgElev)
-      .borderRadius(ZRadius.xl);
-    }
-    .width('100%')
-    .height('100%')
-    .padding({ left: ZSpacing.xl, right: ZSpacing.xl, bottom: this.safeArea.keyboard })
-    .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Center)
-    .backgroundColor(this.zc.overlay)
-    .onClick(() => {
-      // 点遮罩也可关闭（与 phone SheetModal backdrop 行为对齐）
-      if (!this.store.busy) this.onCancelEnable();
-    });
-  }
-
-  /** 改主密码浮层 */
-  @Builder
-  changePwOverlay() {
-    Column() {
-      Column({ space: ZSpacing.md }) {
-        Text('修改主密码')
-          .fontSize(ZType.title2Size)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.zc.text);
-        Text('主密码用于解锁与加密保险库，请妥善保管')
-          .fontSize(ZType.footnoteSize)
-          .fontColor(this.zc.text3);
-
-        Column({ space: 4 }) {
-          Text('当前主密码')
-            .fontSize(ZType.footnoteSize)
-            .fontColor(this.zc.text3)
-            .width('100%');
-          TextInput({ placeholder: '当前主密码', text: this.cpOld })
-            .type(InputType.Password)
-            .placeholderColor(this.zc.text3)
-            .placeholderFont({ size: ZType.bodySize })
-            .fontColor(this.zc.text)
-            .fontSize(ZType.bodySize)
-            .backgroundColor(this.zc.bg)
-            .borderRadius(ZRadius.lg)
-            .padding({ left: ZSpacing.md, right: ZSpacing.md })
-            .height(44)
-            .width('100%')
-            .enabled(!this.store.busy)
-            .onChange((v: string) => {
-              this.cpOld = v;
-              this.cpError = '';
-            });
-        }
-        .alignItems(HorizontalAlign.Start)
-        .width('100%');
-
-        Column({ space: 4 }) {
-          Text('新主密码')
-            .fontSize(ZType.footnoteSize)
-            .fontColor(this.zc.text3)
-            .width('100%');
-          TextInput({ placeholder: '新主密码（≥ 8 位）', text: this.cpNew })
-            .type(InputType.Password)
-            .placeholderColor(this.zc.text3)
-            .placeholderFont({ size: ZType.bodySize })
-            .fontColor(this.zc.text)
-            .fontSize(ZType.bodySize)
-            .backgroundColor(this.zc.bg)
-            .borderRadius(ZRadius.lg)
-            .padding({ left: ZSpacing.md, right: ZSpacing.md })
-            .height(44)
-            .width('100%')
-            .enabled(!this.store.busy)
-            .onChange((v: string) => {
-              this.cpNew = v;
-              this.cpError = '';
-            });
-          Text('至少 8 位，建议混合大小写 + 数字 + 符号')
-            .fontSize(ZType.footnoteSize)
-            .fontColor(this.zc.text3)
-            .width('100%');
-        }
-        .alignItems(HorizontalAlign.Start)
-        .width('100%');
-
-        Column({ space: 4 }) {
-          Text('确认新主密码')
-            .fontSize(ZType.footnoteSize)
-            .fontColor(this.zc.text3)
-            .width('100%');
-          TextInput({ placeholder: '再次输入新主密码', text: this.cpConfirm })
-            .type(InputType.Password)
-            .placeholderColor(this.zc.text3)
-            .placeholderFont({ size: ZType.bodySize })
-            .fontColor(this.zc.text)
-            .fontSize(ZType.bodySize)
-            .backgroundColor(this.zc.bg)
-            .borderRadius(ZRadius.lg)
-            .padding({ left: ZSpacing.md, right: ZSpacing.md })
-            .height(44)
-            .width('100%')
-            .enabled(!this.store.busy)
-            .onChange((v: string) => {
-              this.cpConfirm = v;
-              this.cpError = '';
-            })
-            .onSubmit(() => this.onChangePwSubmit());
-        }
-        .alignItems(HorizontalAlign.Start)
-        .width('100%');
-
-        if (this.cpError) {
-          this.errorBox(this.cpError);
-        }
-
-        Row({ space: ZSpacing.md }) {
-          Text('取消')
-            .fontSize(ZType.bodySize)
-            .fontColor(this.zc.text2)
-            .backgroundColor(this.zc.bg)
-            .borderRadius(ZRadius.lg)
-            .height(44)
-            .layoutWeight(1)
-            .textAlign(TextAlign.Center)
-            .enabled(!this.store.busy)
-            .onClick(() => this.onChangePwCancel());
-          Text(this.store.busy ? '更新中…' : '确认修改')
-            .fontSize(ZType.bodySize)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(this.zc.accentInk)
-            .backgroundColor(this.store.busy ? this.zc.text3 : this.zc.accent)
-            .borderRadius(ZRadius.lg)
-            .height(44)
-            .layoutWeight(1)
-            .textAlign(TextAlign.Center)
-            .enabled(!this.store.busy)
-            .onClick(() => this.onChangePwSubmit());
-        }
-        .width('100%');
-      }
-      .width('100%')
-      .padding(ZSpacing.xl)
-      .backgroundColor(this.zc.bgElev)
-      .borderRadius(ZRadius.xl);
-    }
-    .width('100%')
-    .height('100%')
-    .padding({ left: ZSpacing.xl, right: ZSpacing.xl, bottom: this.safeArea.keyboard })
-    .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Center)
-    .backgroundColor(this.zc.overlay)
-    .onClick(() => {
-      // 遮罩点击不关闭 —— 表单较重，要求显式按取消
-    });
-  }
-
-  /** 主题选择浮层 */
-  @Builder
-  themePickerOverlay() {
-    Column() {
-      Column({ space: ZSpacing.sm }) {
-        Text('选择主题')
-          .fontSize(ZType.title2Size)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.zc.text)
-          .padding({ bottom: ZSpacing.xs });
-
-        this.themeOption('跟随系统', 'system');
-        this.themeOption('深色', 'dark');
-        this.themeOption('浅色', 'light');
-
-        Text('取消')
-          .fontSize(ZType.bodySize)
-          .fontColor(this.zc.text2)
-          .backgroundColor(this.zc.bg)
-          .borderRadius(ZRadius.lg)
-          .height(44)
-          .width('100%')
-          .textAlign(TextAlign.Center)
-          .margin({ top: ZSpacing.sm })
-          .onClick(() => {
-            this.showThemePicker = false;
-          });
-      }
-      .width('100%')
-      .padding(ZSpacing.xl)
-      .backgroundColor(this.zc.bgElev)
-      .borderRadius(ZRadius.xl);
-    }
-    .width('100%')
-    .height('100%')
-    .padding({ left: ZSpacing.xl, right: ZSpacing.xl })
-    .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Center)
-    .backgroundColor(this.zc.overlay)
-    .onClick(() => {
-      this.showThemePicker = false;
-    });
   }
 
   /** 空间管理浮层 —— 与 phone SpacesModal 行为一致 */
@@ -1535,7 +516,7 @@ export struct MeTab {
           .onSubmit(() => this.submitSpacePrompt());
 
         if (this.spacePromptError) {
-          this.errorBox(this.spacePromptError);
+          SettingsErrorBox({ message: this.spacePromptError });
         }
 
         Row({ space: ZSpacing.md }) {
@@ -1574,26 +555,5 @@ export struct MeTab {
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
     .backgroundColor(this.zc.overlay);
-  }
-
-  @Builder
-  themeOption(label: string, value: ThemeMode) {
-    Row() {
-      Text(label)
-        .fontSize(ZType.bodySize)
-        .fontColor(themeStore.mode === value ? this.zc.accentInk : this.zc.text)
-        .layoutWeight(1);
-      if (themeStore.mode === value) {
-        Image($r('app.media.ic_check'))
-          .width(14)
-          .height(14)
-          .fillColor(this.zc.accentInk);
-      }
-    }
-    .width('100%')
-    .padding({ left: ZSpacing.lg, right: ZSpacing.lg, top: ZSpacing.md, bottom: ZSpacing.md })
-    .backgroundColor(themeStore.mode === value ? this.zc.accent : this.zc.bg)
-    .borderRadius(ZRadius.lg)
-    .onClick(() => this.onPickTheme(value));
   }
 }

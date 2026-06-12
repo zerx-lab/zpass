@@ -4,10 +4,11 @@
 // 写入 AppStorage（与 VaultStorage 同源）。
 //
 // 字段：
-//   - gripEnabled       智感握姿（MotionStore 消费）
-//   - bgBlurEnabled     后台模糊保护：切到后台时盖隐私遮罩
-//   - antiPeepEnabled   防窥保护：开启窗口隐私模式（防截屏 / 录屏）
-//   - lockOnBackground  切到后台立即锁定保险库
+//   - gripEnabled         智感握姿（MotionStore 消费），默认关闭
+//   - bgBlurEnabled       后台模糊保护：切到后台时盖隐私遮罩，默认开启
+//   - antiPeepEnabled     禁止截图：开启窗口隐私模式（防截屏 / 录屏），默认开启
+//   - lockOnBackground    切到后台立即锁定保险库，默认开启
+//   - securityTabEnabled  底栏展示「安全」页（UiStore 消费），默认关闭
 //
 // 多个 store 各存各的字段，写入一律「读-改-写」整份，避免互相覆盖。
 
@@ -21,6 +22,7 @@ export interface AppSettings {
   bgBlurEnabled: boolean;
   antiPeepEnabled: boolean;
   lockOnBackground: boolean;
+  securityTabEnabled: boolean;
 }
 
 /** 安全相关三项，供 SecurityStore 一次性写回 */
@@ -36,13 +38,14 @@ function settingsPath(): string | null {
   return `${dir}/${SETTINGS_FILE}`;
 }
 
-/** 读取偏好；文件不存在 / 损坏时回退默认（全 false） */
+/** 读取偏好；文件不存在 / 损坏时回退默认（安全三项开启，握姿关闭） */
 export async function loadSettings(): Promise<AppSettings> {
   const fallback: AppSettings = {
     gripEnabled: false,
-    bgBlurEnabled: false,
-    antiPeepEnabled: false,
-    lockOnBackground: false,
+    bgBlurEnabled: true,
+    antiPeepEnabled: true,
+    lockOnBackground: true,
+    securityTabEnabled: false,
   };
   const path = settingsPath();
   if (!path) return fallback;
@@ -52,9 +55,11 @@ export async function loadSettings(): Promise<AppSettings> {
     const parsed = JSON.parse(text) as AppSettings;
     return {
       gripEnabled: parsed.gripEnabled === true,
-      bgBlurEnabled: parsed.bgBlurEnabled === true,
-      antiPeepEnabled: parsed.antiPeepEnabled === true,
-      lockOnBackground: parsed.lockOnBackground === true,
+      // 安全三项缺省视为开启，仅显式 false（用户主动关闭）才关
+      bgBlurEnabled: parsed.bgBlurEnabled !== false,
+      antiPeepEnabled: parsed.antiPeepEnabled !== false,
+      lockOnBackground: parsed.lockOnBackground !== false,
+      securityTabEnabled: parsed.securityTabEnabled === true,
     };
   } catch (_e) {
     return fallback;
@@ -84,6 +89,13 @@ async function writeSettings(data: AppSettings): Promise<void> {
 export async function saveGripEnabled(v: boolean): Promise<void> {
   const s = await loadSettings();
   s.gripEnabled = v;
+  await writeSettings(s);
+}
+
+/** 持久化「安全」页展示开关（读-改-写，保留其余字段） */
+export async function saveSecurityTabEnabled(v: boolean): Promise<void> {
+  const s = await loadSettings();
+  s.securityTabEnabled = v;
   await writeSettings(s);
 }
 

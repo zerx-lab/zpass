@@ -1,13 +1,14 @@
-// SecurityStore —— 应用保护偏好（后台模糊 / 防窥 / 切后台锁定）
+// SecurityStore —— 应用保护偏好（后台模糊 / 禁止截图 / 切后台锁定）
 //
 // 三项偏好落本地（AppSettings），由 EntryAbility 的前后台生命周期消费：
 //   - bgBlurEnabled    切到后台时把 blurActive 置 true，Index 顶层盖隐私遮罩
-//   - antiPeepEnabled  开启窗口隐私模式（防截屏 / 录屏），由 onPrivacyChange
-//                      回调通知 EntryAbility 即时应用（需系统级 PRIVACY_WINDOW
-//                      权限，三方签名下静默降级）
+//   - antiPeepEnabled  禁止截图：开启窗口隐私模式（防截屏 / 录屏），由
+//                      onPrivacyChange 回调通知 EntryAbility 即时应用（需系统级
+//                      PRIVACY_WINDOW 权限，三方签名下静默降级）
 //   - lockOnBackground 切到后台立即 vaultStore.lock()
 //
-// blurActive 仅为运行态，不持久化。
+// 三项保护默认开启，无需用户手动启用即生效；自动解锁（VaultStore 的信任设备）
+// 例外，必须用户主动录入。blurActive 仅为运行态，不持久化。
 
 import { loadSettings, saveSecuritySettings } from '../lib/AppSettings';
 
@@ -15,9 +16,9 @@ type PrivacyChangeCb = () => void;
 
 @ObservedV2
 export class SecurityStore {
-  @Trace bgBlurEnabled: boolean = false;
-  @Trace antiPeepEnabled: boolean = false;
-  @Trace lockOnBackground: boolean = false;
+  @Trace bgBlurEnabled: boolean = true;
+  @Trace antiPeepEnabled: boolean = true;
+  @Trace lockOnBackground: boolean = true;
 
   /** 后台隐私遮罩当前是否显示（由 EntryAbility 生命周期驱动，不持久化） */
   @Trace blurActive: boolean = false;
@@ -44,7 +45,7 @@ export class SecurityStore {
   setAntiPeepEnabled(v: boolean): void {
     this.antiPeepEnabled = v;
     this.persist();
-    if (this.onPrivacyChange) this.onPrivacyChange(); // 防窥需前台即时生效
+    if (this.onPrivacyChange) this.onPrivacyChange(); // 禁止截图需前台即时生效
   }
 
   setLockOnBackground(v: boolean): void {

@@ -229,7 +229,7 @@ struct SyncHostPage {
         .fontSize(ZType.title2Size)
         .fontWeight(FontWeight.Bold)
         .fontColor(this.zc.text);
-      Text('本机将作为局域网同步服务端。其他设备扫描下方二维码，或手动输入本机 IP 与配对 PIN，即可建立端到端加密通道安全同步密码库——全程不经任何外部服务器中转。')
+      Text('本机将作为局域网同步服务端。其他设备扫描下方二维码，或手动输入本机 IP 与配对 PIN，即可同步密码库。')
         .fontSize(ZType.footnoteSize)
         .fontColor(this.zc.text3)
         .textAlign(TextAlign.Center)

@@ -121,7 +121,7 @@ export default class EntryAbility extends UIAbility {
       this.applySystemBar(m);
     });
 
-    // 防窥偏好变化时即时重应用窗口隐私模式（hydrate 完成 / 用户切换开关）
+    // 禁止截图偏好变化时即时重应用窗口隐私模式（hydrate 完成 / 用户切换开关）
     securityStore.setOnPrivacyChange(() => {
       this.applyPrivacyMode();
     });
@@ -129,7 +129,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   /**
-   * 防窥保护：开启窗口隐私模式后，截屏 / 录屏 / 多任务预览均不可见。
+   * 禁止截图：开启窗口隐私模式后，截屏 / 录屏 / 多任务预览均不可见。
    * 需系统级 ohos.permission.PRIVACY_WINDOW；三方签名拿不到时静默降级。
    */
   private applyPrivacyMode(): void {

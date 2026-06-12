@@ -10,6 +10,9 @@
     "pages/Sync",
     "pages/SyncHost",
     "pages/SyncConflicts",
-    "pages/Trash"
+    "pages/Trash",
+    "pages/MeProtection",
+    "pages/MeAppearance",
+    "pages/MeData"
   ]
 }

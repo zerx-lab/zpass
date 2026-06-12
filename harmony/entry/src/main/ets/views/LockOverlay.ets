@@ -5,7 +5,6 @@
 //  - 主密码输入（带前置图标 + 错误边框 + disabled-during-busy）
 //  - 解锁按钮（idle: icon + label；busy: LoadingProgress + label）
 //  - "使用设备解锁"按钮（仅 supported && enabled 时）
-//  - 底部零知识提示文字
 //
 // 显示规则由 pages/Index 控制；本组件只关心解锁动作。
 
@@ -251,14 +250,6 @@ export struct LockOverlay {
           }
         }
         .width('100%');
-
-        // 底部零知识安全提示
-        Text('零知识加密 · 主密码永不离开此设备')
-          .fontSize(ZType.captionSize)
-          .fontColor(this.zc.text4)
-          .fontFamily('HarmonyOS Sans Condensed')
-          .textAlign(TextAlign.Center)
-          .width('100%');
       }
       .layoutWeight(1)
       .width('100%')

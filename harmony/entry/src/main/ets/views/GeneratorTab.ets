@@ -206,15 +206,12 @@ export struct GeneratorTab {
     Column() {
       Row().height(this.safeArea.top).width('100%');
 
-      // Header —— 标题 + 副标题
+      // Header —— 标题
       Column({ space: 2 }) {
         Text('生成器')
           .fontSize(ZType.titleSize)
           .fontWeight(FontWeight.Bold)
           .fontColor(this.zc.text);
-        Text('零知识 · 本地生成')
-          .fontSize(ZType.footnoteSize)
-          .fontColor(this.zc.text3);
       }
       .alignItems(HorizontalAlign.Start)
       .width('100%')

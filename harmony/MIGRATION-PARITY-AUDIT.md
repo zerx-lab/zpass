@@ -455,7 +455,7 @@ GeneratorTab.ets covers the basic three-mode generation flow (password/passphras
   - harmony: GeneratorTab.ets has no save button and no navigation to create a new vault item (entire GeneratorTab.ets has no router.pushUrl to the item editor).
   - 位置: `phone generator.tsx:442-448,718-728; harmony GeneratorTab.ets — absent`
   - 实现: Add a '保存到密码库' Button below the options column, visible only when genCount <= 1. On click, navigate to the item editor page using router.pushUrl with params { id: 'new', type: 'login', initialPassword: this.genResult }.
-- **[中·缺UI] Header subtitle '零知识 · 本地生成' missing**
+- **[有意省略] Header subtitle '零知识 · 本地生成'（文案清理，2026-06-11 决定移除自证式零知识文案，不再补齐）**
   - phone: Phone renders a subtitle Text '零知识 · 本地生成' in c.text3 / footnote style directly below the '生成器' title (generator.tsx:485–488).
   - harmony: GeneratorTab.ets only shows the '生成器' title Text; no subtitle is present (GeneratorTab.ets:92–96).
   - 位置: `phone generator.tsx:485-488; harmony GeneratorTab.ets:91-104`
@@ -686,7 +686,7 @@ The Harmony LockOverlay implements the core unlock flow (password input, error d
   - harmony: Harmony shows a plain Text '生物解锁' with no icon. No loading/spinner state during biometric authentication. No opacity change during busy state (LockOverlay.ets:165-175). Label text '生物解锁' vs phone's '使用设备解锁'.
   - 位置: `phone: lock-overlay.tsx:170-195 | harmony: LockOverlay.ets:165-175`
   - 实现: Replace plain Text with a Row containing a biometric/face SVG icon (18vp, zc.info color) + '使用设备解锁' text. Add `.opacity(this.store.busy ? 0.6 : 1.0)` and show a LoadingProgress in place of the icon when store.busy is true and a biometric attempt is in progress.
-- **[中·缺UI] Bottom 'zero-knowledge' hint text is absent**
+- **[有意省略] Bottom 'zero-knowledge' hint text（文案清理，2026-06-11 决定移除自证式零知识文案，不再补齐）**
   - phone: Phone shows '零知识加密 · 主密码永不离开此设备' at the bottom in monospace font, text4 color, center-aligned. This is a trust/security reassurance visible to locked users. lock-overlay.tsx:197-199.
   - harmony: Harmony has no equivalent hint text anywhere in the LockOverlay layout (LockOverlay.ets:99-199).
   - 位置: `phone: lock-overlay.tsx:197-199 | harmony: LockOverlay.ets (absent)`
