@@ -81,7 +81,7 @@ function UserCard({
           {space?.name ?? "本地保险库"}
         </Text>
         <Text style={[styles.userMeta, { color: c.text3 }]}>
-          {count} 条加密条目 · 零知识
+          {count} 条加密条目
         </Text>
       </View>
       <IconSymbol name="chevron.right" size={18} color={c.text4} />
@@ -92,7 +92,12 @@ function UserCard({
 /* ----- 主屏 ----- */
 
 export default function MeScreen() {
-  const { colors: c, mode: themeMode, setMode: setThemeMode, scheme } = useTheme();
+  const {
+    colors: c,
+    mode: themeMode,
+    setMode: setThemeMode,
+    scheme,
+  } = useTheme();
   const router = useRouter();
   // 原生是否支持作为同步服务端（仅 Android 编入 tiny_http 监听）
   const syncServerAvailable = isNativeSyncServerAvailable();
@@ -227,7 +232,10 @@ export default function MeScreen() {
   /* ── 信任设备切换 ── */
   const handleToggleTrustedDevice = React.useCallback(async () => {
     if (!trustedDeviceSupported) {
-      toast.info("当前平台不支持设备解锁", "需在 iOS / Android 真机上启用生物识别");
+      toast.info(
+        "当前平台不支持设备解锁",
+        "需在 iOS / Android 真机上启用生物识别",
+      );
       return;
     }
     if (trustedDeviceEnabled) {
@@ -254,18 +262,22 @@ export default function MeScreen() {
       ? "已启用"
       : "未启用";
 
-  const itemTypeRows: { label: string; type: VaultItemType; icon: IconName }[] = [
-    { label: "登录凭据", type: "login", icon: "key.fill" },
-    { label: "验证码", type: "totp", icon: "clock.fill" },
-    { label: "支付卡", type: "card", icon: "creditcard.fill" },
-    { label: "安全笔记", type: "note", icon: "note.text" },
-    { label: "身份信息", type: "identity", icon: "person.crop.circle.fill" },
-    { label: "SSH 密钥", type: "ssh", icon: "terminal.fill" },
-    { label: "通行密钥", type: "passkey", icon: "key.horizontal.fill" },
-  ];
+  const itemTypeRows: { label: string; type: VaultItemType; icon: IconName }[] =
+    [
+      { label: "登录凭据", type: "login", icon: "key.fill" },
+      { label: "验证码", type: "totp", icon: "clock.fill" },
+      { label: "支付卡", type: "card", icon: "creditcard.fill" },
+      { label: "安全笔记", type: "note", icon: "note.text" },
+      { label: "身份信息", type: "identity", icon: "person.crop.circle.fill" },
+      { label: "SSH 密钥", type: "ssh", icon: "terminal.fill" },
+      { label: "通行密钥", type: "passkey", icon: "key.horizontal.fill" },
+    ];
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: c.bg }]} edges={["top"]}>
+    <SafeAreaView
+      style={[styles.safe, { backgroundColor: c.bg }]}
+      edges={["top"]}
+    >
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={styles.scrollContent}
@@ -275,7 +287,9 @@ export default function MeScreen() {
           <Text style={[styles.pageTitle, { color: c.text }]}>我的</Text>
         </View>
 
-        <View style={{ marginHorizontal: Spacing.lg, marginBottom: Spacing.lg }}>
+        <View
+          style={{ marginHorizontal: Spacing.lg, marginBottom: Spacing.lg }}
+        >
           <UserCard
             count={items.length}
             space={activeSpace}
@@ -389,7 +403,7 @@ export default function MeScreen() {
           ))}
         </ListGroup>
 
-        <ListGroup header="关于" footer="零知识本地密码管理器 · 数据永远只在你的设备上加密存储">
+        <ListGroup header="关于">
           <ListRow title="版本" value={APP_VERSION} icon="info.circle" />
         </ListGroup>
 
@@ -494,7 +508,12 @@ function ChangePasswordModal({
       title="修改主密码"
       subtitle="主密码用于解锁与加密保险库，请妥善保管"
     >
-      <ModalField label="当前主密码" value={oldPwd} onChange={setOldPwd} c={c} />
+      <ModalField
+        label="当前主密码"
+        value={oldPwd}
+        onChange={setOldPwd}
+        c={c}
+      />
       <ModalField
         label="新主密码"
         hint="至少 8 位，建议混合大小写 + 数字 + 符号"
@@ -510,7 +529,9 @@ function ChangePasswordModal({
       />
 
       {error ? (
-        <View style={[modalStyles.errorBox, { backgroundColor: c.danger + "1f" }]}>
+        <View
+          style={[modalStyles.errorBox, { backgroundColor: c.danger + "1f" }]}
+        >
           <IconSymbol
             name="exclamationmark.circle.fill"
             size={14}
@@ -605,7 +626,9 @@ function TrustedDeviceEnableModal({
       <ModalField label="主密码" value={pwd} onChange={setPwd} c={c} />
 
       {error ? (
-        <View style={[modalStyles.errorBox, { backgroundColor: c.danger + "1f" }]}>
+        <View
+          style={[modalStyles.errorBox, { backgroundColor: c.danger + "1f" }]}
+        >
           <IconSymbol
             name="exclamationmark.circle.fill"
             size={14}
@@ -734,10 +757,7 @@ function SheetModal({
         >
           <View style={modalStyles.cardHandle}>
             <View
-              style={[
-                modalStyles.handleBar,
-                { backgroundColor: c.line },
-              ]}
+              style={[modalStyles.handleBar, { backgroundColor: c.line }]}
             />
           </View>
           <Text style={[modalStyles.title, { color: c.text }]}>{title}</Text>
@@ -868,7 +888,9 @@ function SpacesModal({
           </View>
 
           <ScrollView style={{ maxHeight: 400 }}>
-            <View style={[modalStyles.spacesList, { backgroundColor: c.bgElev }]}>
+            <View
+              style={[modalStyles.spacesList, { backgroundColor: c.bgElev }]}
+            >
               {ordered.length === 0 ? (
                 <Text style={[modalStyles.emptyText, { color: c.text3 }]}>
                   没有空间
@@ -896,10 +918,7 @@ function SpacesModal({
                         />
                         <View style={{ flex: 1, minWidth: 0 }}>
                           <Text
-                            style={[
-                              modalStyles.spaceName,
-                              { color: c.text },
-                            ]}
+                            style={[modalStyles.spaceName, { color: c.text }]}
                             numberOfLines={1}
                           >
                             {sp.name}

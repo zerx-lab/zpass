@@ -19,9 +19,7 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "permissions": [
-        "android.permission.CAMERA"
-      ],
+      "permissions": ["android.permission.CAMERA"],
       "package": "com.zerx.zpass"
     },
     "web": {
@@ -46,7 +44,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "需要相机以扫描身份验证器二维码（otpauth://）。图像不会离开本机，不会上传到任何服务器。",
+          "cameraPermission": "需要相机以扫描身份验证器二维码（otpauth://）。",
           "microphonePermission": false,
           "recordAudioAndroid": false
         }

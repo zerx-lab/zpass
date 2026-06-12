@@ -11,13 +11,16 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 
-import { Elevation, Fonts, Radius, Spacing, Type, Hit } from "@/constants/theme";
-import { useTheme } from "@/contexts/theme-context";
 import {
-  Button,
-  IconButton,
-  PressableScale,
-} from "@/components/ui/primitives";
+  Elevation,
+  Fonts,
+  Radius,
+  Spacing,
+  Type,
+  Hit,
+} from "@/constants/theme";
+import { useTheme } from "@/contexts/theme-context";
+import { Button, IconButton, PressableScale } from "@/components/ui/primitives";
 import { copyText } from "@/lib/clipboard";
 import { randomBytes } from "@/lib/crypto";
 
@@ -67,14 +70,66 @@ function generatePassword(len: number, opts: Options): string {
 }
 
 const WORDLIST = [
-  "apple", "brave", "cloud", "dance", "eagle", "flame", "grace", "heart",
-  "ivory", "jewel", "karma", "lemon", "maple", "noble", "ocean", "pearl",
-  "queen", "river", "solar", "tiger", "ultra", "vivid", "water", "xenon",
-  "youth", "zebra", "amber", "blaze", "crisp", "delta", "ember", "frost",
-  "glide", "haven", "index", "jolly", "knack", "lunar", "mango", "nexus",
-  "orbit", "prism", "quiet", "radar", "sleek", "trove", "unity", "vault",
-  "witch", "xerox", "yield", "zonal", "acorn", "bloom", "coral", "drift",
-  "elbow", "fable", "glade", "honey",
+  "apple",
+  "brave",
+  "cloud",
+  "dance",
+  "eagle",
+  "flame",
+  "grace",
+  "heart",
+  "ivory",
+  "jewel",
+  "karma",
+  "lemon",
+  "maple",
+  "noble",
+  "ocean",
+  "pearl",
+  "queen",
+  "river",
+  "solar",
+  "tiger",
+  "ultra",
+  "vivid",
+  "water",
+  "xenon",
+  "youth",
+  "zebra",
+  "amber",
+  "blaze",
+  "crisp",
+  "delta",
+  "ember",
+  "frost",
+  "glide",
+  "haven",
+  "index",
+  "jolly",
+  "knack",
+  "lunar",
+  "mango",
+  "nexus",
+  "orbit",
+  "prism",
+  "quiet",
+  "radar",
+  "sleek",
+  "trove",
+  "unity",
+  "vault",
+  "witch",
+  "xerox",
+  "yield",
+  "zonal",
+  "acorn",
+  "bloom",
+  "coral",
+  "drift",
+  "elbow",
+  "fable",
+  "glade",
+  "honey",
 ];
 
 function generatePassphrase(wordCount: number): string {
@@ -364,14 +419,20 @@ function Stepper({
         <Text
           onPress={startEdit}
           suppressHighlighting
-          style={[styles.stepperValue, { color: c.text, fontFamily: monoFamily }]}
+          style={[
+            styles.stepperValue,
+            { color: c.text, fontFamily: monoFamily },
+          ]}
         >
           {value}
         </Text>
       )}
       {hint ? (
         <Text
-          style={[styles.stepperHint, { color: c.text3, fontFamily: monoFamily }]}
+          style={[
+            styles.stepperHint,
+            { color: c.text3, fontFamily: monoFamily },
+          ]}
         >
           {hint}
         </Text>
@@ -473,7 +534,10 @@ export default function GeneratorScreen() {
   const monoFamily = Fonts?.mono ?? "monospace";
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: c.bg }]} edges={["top"]}>
+    <SafeAreaView
+      style={[styles.safe, { backgroundColor: c.bg }]}
+      edges={["top"]}
+    >
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={styles.scrollContent}
@@ -482,9 +546,6 @@ export default function GeneratorScreen() {
         {/* Header */}
         <View style={styles.header}>
           <Text style={[styles.title, { color: c.text }]}>生成器</Text>
-          <Text style={[styles.subtitle, { color: c.text3 }]}>
-            零知识 · 本地生成
-          </Text>
         </View>
 
         {/* Password Display Card */}
@@ -527,7 +588,9 @@ export default function GeneratorScreen() {
                   </Text>
                 ))}
               </Text>
-              <View style={[styles.strengthRow, { borderTopColor: c.lineSoft }]}>
+              <View
+                style={[styles.strengthRow, { borderTopColor: c.lineSoft }]}
+              >
                 <View style={[styles.barBg, { backgroundColor: c.bgActive }]}>
                   <View
                     style={[
@@ -746,10 +809,6 @@ const styles = StyleSheet.create({
   },
   title: {
     ...Type.title,
-  },
-  subtitle: {
-    ...Type.footnote,
-    marginTop: 2,
   },
 
   /* Display */

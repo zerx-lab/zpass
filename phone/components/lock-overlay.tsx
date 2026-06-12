@@ -19,10 +19,7 @@ import { useTheme } from "@/contexts/theme-context";
 import { useVault } from "@/contexts/vault-context";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { SpaceAvatar } from "@/components/space-avatar";
-import {
-  Button,
-  PressableScale,
-} from "@/components/ui/primitives";
+import { Button, PressableScale } from "@/components/ui/primitives";
 
 const MONO = Fonts?.mono ?? "monospace";
 
@@ -193,10 +190,6 @@ export function LockOverlay() {
           )}
         </PressableScale>
       ) : null}
-
-      <Text style={[styles.hint, { color: c.text4, fontFamily: MONO }]}>
-        零知识加密 · 主密码永不离开此设备
-      </Text>
     </View>
   );
 }
@@ -265,9 +258,4 @@ const styles = StyleSheet.create({
     marginTop: Spacing.md,
   },
   trustedBtnText: { ...Type.subhead, fontWeight: "600" },
-  hint: {
-    ...Type.caption,
-    marginTop: Spacing.xxl,
-    textAlign: "center",
-  },
 });

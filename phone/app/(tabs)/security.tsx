@@ -13,17 +13,19 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 
-import { Fonts, Radius, Spacing, Type, type ColorPalette } from "@/constants/theme";
+import {
+  Fonts,
+  Radius,
+  Spacing,
+  Type,
+  type ColorPalette,
+} from "@/constants/theme";
 import { useTheme } from "@/contexts/theme-context";
 import { useVault } from "@/contexts/vault-context";
 import type { LoginItem, VaultItem } from "@/data/vault";
 import { estimateStrength } from "@/lib/password";
 import { IconSymbol } from "@/components/ui/icon-symbol";
-import {
-  Badge,
-  Button,
-  PressableScale,
-} from "@/components/ui/primitives";
+import { Badge, Button, PressableScale } from "@/components/ui/primitives";
 
 const MONO = Fonts?.mono ?? "monospace";
 
@@ -198,12 +200,7 @@ function IssueRow({
       pressedBg={c.bgHover}
       style={styles.issueRow}
     >
-      <View
-        style={[
-          styles.issueGlyph,
-          { backgroundColor: c.danger + "1f" },
-        ]}
-      >
+      <View style={[styles.issueGlyph, { backgroundColor: c.danger + "1f" }]}>
         <Text
           style={[styles.issueGlyphText, { color: c.danger, fontFamily: MONO }]}
         >
@@ -240,13 +237,7 @@ function IssueRow({
   );
 }
 
-function StrengthHistogram({
-  bins,
-  c,
-}: {
-  bins: number[];
-  c: ColorPalette;
-}) {
+function StrengthHistogram({ bins, c }: { bins: number[]; c: ColorPalette }) {
   const max = Math.max(...bins, 1);
   const labels = ["0-20", "20-40", "40-60", "60-80", "80-100"];
   const colors = [c.danger, c.danger, c.warn, c.info, c.ok];
@@ -401,7 +392,10 @@ export default function SecurityScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: c.bg }]} edges={["top"]}>
+    <SafeAreaView
+      style={[styles.safe, { backgroundColor: c.bg }]}
+      edges={["top"]}
+    >
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={styles.scrollContent}
@@ -417,9 +411,7 @@ export default function SecurityScreen() {
 
         {!hasLogins ? (
           <View style={[styles.emptyState, { backgroundColor: c.bgElev }]}>
-            <View
-              style={[styles.emptyIcon, { backgroundColor: c.ok + "1f" }]}
-            >
+            <View style={[styles.emptyIcon, { backgroundColor: c.ok + "1f" }]}>
               <IconSymbol name="checkmark.shield.fill" size={28} color={c.ok} />
             </View>
             <Text style={[styles.emptyTitle, { color: c.text }]}>
@@ -435,9 +427,7 @@ export default function SecurityScreen() {
             <View style={[styles.heroCard, { backgroundColor: c.bgElev }]}>
               <View style={styles.heroTop}>
                 <View>
-                  <Text
-                    style={[styles.heroKicker, { color: c.text3 }]}
-                  >
+                  <Text style={[styles.heroKicker, { color: c.text3 }]}>
                     综合评分
                   </Text>
                   <View style={styles.heroScoreLine}>
@@ -490,12 +480,17 @@ export default function SecurityScreen() {
                     登录
                   </Text>
                   <Text
-                    style={[styles.heroStatValue, { color: c.text, fontFamily: MONO }]}
+                    style={[
+                      styles.heroStatValue,
+                      { color: c.text, fontFamily: MONO },
+                    ]}
                   >
                     {stats.totalLogins}
                   </Text>
                 </View>
-                <View style={[styles.heroStatDiv, { backgroundColor: c.lineSoft }]} />
+                <View
+                  style={[styles.heroStatDiv, { backgroundColor: c.lineSoft }]}
+                />
                 <View style={styles.heroStatCol}>
                   <Text style={[styles.heroStatLabel, { color: c.text3 }]}>
                     已泄露
@@ -512,13 +507,18 @@ export default function SecurityScreen() {
                     {breachResults === null ? "—" : breachedItems.length}
                   </Text>
                 </View>
-                <View style={[styles.heroStatDiv, { backgroundColor: c.lineSoft }]} />
+                <View
+                  style={[styles.heroStatDiv, { backgroundColor: c.lineSoft }]}
+                />
                 <View style={styles.heroStatCol}>
                   <Text style={[styles.heroStatLabel, { color: c.text3 }]}>
                     待修复
                   </Text>
                   <Text
-                    style={[styles.heroStatValue, { color: c.text, fontFamily: MONO }]}
+                    style={[
+                      styles.heroStatValue,
+                      { color: c.text, fontFamily: MONO },
+                    ]}
                   >
                     {actionItems.length}
                   </Text>
@@ -553,7 +553,10 @@ export default function SecurityScreen() {
                 <View style={styles.scanHeaderRight}>
                   {breachLastScanAt != null ? (
                     <Text
-                      style={[styles.scanLastAt, { color: c.text3, fontFamily: MONO }]}
+                      style={[
+                        styles.scanLastAt,
+                        { color: c.text3, fontFamily: MONO },
+                      ]}
                     >
                       {formatTime(breachLastScanAt)}
                     </Text>
@@ -583,14 +586,17 @@ export default function SecurityScreen() {
                     color={c.text3}
                   />
                   <Text style={[styles.scanEmptyText, { color: c.text3 }]}>
-                    仅发送密码 SHA-1 哈希的前 5 位 — HIBP 无法得知你的真实密码
+                    仅发送密码 SHA-1 哈希的前 5 位
                   </Text>
                 </View>
               ) : breachScanning ? (
                 <View style={styles.scanRunning}>
                   <ActivityIndicator size="small" color={c.text3} />
                   <Text
-                    style={[styles.scanRunningText, { color: c.text3, fontFamily: MONO }]}
+                    style={[
+                      styles.scanRunningText,
+                      { color: c.text3, fontFamily: MONO },
+                    ]}
                   >
                     正在扫描…
                   </Text>
@@ -598,7 +604,10 @@ export default function SecurityScreen() {
               ) : breachedItems.length === 0 && breachErrorCount === 0 ? (
                 <View style={styles.scanClear}>
                   <View
-                    style={[styles.scanClearIcon, { backgroundColor: c.ok + "1f" }]}
+                    style={[
+                      styles.scanClearIcon,
+                      { backgroundColor: c.ok + "1f" },
+                    ]}
                   >
                     <IconSymbol
                       name="checkmark.shield.fill"
@@ -616,7 +625,10 @@ export default function SecurityScreen() {
               ) : breachedItems.length === 0 && breachErrorCount > 0 ? (
                 <View style={styles.scanClear}>
                   <View
-                    style={[styles.scanClearIcon, { backgroundColor: c.warn + "1f" }]}
+                    style={[
+                      styles.scanClearIcon,
+                      { backgroundColor: c.warn + "1f" },
+                    ]}
                   >
                     <IconSymbol
                       name="exclamationmark.triangle.fill"
@@ -644,11 +656,15 @@ export default function SecurityScreen() {
                     </Text>
                   </View>
                   {breachErrorCount > 0 ? (
-                    <Text style={[styles.scanPartialErrorText, { color: c.warn }]}>
+                    <Text
+                      style={[styles.scanPartialErrorText, { color: c.warn }]}
+                    >
                       另有 {breachErrorCount} 条扫描失败，建议重试
                     </Text>
                   ) : null}
-                  <View style={[styles.innerList, { backgroundColor: c.bgElev2 }]}>
+                  <View
+                    style={[styles.innerList, { backgroundColor: c.bgElev2 }]}
+                  >
                     {breachedItems.map((r, idx) => {
                       const item = allItems.find((i) => i.id === r.itemId);
                       const name = item?.name ?? r.itemName;
@@ -695,7 +711,11 @@ export default function SecurityScreen() {
                             </Text>
                           </View>
                           <Badge label="已泄露" tone="danger" />
-                          <IconSymbol name="chevron.right" size={14} color={c.text4} />
+                          <IconSymbol
+                            name="chevron.right"
+                            size={14}
+                            color={c.text4}
+                          />
                           {idx !== breachedItems.length - 1 && (
                             <View
                               style={[
@@ -713,7 +733,9 @@ export default function SecurityScreen() {
                   </View>
                 </View>
               )}
-              <Text style={[styles.poweredBy, { color: c.text4, fontFamily: MONO }]}>
+              <Text
+                style={[styles.poweredBy, { color: c.text4, fontFamily: MONO }]}
+              >
                 由 Have I Been Pwned 提供支持
               </Text>
             </SectionCard>
@@ -735,7 +757,10 @@ export default function SecurityScreen() {
               {actionItems.length === 0 ? (
                 <View style={styles.actionEmpty}>
                   <View
-                    style={[styles.scanClearIcon, { backgroundColor: c.ok + "1f" }]}
+                    style={[
+                      styles.scanClearIcon,
+                      { backgroundColor: c.ok + "1f" },
+                    ]}
                   >
                     <IconSymbol
                       name="checkmark.shield.fill"
@@ -751,7 +776,9 @@ export default function SecurityScreen() {
                   </Text>
                 </View>
               ) : (
-                <View style={[styles.innerList, { backgroundColor: c.bgElev2 }]}>
+                <View
+                  style={[styles.innerList, { backgroundColor: c.bgElev2 }]}
+                >
                   {actionItems.map((issue, idx) => (
                     <IssueRow
                       key={`${issue.item.id}-${issue.severity}`}
@@ -915,7 +942,11 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   sectionTitle: { ...Type.headline },
-  sectionBody: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md, gap: Spacing.md },
+  sectionBody: {
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: Spacing.md,
+    gap: Spacing.md,
+  },
 
   /* Scan controls */
   scanHeaderRight: {

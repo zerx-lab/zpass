@@ -204,7 +204,10 @@ export function QrScanner({ visible, onClose, onApply }: QrScannerProps) {
       presentationStyle="pageSheet"
       onRequestClose={onClose}
     >
-      <SafeAreaView style={[styles.safe, { backgroundColor: c.bg }]} edges={["top"]}>
+      <SafeAreaView
+        style={[styles.safe, { backgroundColor: c.bg }]}
+        edges={["top"]}
+      >
         {/* NavBar */}
         <View style={styles.nav}>
           <PressableScale
@@ -253,7 +256,12 @@ export function QrScanner({ visible, onClose, onApply }: QrScannerProps) {
               c={c}
             />
           ) : state.kind === "bad" ? (
-            <ResultBad error={state.error} rawText={state.rawText} onRetry={handleRetry} c={c} />
+            <ResultBad
+              error={state.error}
+              rawText={state.rawText}
+              onRetry={handleRetry}
+              c={c}
+            />
           ) : state.kind === "decoding" ? (
             <Decoding c={c} />
           ) : mode === "camera" ? (
@@ -333,7 +341,7 @@ function CameraScene({
         </View>
         <Text style={[styles.permTitle, { color: c.text }]}>需要相机权限</Text>
         <Text style={[styles.permHint, { color: c.text3 }]}>
-          扫描身份验证器二维码需要使用相机。图像不会离开本机，不上传任何服务器。
+          扫描身份验证器二维码需要使用相机。
         </Text>
         {canAskAgain ? (
           <Button
@@ -363,7 +371,10 @@ function CameraScene({
     );
   }
 
-  const sweepY = sweep.interpolate({ inputRange: [0, 1], outputRange: [0, 220] });
+  const sweepY = sweep.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 220],
+  });
 
   return (
     <View style={styles.cameraWrap}>
@@ -381,10 +392,7 @@ function CameraScene({
           <View style={[styles.corner, styles.cornerBL]} />
           <View style={[styles.corner, styles.cornerBR]} />
           <Animated.View
-            style={[
-              styles.sweepLine,
-              { transform: [{ translateY: sweepY }] },
-            ]}
+            style={[styles.sweepLine, { transform: [{ translateY: sweepY }] }]}
           />
         </View>
         <Text style={styles.viewfinderHint}>把二维码对准框内</Text>
@@ -439,7 +447,12 @@ function PasteScene({
       contentContainerStyle={{ padding: 20 }}
       keyboardShouldPersistTaps="handled"
     >
-      <Text style={[styles.permTitle, { color: c.text, textAlign: "left", marginTop: 4 }]}>
+      <Text
+        style={[
+          styles.permTitle,
+          { color: c.text, textAlign: "left", marginTop: 4 },
+        ]}
+      >
         粘贴 otpauth:// URI
       </Text>
       <Text
@@ -448,7 +461,8 @@ function PasteScene({
           { color: c.text3, textAlign: "left", marginBottom: 12 },
         ]}
       >
-        支持 totp / hotp / steam 三种协议，可指定 SHA1/256/512 与位数 / 周期等参数。
+        支持 totp / hotp / steam 三种协议，可指定 SHA1/256/512 与位数 /
+        周期等参数。
       </Text>
       <View style={[styles.pasteWrap, { backgroundColor: c.bgElev }]}>
         <TextInput
@@ -460,10 +474,7 @@ function PasteScene({
           autoCapitalize="none"
           autoCorrect={false}
           autoComplete="off"
-          style={[
-            styles.pasteInput,
-            { color: c.text, fontFamily: MONO },
-          ]}
+          style={[styles.pasteInput, { color: c.text, fontFamily: MONO }]}
         />
       </View>
       <Button
@@ -527,9 +538,7 @@ function ResultOk({
       ? `${meta.algorithm} · ${meta.digits} 位 · 计数器 ${meta.counter}`
       : `${meta.algorithm} · ${meta.digits} 位 · ${meta.period}s`;
 
-  const maskedSecret = revealSecret
-    ? formatBase32Groups(meta.secret)
-    : null;
+  const maskedSecret = revealSecret ? formatBase32Groups(meta.secret) : null;
 
   return (
     <ScrollView contentContainerStyle={{ padding: Spacing.xl }}>
@@ -575,10 +584,7 @@ function ResultOk({
           </View>
           {maskedSecret ? (
             <Text
-              style={[
-                styles.secretValue,
-                { color: c.text, fontFamily: MONO },
-              ]}
+              style={[styles.secretValue, { color: c.text, fontFamily: MONO }]}
               selectable
             >
               {maskedSecret}
@@ -600,7 +606,9 @@ function ResultOk({
         请确认 issuer 与账户与你的预期一致再使用。来源不明的二维码可能是钓鱼。
       </Text>
 
-      <View style={{ flexDirection: "row", gap: Spacing.sm, marginTop: Spacing.lg }}>
+      <View
+        style={{ flexDirection: "row", gap: Spacing.sm, marginTop: Spacing.lg }}
+      >
         <Button
           label="重新扫"
           variant="secondary"
@@ -670,13 +678,17 @@ function ResultBad({
           color={c.warn}
         />
       </View>
-      <Text style={[styles.permTitle, { color: c.text, marginTop: Spacing.md }]}>
+      <Text
+        style={[styles.permTitle, { color: c.text, marginTop: Spacing.md }]}
+      >
         {title}
       </Text>
       <Text style={[styles.permHint, { color: c.text3 }]}>{hint}</Text>
       {rawText ? (
         <View style={[styles.rawBox, { backgroundColor: c.bgElev }]}>
-          <Text style={[styles.rawLabel, { color: c.text3 }]}>识别到的内容</Text>
+          <Text style={[styles.rawLabel, { color: c.text3 }]}>
+            识别到的内容
+          </Text>
           <Text
             style={[styles.rawText, { color: c.text2, fontFamily: MONO }]}
             numberOfLines={4}
@@ -806,10 +818,34 @@ const styles = StyleSheet.create({
     height: 22,
     borderColor: "#fff",
   },
-  cornerTL: { top: 0, left: 0, borderTopWidth: 3, borderLeftWidth: 3, borderTopLeftRadius: 14 },
-  cornerTR: { top: 0, right: 0, borderTopWidth: 3, borderRightWidth: 3, borderTopRightRadius: 14 },
-  cornerBL: { bottom: 0, left: 0, borderBottomWidth: 3, borderLeftWidth: 3, borderBottomLeftRadius: 14 },
-  cornerBR: { bottom: 0, right: 0, borderBottomWidth: 3, borderRightWidth: 3, borderBottomRightRadius: 14 },
+  cornerTL: {
+    top: 0,
+    left: 0,
+    borderTopWidth: 3,
+    borderLeftWidth: 3,
+    borderTopLeftRadius: 14,
+  },
+  cornerTR: {
+    top: 0,
+    right: 0,
+    borderTopWidth: 3,
+    borderRightWidth: 3,
+    borderTopRightRadius: 14,
+  },
+  cornerBL: {
+    bottom: 0,
+    left: 0,
+    borderBottomWidth: 3,
+    borderLeftWidth: 3,
+    borderBottomLeftRadius: 14,
+  },
+  cornerBR: {
+    bottom: 0,
+    right: 0,
+    borderBottomWidth: 3,
+    borderRightWidth: 3,
+    borderBottomRightRadius: 14,
+  },
   sweepLine: {
     position: "absolute",
     left: 8,
@@ -867,7 +903,12 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
   },
   metaLabel: { ...Type.subhead },
-  metaValue: { ...Type.body, fontWeight: "500", flexShrink: 1, textAlign: "right" },
+  metaValue: {
+    ...Type.body,
+    fontWeight: "500",
+    flexShrink: 1,
+    textAlign: "right",
+  },
   divider: { height: StyleSheet.hairlineWidth, width: "100%" },
 
   /* 密钥块：上行 label+toggle，下行整行展示密钥/dots */
@@ -894,7 +935,12 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     lineHeight: 22,
   },
-  maskRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, paddingVertical: 6 },
+  maskRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    paddingVertical: 6,
+  },
   maskDot: { width: 7, height: 7, borderRadius: 4 },
 
   rawBox: {

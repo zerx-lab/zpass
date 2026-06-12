@@ -27,10 +27,7 @@ import { IconSymbol } from "@/components/ui/icon-symbol";
 import { SpaceAvatar } from "@/components/space-avatar";
 import { isNativeKDF, isWasmKDF } from "@/lib/crypto";
 import { DEFAULT_SPACE_ID } from "@/lib/spaces";
-import {
-  Button,
-  IconButton,
-} from "@/components/ui/primitives";
+import { Button, IconButton } from "@/components/ui/primitives";
 import type { ColorPalette } from "@/constants/theme";
 
 const MONO = Fonts?.mono ?? "monospace";
@@ -58,13 +55,18 @@ export function OnboardingOverlay() {
   const canNext = pw.length >= 8 && pw === confirm && !busy;
 
   const trimmedSpace = spaceName.trim();
-  const canSubmit = trimmedSpace.length > 0 && trimmedSpace.length <= 32 && !busy;
+  const canSubmit =
+    trimmedSpace.length > 0 && trimmedSpace.length <= 32 && !busy;
 
   const handleNext = () => {
     if (!canNext) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setError(
-        pw.length < 8 ? "主密码至少 8 位" : pw !== confirm ? "两次输入不一致" : null,
+        pw.length < 8
+          ? "主密码至少 8 位"
+          : pw !== confirm
+            ? "两次输入不一致"
+            : null,
       );
       return;
     }
@@ -124,7 +126,9 @@ export function OnboardingOverlay() {
             <View style={styles.logoWrap}>
               {isPasswordStep ? (
                 <View style={[styles.logo, { backgroundColor: c.accent }]}>
-                  <Text style={[styles.logoText, { color: c.accentInk }]}>Z</Text>
+                  <Text style={[styles.logoText, { color: c.accentInk }]}>
+                    Z
+                  </Text>
                 </View>
               ) : (
                 <SpaceAvatar
@@ -149,18 +153,12 @@ export function OnboardingOverlay() {
 
             {/* 步骤指示器 */}
             <View style={styles.steps}>
-              <View
-                style={[
-                  styles.stepDot,
-                  { backgroundColor: c.accent },
-                ]}
-              />
+              <View style={[styles.stepDot, { backgroundColor: c.accent }]} />
               <View
                 style={[
                   styles.stepLine,
                   {
-                    backgroundColor:
-                      step === "space" ? c.accent : c.bgActive,
+                    backgroundColor: step === "space" ? c.accent : c.bgActive,
                   },
                 ]}
               />
@@ -224,9 +222,9 @@ export function OnboardingOverlay() {
 
                   <View style={[styles.points, { borderTopColor: c.lineSoft }]}>
                     {[
-                      "数据仅保存在本设备，零知识端到端",
+                      "数据仅保存在本设备",
                       "Argon2id 派生主密码 → XChaCha20-Poly1305 加密",
-                      "主密码不会离开设备，丢失无法恢复",
+                      "主密码一旦丢失将无法恢复",
                     ].map((p) => (
                       <View key={p} style={styles.pointRow}>
                         <View
@@ -312,7 +310,12 @@ export function OnboardingOverlay() {
                   disabled={!canNext}
                   fullWidth
                 />
-                <Text style={[styles.footerHint, { color: c.text4, fontFamily: MONO }]}>
+                <Text
+                  style={[
+                    styles.footerHint,
+                    { color: c.text4, fontFamily: MONO },
+                  ]}
+                >
                   {isNativeKDF()
                     ? "原生 Go 加速 · 派生约 0.3 秒"
                     : isWasmKDF()
