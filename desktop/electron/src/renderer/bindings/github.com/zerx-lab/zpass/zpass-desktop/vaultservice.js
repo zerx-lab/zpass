@@ -29,6 +29,17 @@ export const UpdateItem = svc.UpdateItem;
 export const DeleteItem = svc.DeleteItem;
 export const BatchCreateItems = svc.BatchCreateItems;
 
+// item version history / revert
+export const ListItemHistory = svc.ListItemHistory;
+export const GetItemHistoryVersion = svc.GetItemHistoryVersion;
+export const RevertItem = svc.RevertItem;
+
+// item attachments
+export const AddAttachment = svc.AddAttachment;
+export const ListAttachments = svc.ListAttachments;
+export const GetAttachmentData = svc.GetAttachmentData;
+export const DeleteAttachment = svc.DeleteAttachment;
+
 // space isolation
 export const SetActiveSpace = svc.SetActiveSpace;
 export const GetActiveSpace = svc.GetActiveSpace;

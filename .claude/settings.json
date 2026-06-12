@@ -1,0 +1,5 @@
+{
+  "permissions": {
+    "additionalDirectories": ["../zpass_cloud"]
+  }
+}

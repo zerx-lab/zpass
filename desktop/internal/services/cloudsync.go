@@ -413,7 +413,18 @@ func (s *CloudService) BindCloudVault(spaceID, vaultID string) error {
 // SyncNow runs one FULL reconcile over every bound space and returns a summary.
 // It is a no-op (not an error) when signed out or the vault is locked.
 func (s *CloudService) SyncNow() (CloudSyncSummary, error) {
-	return s.runSync(context.Background(), true, nil)
+	sum, err := s.runSync(context.Background(), true, nil)
+	// A manual sync is the user's explicit "is the server back?" probe. If the
+	// realtime channel is not connected it is likely deep in reconnect backoff
+	// (up to 2 minutes after a server outage) — restart it now so the
+	// connection state recovers together with the manual sync instead of
+	// waiting the backoff out. stop+start resets the backoff; both are no-ops
+	// when signed out.
+	if !s.realtimeConnected.Load() {
+		s.stopRealtime()
+		s.startRealtime()
+	}
+	return sum, err
 }
 
 // runSync reconciles bound spaces with the cloud. full=true forces a full
@@ -524,6 +535,17 @@ func (s *CloudService) runSync(parent context.Context, full bool, scope map[stri
 	s.lastSyncMs.Store(nowMillis())
 	if full {
 		s.lastFullSyncMs.Store(nowMillis())
+	}
+	// This run reached the server, so the network is back — if the realtime
+	// watcher is still sitting in reconnect backoff (up to 2 minutes), restart
+	// it with fresh backoff so SSE recovers as soon as HTTP does. Guarded on
+	// len(bindings): a no-binding run proves nothing about reachability.
+	// Async because stop/start takes s.mu and must not extend syncMu hold time.
+	if len(bindings) > 0 && !s.realtimeConnected.Load() {
+		go func() {
+			s.stopRealtime()
+			s.startRealtime()
+		}()
 	}
 	s.notifySync("done", len(bindings), len(bindings), "")
 	s.emitEvent("cloud:sync:done", map[string]any{
@@ -677,6 +699,16 @@ func (s *CloudService) syncVaultFull(ctx context.Context, spaceID, vaultID strin
 			s.emitEvent("cloud:sync:warning", map[string]any{"spaceId": spaceID, "message": "set cursor: " + err.Error()})
 		}
 	}
+
+	// 8. Attachment reconcile. The attachment API is item-scoped and separate
+	// from the item change-feed, so it cannot ride the snapshot/CAS path; we run
+	// it as its own pass after the items converge. On the full path we pull-check
+	// every live remote item (authoritative self-heal).
+	pullIDs := make([]string, 0, len(remoteByID))
+	for id := range remoteByID {
+		pullIDs = append(pullIDs, id)
+	}
+	s.reconcileAttachments(ctx, client, spaceID, vaultID, vaultKey, pullIDs)
 	return pulled, pushed, nil
 }
 
@@ -884,6 +916,17 @@ func (s *CloudService) syncVaultIncremental(ctx context.Context, spaceID, vaultI
 		}
 	}
 	_ = hintSeq // reserved: a future optimization can short-circuit when hintSeq <= cursor and no local candidates exist
+
+	// Attachment reconcile (see syncVaultFull step 8). On the incremental path we
+	// only pull-check items that appeared in this delta — pushes/cloud-deletes of
+	// local attachment changes are scanned globally inside reconcileAttachments
+	// (cheap: indexed lookups of unsynced/deleted rows), so a local attachment
+	// add still propagates even when its item had no item-level change this cycle.
+	pullIDs := make([]string, 0, len(deltaByID))
+	for id := range deltaByID {
+		pullIDs = append(pullIDs, id)
+	}
+	s.reconcileAttachments(ctx, client, spaceID, vaultID, vaultKey, pullIDs)
 	return pulled, pushed, nil
 }
 

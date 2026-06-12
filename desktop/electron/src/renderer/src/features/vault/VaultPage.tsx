@@ -47,6 +47,7 @@
 import * as RadixAlertDialog from "@radix-ui/react-alert-dialog";
 import * as RadixDialog from "@radix-ui/react-dialog";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import { Events } from "@wailsio/runtime";
 import { clsx } from "clsx";
 import {
 	Check,
@@ -54,16 +55,20 @@ import {
 	ChevronRight,
 	Copy,
 	CreditCard,
+	Download,
 	Eye,
 	EyeOff,
+	History as HistoryIcon,
 	IdCard,
 	KeyRound,
 	Link2,
 	Lock as LockIcon,
 	LogIn as LogInIcon,
+	Paperclip,
 	Pencil,
 	Plus,
 	QrCode,
+	RotateCcw,
 	Search,
 	ShieldCheck,
 	Sparkles,
@@ -92,10 +97,16 @@ import { PasswordStrength } from "@/components/PasswordStrength";
 import { Select } from "@/components/Select";
 import { TotpField } from "@/features/vault/TotpField";
 import { writeClipboard, writeClipboardEphemeral } from "@/lib/clipboard";
+import { translateCloudError } from "@/lib/cloud-errors";
 import { formatShortcut, KEY_SYMBOL, SHORTCUTS } from "@/lib/keys";
 import type { OtpauthMeta } from "@/lib/parse-otpauth";
 import { DEFAULT_PASSWORD_OPTIONS, generatePassword } from "@/lib/password";
-import { vaultApi } from "@/lib/vault-api";
+import {
+	ATTACHMENT_MAX_BYTES,
+	type AttachmentMeta,
+	type VaultHistoryEntry,
+	vaultApi,
+} from "@/lib/vault-api";
 import { useLockStore } from "@/stores/lock";
 import { useUIStore } from "@/stores/ui";
 import {
@@ -156,6 +167,18 @@ function relativeTime(ts: number): string {
 	const d = Math.floor(h / 24);
 	if (d < 30) return `${d}d`;
 	return new Date(ts).toLocaleDateString();
+}
+
+/**
+ * 完整本地化日期 + 时间 —— 版本历史里需要精确到分钟的可读时间戳
+ *
+ * 与列表的 relativeTime 互补：列表求"扫一眼知道新旧"，历史求"看清具体
+ * 哪一刻"。沿用项目其它处（HealthPage / CloudSyncSection）的
+ * toLocaleString 惯例，不引入额外日期库。
+ */
+function formatTimestamp(ts: number): string {
+	if (!ts) return "";
+	return new Date(ts).toLocaleString();
 }
 
 /**
@@ -662,6 +685,8 @@ export function VaultPage() {
 	 */
 	const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 	const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+	/** 版本历史弹层开合 —— 针对当前选中条目 */
+	const [historyOpen, setHistoryOpen] = useState(false);
 	/**
 	 * 新建对话框打开时的预设 type。
 	 *
@@ -819,8 +844,7 @@ export function VaultPage() {
 		if (items.length === 0) return;
 		const targets = items.filter(
 			(it) =>
-				(it.type === "login" || it.type === "passkey") &&
-				!itemDetails[it.id],
+				(it.type === "login" || it.type === "passkey") && !itemDetails[it.id],
 		);
 		if (targets.length === 0) return;
 
@@ -899,18 +923,27 @@ export function VaultPage() {
 			if (id !== selectedId) {
 				selectItem(id);
 			}
-			if (!itemDetails[id]) {
-				// 后台拉；若条目已被删除（返回 null）或解密失败则把弹层关掉，
-				// 恢复原 await 版本"item 不存在不打开"的语义。
-				fetchItem(id)
-					.then((payload) => {
-						if (!payload) setDialogMode(null);
-					})
-					.catch(() => setDialogMode(null));
-			}
+			// 始终重新拉取最新完整数据 —— 不再因 itemDetails 命中就跳过。
+			//
+			// 原因（Bug 修复）：云端同步 pull 到本地后，VaultEventSync 只重 load
+			// 了摘要列表，itemDetails 缓存不会被刷新，于是缓存命中时编辑表单会
+			// 用到陈旧 fields。这里在每次打开编辑弹层时强制 fetchItem 抓权威数据，
+			// store 写入后 payload.updatedAt 变化，ItemDialog 的回填 effect（以
+			// existing.id + existing.updatedAt 为触发依据）会用最新值刷新一次表单。
+			//
+			// 不会打断用户输入：表单只在"打开瞬间"取最新；fetch 在 setDialogMode
+			// 之前/同步发起，回填只在 dialog 首次 mount 拿到新 payload 时发生一次，
+			// 之后后台同步不写 itemDetails，故 updatedAt 不变、不会重置正在编辑的表单。
+			fetchItem(id)
+				.then((payload) => {
+					// 条目已被删除（返回 null）或解密失败 → 关掉弹层，
+					// 恢复"item 不存在不打开"的语义。
+					if (!payload) setDialogMode(null);
+				})
+				.catch(() => setDialogMode(null));
 			setDialogMode("edit");
 		},
-		[selectedId, selectItem, itemDetails, fetchItem],
+		[selectedId, selectItem, fetchItem],
 	);
 
 	// 订阅 Topbar / ⌘N 触发的新建信号 —— 每次计数器递增就打开新建对话框，
@@ -1029,10 +1062,7 @@ export function VaultPage() {
 	);
 
 	const openListContextMenu = useCallback(
-		(
-			event: React.MouseEvent<HTMLElement>,
-			itemId?: string | null,
-		) => {
+		(event: React.MouseEvent<HTMLElement>, itemId?: string | null) => {
 			event.preventDefault();
 			event.stopPropagation();
 			const targetId = itemId === undefined ? selectedId : itemId;
@@ -1103,6 +1133,33 @@ export function VaultPage() {
 			setDeleteTargetId(null);
 		}
 	};
+
+	/**
+	 * 回退到指定历史版本
+	 *
+	 * 走 vaultApi.revertItem（后端产生新版本并同步），成功后刷新：
+	 *   - fetchItem(id)：重新拉完整 payload，刷新详情面板缓存
+	 *   - loadVault()：重拉列表，校准排序 / updatedAt 时间戳
+	 * 历史列表本身由 ItemHistoryDialog 在 revert 成功回调里自行重拉。
+	 *
+	 * 返回 boolean 表示成功与否，供弹层据此刷新历史列表 / 关闭。
+	 */
+	const onRevert = useCallback(
+		async (versionId: number): Promise<boolean> => {
+			if (!selectedId) return false;
+			try {
+				await vaultApi.revertItem(selectedId, versionId);
+				await fetchItem(selectedId);
+				await loadVault();
+				pushToast({ text: t("history_reverted"), icon: "check" });
+				return true;
+			} catch {
+				pushToast({ text: t("history_revert_failed"), icon: "x" });
+				return false;
+			}
+		},
+		[selectedId, fetchItem, loadVault, pushToast, t],
+	);
 
 	// ----- 键盘导航 -----
 	//
@@ -1331,9 +1388,7 @@ export function VaultPage() {
 										host={host}
 										selected={selectedId === it.id}
 										onClick={() => selectItem(it.id)}
-										onContextMenu={(event) =>
-											openListContextMenu(event, it.id)
-										}
+										onContextMenu={(event) => openListContextMenu(event, it.id)}
 										onPrefetch={() => prefetchItem(it.id)}
 									/>
 								);
@@ -1408,6 +1463,7 @@ export function VaultPage() {
 						onEdit={() => {
 							void openEditDialog(selectedSummary.id);
 						}}
+						onShowHistory={() => setHistoryOpen(true)}
 					/>
 				)}
 			</section>
@@ -1418,9 +1474,7 @@ export function VaultPage() {
 				y={contextMenu.y}
 				item={contextTargetSummary}
 				detail={contextTargetDetail}
-				onOpenChange={(open) =>
-					setContextMenu((prev) => ({ ...prev, open }))
-				}
+				onOpenChange={(open) => setContextMenu((prev) => ({ ...prev, open }))}
 				onNewItem={openNewDialogForType}
 				onEdit={(id) => {
 					void openEditDialog(id);
@@ -1436,6 +1490,16 @@ export function VaultPage() {
 					existing={dialogMode === "edit" ? detail : undefined}
 					presetType={dialogMode === "new" ? presetType : undefined}
 					onClose={() => setDialogMode(null)}
+				/>
+			)}
+
+			{/* ========== 版本历史弹层 ========== */}
+			{historyOpen && selectedSummary && (
+				<ItemHistoryDialog
+					itemId={selectedSummary.id}
+					itemName={selectedSummary.name}
+					onRevert={onRevert}
+					onClose={() => setHistoryOpen(false)}
 				/>
 			)}
 
@@ -1516,12 +1580,7 @@ function VaultListRow({
 				 * 选中态不再翻整块为 --accent（web checkbox-list 味）,改为行左侧
 				 * 2px brand 色 indicator（.zpass-row-active）
 				 */}
-				<ItemIcon
-					type={item.type}
-					name={item.name}
-					host={host}
-					variant="row"
-				/>
+				<ItemIcon type={item.type} name={item.name} host={host} variant="row" />
 				<div className="min-w-0 flex-1">
 					<div className="truncate text-[13px] text-(--text)">{item.name}</div>
 					<div className="truncate font-mono text-[10.5px] tracking-wider text-(--text-3) uppercase">
@@ -1627,9 +1686,17 @@ function VaultListContextMenu({
 
 					<DropdownMenu.Sub>
 						<DropdownMenu.SubTrigger className={itemClass}>
-							<Plus size={13} strokeWidth={1.6} className="shrink-0 text-(--text-3)" />
+							<Plus
+								size={13}
+								strokeWidth={1.6}
+								className="shrink-0 text-(--text-3)"
+							/>
 							<span className="flex-1">{t("ctx_new_item")}</span>
-							<ChevronRight size={12} strokeWidth={1.6} className="shrink-0 text-(--text-4)" />
+							<ChevronRight
+								size={12}
+								strokeWidth={1.6}
+								className="shrink-0 text-(--text-4)"
+							/>
 						</DropdownMenu.SubTrigger>
 						<DropdownMenu.Portal container={portalContainer}>
 							<DropdownMenu.SubContent
@@ -1667,7 +1734,11 @@ function VaultListContextMenu({
 								onSelect={() => onEdit(item.id)}
 								className={itemClass}
 							>
-								<Pencil size={13} strokeWidth={1.5} className="shrink-0 text-(--text-3)" />
+								<Pencil
+									size={13}
+									strokeWidth={1.5}
+									className="shrink-0 text-(--text-3)"
+								/>
 								{t("edit_btn")}
 							</DropdownMenu.Item>
 
@@ -1678,7 +1749,11 @@ function VaultListContextMenu({
 								}}
 								className={username ? itemClass : disabledClass}
 							>
-								<Copy size={13} strokeWidth={1.5} className="shrink-0 text-(--text-3)" />
+								<Copy
+									size={13}
+									strokeWidth={1.5}
+									className="shrink-0 text-(--text-3)"
+								/>
 								{t("ctx_copy_username")}
 							</DropdownMenu.Item>
 
@@ -1689,7 +1764,11 @@ function VaultListContextMenu({
 								}}
 								className={password ? itemClass : disabledClass}
 							>
-								<KeyRound size={13} strokeWidth={1.5} className="shrink-0 text-(--text-3)" />
+								<KeyRound
+									size={13}
+									strokeWidth={1.5}
+									className="shrink-0 text-(--text-3)"
+								/>
 								{t("ctx_copy_password")}
 							</DropdownMenu.Item>
 
@@ -1700,7 +1779,11 @@ function VaultListContextMenu({
 								}}
 								className={url ? itemClass : disabledClass}
 							>
-								<Link2 size={13} strokeWidth={1.5} className="shrink-0 text-(--text-3)" />
+								<Link2
+									size={13}
+									strokeWidth={1.5}
+									className="shrink-0 text-(--text-3)"
+								/>
 								{t("ctx_copy_url")}
 							</DropdownMenu.Item>
 
@@ -1710,7 +1793,11 @@ function VaultListContextMenu({
 								onSelect={() => onDelete(item.id)}
 								className={dangerClass}
 							>
-								<Trash2 size={13} strokeWidth={1.5} className="shrink-0 text-(--text-3)" />
+								<Trash2
+									size={13}
+									strokeWidth={1.5}
+									className="shrink-0 text-(--text-3)"
+								/>
 								{t("detail_delete")}
 							</DropdownMenu.Item>
 						</>
@@ -1744,7 +1831,13 @@ function EmptyDetail() {
 		<div className="flex h-full flex-col items-center justify-center gap-5 px-6 text-center">
 			{/* 占位图标 —— 不用 dashed border 的 web "no-content placeholder" 风,
 			 * 改用与 hero-glyph 同源的圆角矩形 + 内描边 + 微落影,让"空"也有桌面 app 质感 */}
-			<div className="flex h-14 w-14 items-center justify-center rounded-(--radius-xl) bg-(--bg-elev-2) text-(--text-3) shadow-(--shadow-sm)" style={{ boxShadow: "inset 0 0 0 1px var(--line-soft), 0 1px 2px rgba(0,0,0,0.06)" }}>
+			<div
+				className="flex h-14 w-14 items-center justify-center rounded-(--radius-xl) bg-(--bg-elev-2) text-(--text-3) shadow-(--shadow-sm)"
+				style={{
+					boxShadow:
+						"inset 0 0 0 1px var(--line-soft), 0 1px 2px rgba(0,0,0,0.06)",
+				}}
+			>
 				<KeyRound size={22} strokeWidth={1.2} />
 			</div>
 			<div className="flex flex-col gap-1">
@@ -1820,6 +1913,7 @@ function VaultDetail({
 	copiedAt,
 	onDelete,
 	onEdit,
+	onShowHistory,
 }: {
 	summary: VaultItemSummary;
 	detail: VaultItemPayload | undefined;
@@ -1829,6 +1923,7 @@ function VaultDetail({
 	copiedAt: Record<string, number>;
 	onDelete: () => void;
 	onEdit: () => void;
+	onShowHistory: () => void;
 }) {
 	const { t } = useTranslation();
 
@@ -1869,7 +1964,10 @@ function VaultDetail({
 								<TypeIcon size={9} strokeWidth={2} />
 								{t(typeLabelKey(summary.type))}
 							</span>
-							<span aria-hidden className="inline-block h-[3px] w-[3px] rounded-full bg-(--text-4)" />
+							<span
+								aria-hidden
+								className="inline-block h-[3px] w-[3px] rounded-full bg-(--text-4)"
+							/>
 							<span>{relativeTime(summary.updatedAt)}</span>
 						</div>
 					</div>
@@ -1884,6 +1982,15 @@ function VaultDetail({
 						leftIcon={<Pencil size={12} strokeWidth={1.5} />}
 					>
 						{t("edit_btn")}
+					</Button>
+					<Button
+						variant="ghost"
+						size="icon"
+						onClick={onShowHistory}
+						aria-label={t("history_btn")}
+						title={t("history_btn")}
+					>
+						<HistoryIcon size={14} strokeWidth={1.5} />
 					</Button>
 					<Button
 						variant="ghost"
@@ -2054,6 +2161,9 @@ function VaultDetail({
 					/>
 				</div>
 			)}
+
+			{/* 附件区 —— 条目已加载时展示 */}
+			{detail && <AttachmentsSection itemId={summary.id} />}
 
 			{/* 键盘提示尾栏：底栏式排版，kbd + 标签 + 中点分隔
 			 *
@@ -2391,13 +2501,23 @@ function ItemDialog({
 	 * 推导，不需要单列进 deps；只用 existing?.id 作为唯一触发条件，避免
 	 * 同一对象引用变化导致重复回填。
 	 */
-	// biome-ignore lint/correctness/useExhaustiveDependencies: existing.id 是唯一触发依据
+	//
+	// 触发依据为 existing.id + existing.updatedAt：
+	//   - id 变化：换了条目（理论上 edit 弹层不会换，但保留语义）
+	//   - updatedAt 变化：打开编辑弹层时 openEditDialog 强制 fetchItem 抓到了
+	//     比缓存更新的权威数据（云同步 pull 后缓存陈旧的修复路径），payload 被
+	//     替换、updatedAt 前进 → 在此一次性把最新值回填进表单。
+	//
+	// 为何不会打断输入：后台同步事件（VaultEventSync）只 load 摘要列表，不写
+	// itemDetails，所以弹层打开后 existing.updatedAt 不会再变 —— 用户输入到一半
+	// 不会被远端刷新覆盖。只有"打开瞬间那一次 fetch 带回更新的 updatedAt"会回填。
+	// biome-ignore lint/correctness/useExhaustiveDependencies: existing.id + existing.updatedAt 是触发依据，initialFields/initialCustomFields 由 existing 派生
 	useEffect(() => {
 		if (mode !== "edit" || !existing) return;
 		setName(existing.name);
 		setFields(initialFields);
 		setCustomFields(initialCustomFields);
-	}, [existing?.id]);
+	}, [existing?.id, existing?.updatedAt]);
 
 	/**
 	 * skeleton → 真实表单切换瞬间把焦点搬到 name 输入框
@@ -2725,82 +2845,216 @@ function ItemDialog({
 								<ItemDialogSkeleton />
 							) : (
 								<>
-							{/* 原"条目类型"选择行已删除：类型由侧边栏分类决定，dialog 内不再可切换 */}
+									{/* 原"条目类型"选择行已删除：类型由侧边栏分类决定，dialog 内不再可切换 */}
 
-							{/* 字段：name */}
-							<DialogField label={t("newlogin_name")}>
-								<input
-									ref={nameRef}
-									type="text"
-									value={name}
-									onChange={(e) => setName(e.target.value)}
-									placeholder={t("newlogin_name_placeholder")}
-									maxLength={120}
-									className="w-full border-0 bg-transparent text-sm text-(--text) outline-none placeholder:text-(--text-4)"
-								/>
-							</DialogField>
-
-							{/* SSH 专属：生成 / 导入 mode 切换 + 生成器面板 *
-								* lazy chunk:首次进入 SSH 新建路径时拉。fallback 用空 div
-								* 占位避免布局抖动 —— chunk 一般 <50ms 到位,几乎无感知。 */}
-							{type === "ssh" && mode === "new" && (
-								<Suspense
-									fallback={
-										<div
-											aria-hidden
-											className="h-24 rounded-(--radius) bg-(--bg-elev-2)"
+									{/* 字段：name */}
+									<DialogField label={t("newlogin_name")}>
+										<input
+											ref={nameRef}
+											type="text"
+											value={name}
+											onChange={(e) => setName(e.target.value)}
+											placeholder={t("newlogin_name_placeholder")}
+											maxLength={120}
+											className="w-full border-0 bg-transparent text-sm text-(--text) outline-none placeholder:text-(--text-4)"
 										/>
-									}
-								>
-									<SshKeyDialogSection
-										mode={sshKeyMode}
-										onModeChange={setSshKeyMode}
-										itemName={name}
-										fields={fields}
-										setField={setField}
-									/>
-								</Suspense>
-							)}
+									</DialogField>
 
-							{/* 按 type 渲染所有字段 */}
-							{fieldDefs.map((def) => {
-								// SSH 生成模式：隐藏 private_key / passphrase 字段
-								// （以及 public_key、如果有）—— 这些由生成器对话填入
-								if (
-									type === "ssh" &&
-									mode === "new" &&
-									sshKeyMode === "generate" &&
-									(def.key === "private_key" ||
-										def.key === "passphrase" ||
-										def.key === "public_key")
-								) {
-									return null;
-								}
+									{/* SSH 专属：生成 / 导入 mode 切换 + 生成器面板 *
+									 * lazy chunk:首次进入 SSH 新建路径时拉。fallback 用空 div
+									 * 占位避免布局抖动 —— chunk 一般 <50ms 到位,几乎无感知。 */}
+									{type === "ssh" && mode === "new" && (
+										<Suspense
+											fallback={
+												<div
+													aria-hidden
+													className="h-24 rounded-(--radius) bg-(--bg-elev-2)"
+												/>
+											}
+										>
+											<SshKeyDialogSection
+												mode={sshKeyMode}
+												onModeChange={setSshKeyMode}
+												itemName={name}
+												fields={fields}
+												setField={setField}
+											/>
+										</Suspense>
+									)}
 
-								const value = fields[def.key] ?? "";
-								const reveal = revealMap[def.key] ?? false;
-								const labelText = `${t(def.labelKey)}${def.required ? "" : ` · ${t("common_optional")}`}`;
-								const placeholder = def.placeholderKey
-									? t(def.placeholderKey)
-									: undefined;
+									{/* 按 type 渲染所有字段 */}
+									{fieldDefs.map((def) => {
+										// SSH 生成模式：隐藏 private_key / passphrase 字段
+										// （以及 public_key、如果有）—— 这些由生成器对话填入
+										if (
+											type === "ssh" &&
+											mode === "new" &&
+											sshKeyMode === "generate" &&
+											(def.key === "private_key" ||
+												def.key === "passphrase" ||
+												def.key === "public_key")
+										) {
+											return null;
+										}
 
-								if (def.kind === "textarea") {
-									// SSH 私钥 —— 默认折叠，与生成态体验一致。
-									// 防止「肩叔叔偷窥」+ 避免用户误在分享屏幕时裸露。
-									const isSshPrivateKey =
-										type === "ssh" && def.key === "private_key";
-									if (isSshPrivateKey) {
-										return (
-											<div key={def.key} className="flex flex-col gap-1.5">
-												<div className="flex items-center justify-between">
+										const value = fields[def.key] ?? "";
+										const reveal = revealMap[def.key] ?? false;
+										const labelText = `${t(def.labelKey)}${def.required ? "" : ` · ${t("common_optional")}`}`;
+										const placeholder = def.placeholderKey
+											? t(def.placeholderKey)
+											: undefined;
+
+										if (def.kind === "textarea") {
+											// SSH 私钥 —— 默认折叠，与生成态体验一致。
+											// 防止「肩叔叔偷窥」+ 避免用户误在分享屏幕时裸露。
+											const isSshPrivateKey =
+												type === "ssh" && def.key === "private_key";
+											if (isSshPrivateKey) {
+												return (
+													<div key={def.key} className="flex flex-col gap-1.5">
+														<div className="flex items-center justify-between">
+															<span className="font-mono text-[10.5px] tracking-wider text-(--text-3) uppercase">
+																{labelText}
+															</span>
+															<div className="flex items-center gap-1">
+																<Button
+																	type="button"
+																	variant="ghost"
+																	size="sm"
+																	onClick={() => toggleReveal(def.key)}
+																	aria-label={
+																		reveal
+																			? t("detail_hide")
+																			: t("detail_reveal")
+																	}
+																	title={
+																		reveal
+																			? t("detail_hide")
+																			: t("detail_reveal")
+																	}
+																>
+																	{reveal ? (
+																		<EyeOff size={11} strokeWidth={1.5} />
+																	) : (
+																		<Eye size={11} strokeWidth={1.5} />
+																	)}
+																</Button>
+																{value && (
+																	<Button
+																		type="button"
+																		variant="ghost"
+																		size="sm"
+																		onClick={() => writeClipboard(value)}
+																		aria-label={t("detail_copy")}
+																		title={t("detail_copy")}
+																	>
+																		<Copy size={11} strokeWidth={1.5} />
+																	</Button>
+																)}
+															</div>
+														</div>
+														{reveal || !value ? (
+															<textarea
+																value={value}
+																onChange={(e) =>
+																	setField(def.key, e.target.value)
+																}
+																placeholder={placeholder}
+																rows={5}
+																className="w-full resize-y rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) px-3 py-2 font-mono text-sm text-(--text) outline-none placeholder:text-(--text-4) focus:border-(--text-3)"
+															/>
+														) : (
+															<button
+																type="button"
+																onClick={() => toggleReveal(def.key)}
+																className="flex w-full items-center justify-center rounded-(--radius) border border-dashed border-(--line) bg-(--bg-elev-2) px-3 py-4 text-[12px] text-(--text-3) hover:bg-(--bg-hover) hover:text-(--text-2)"
+															>
+																{t("sshkey_private_hidden_hint")}
+															</button>
+														)}
+													</div>
+												);
+											}
+
+											return (
+												<div key={def.key} className="flex flex-col gap-1.5">
 													<span className="font-mono text-[10.5px] tracking-wider text-(--text-3) uppercase">
 														{labelText}
 													</span>
-													<div className="flex items-center gap-1">
+													<textarea
+														value={value}
+														onChange={(e) => setField(def.key, e.target.value)}
+														placeholder={placeholder}
+														rows={
+															def.key === "private_key" || def.key === "seed"
+																? 5
+																: 3
+														}
+														className={
+															def.mono
+																? "w-full resize-y rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) px-3 py-2 font-mono text-sm text-(--text) outline-none placeholder:text-(--text-4) focus:border-(--text-3)"
+																: "w-full resize-y rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) px-3 py-2 text-sm text-(--text) outline-none placeholder:text-(--text-4) focus:border-(--text-3)"
+														}
+													/>
+												</div>
+											);
+										}
+
+										if (def.kind === "secret") {
+											const showGenerator =
+												type === "login" && def.key === "password";
+											// totp 字段允许从二维码导入。login 类型的 totp 字段 +
+											// 独立 totp 类型的 totp 字段都走这个分支。不看 type，
+											// 只看 key ） 是因为全部 "totp" 语义的字段都可以从QR 导入。
+											const showQrImport = def.key === "totp";
+											return (
+												<div key={def.key} className="flex flex-col gap-1.5">
+													<DialogField label={labelText}>
+														<input
+															type={reveal ? "text" : "password"}
+															value={value}
+															onChange={(e) =>
+																setField(def.key, e.target.value)
+															}
+															placeholder={placeholder}
+															autoComplete="new-password"
+															className={
+																def.mono
+																	? "flex-1 border-0 bg-transparent font-mono text-sm text-(--text) outline-none placeholder:text-(--text-4)"
+																	: "flex-1 border-0 bg-transparent text-sm text-(--text) outline-none placeholder:text-(--text-4)"
+															}
+														/>
+														{showGenerator && (
+															<Button
+																type="button"
+																variant="secondary"
+																size="sm"
+																onClick={() => onGeneratePassword(def.key)}
+																title={t("newlogin_generate_hint")}
+																leftIcon={
+																	<Sparkles size={10} strokeWidth={1.5} />
+																}
+															>
+																{t("newlogin_generate")}
+															</Button>
+														)}
+														{showQrImport && (
+															<Button
+																type="button"
+																variant="ghost"
+																size="icon"
+																onClick={() => setQrPanelOpen((v) => !v)}
+																aria-label={t("qr_btn_label")}
+																aria-expanded={qrPanelOpen}
+																title={t("qr_btn_label")}
+															>
+																<QrCode size={13} strokeWidth={1.5} />
+															</Button>
+														)}
 														<Button
 															type="button"
 															variant="ghost"
-															size="sm"
+															size="icon"
 															onClick={() => toggleReveal(def.key)}
 															aria-label={
 																reveal ? t("detail_hide") : t("detail_reveal")
@@ -2810,193 +3064,71 @@ function ItemDialog({
 															}
 														>
 															{reveal ? (
-																<EyeOff size={11} strokeWidth={1.5} />
+																<EyeOff size={13} strokeWidth={1.5} />
 															) : (
-																<Eye size={11} strokeWidth={1.5} />
+																<Eye size={13} strokeWidth={1.5} />
 															)}
 														</Button>
-														{value && (
-															<Button
-																type="button"
-																variant="ghost"
-																size="sm"
-																onClick={() => writeClipboard(value)}
-																aria-label={t("detail_copy")}
-																title={t("detail_copy")}
-															>
-																<Copy size={11} strokeWidth={1.5} />
-															</Button>
-														)}
-													</div>
+													</DialogField>
+													{/* 仅 login.password 显示强度条 */}
+													{showGenerator && value && (
+														<PasswordStrength password={value} size="sm" />
+													)}
+													{/* totp 字段展开的二维码扫描面板(lazy chunk) */}
+													{showQrImport && qrPanelOpen && (
+														<Suspense
+															fallback={
+																<div
+																	aria-hidden
+																	className="h-40 rounded-(--radius) bg-(--bg-elev-2)"
+																/>
+															}
+														>
+															<QrScannerPanel
+																onClose={() => setQrPanelOpen(false)}
+																onApply={applyQrResult}
+															/>
+														</Suspense>
+													)}
 												</div>
-												{reveal || !value ? (
-													<textarea
-														value={value}
-														onChange={(e) => setField(def.key, e.target.value)}
-														placeholder={placeholder}
-														rows={5}
-														className="w-full resize-y rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) px-3 py-2 font-mono text-sm text-(--text) outline-none placeholder:text-(--text-4) focus:border-(--text-3)"
-													/>
-												) : (
-													<button
-														type="button"
-														onClick={() => toggleReveal(def.key)}
-														className="flex w-full items-center justify-center rounded-(--radius) border border-dashed border-(--line) bg-(--bg-elev-2) px-3 py-4 text-[12px] text-(--text-3) hover:bg-(--bg-hover) hover:text-(--text-2)"
-													>
-														{t("sshkey_private_hidden_hint")}
-													</button>
-												)}
-											</div>
-										);
-									}
+											);
+										}
 
-									return (
-										<div key={def.key} className="flex flex-col gap-1.5">
-											<span className="font-mono text-[10.5px] tracking-wider text-(--text-3) uppercase">
-												{labelText}
-											</span>
-											<textarea
-												value={value}
-												onChange={(e) => setField(def.key, e.target.value)}
-												placeholder={placeholder}
-												rows={
-													def.key === "private_key" || def.key === "seed"
-														? 5
-														: 3
-												}
-												className={
-													def.mono
-														? "w-full resize-y rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) px-3 py-2 font-mono text-sm text-(--text) outline-none placeholder:text-(--text-4) focus:border-(--text-3)"
-														: "w-full resize-y rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) px-3 py-2 text-sm text-(--text) outline-none placeholder:text-(--text-4) focus:border-(--text-3)"
-												}
-											/>
-										</div>
-									);
-								}
-
-								if (def.kind === "secret") {
-									const showGenerator =
-										type === "login" && def.key === "password";
-									// totp 字段允许从二维码导入。login 类型的 totp 字段 +
-									// 独立 totp 类型的 totp 字段都走这个分支。不看 type，
-									// 只看 key ） 是因为全部 "totp" 语义的字段都可以从QR 导入。
-									const showQrImport = def.key === "totp";
-									return (
-										<div key={def.key} className="flex flex-col gap-1.5">
-											<DialogField label={labelText}>
+										// "text" 与 "url" 共用普通 input 渲染
+										return (
+											<DialogField key={def.key} label={labelText}>
 												<input
-													type={reveal ? "text" : "password"}
+													type="text"
 													value={value}
 													onChange={(e) => setField(def.key, e.target.value)}
 													placeholder={placeholder}
-													autoComplete="new-password"
+													autoComplete="off"
 													className={
 														def.mono
-															? "flex-1 border-0 bg-transparent font-mono text-sm text-(--text) outline-none placeholder:text-(--text-4)"
-															: "flex-1 border-0 bg-transparent text-sm text-(--text) outline-none placeholder:text-(--text-4)"
+															? "w-full border-0 bg-transparent font-mono text-sm text-(--text) outline-none placeholder:text-(--text-4)"
+															: "w-full border-0 bg-transparent text-sm text-(--text) outline-none placeholder:text-(--text-4)"
 													}
 												/>
-												{showGenerator && (
-													<Button
-														type="button"
-														variant="secondary"
-														size="sm"
-														onClick={() => onGeneratePassword(def.key)}
-														title={t("newlogin_generate_hint")}
-														leftIcon={<Sparkles size={10} strokeWidth={1.5} />}
-													>
-														{t("newlogin_generate")}
-													</Button>
-												)}
-												{showQrImport && (
-													<Button
-														type="button"
-														variant="ghost"
-														size="icon"
-														onClick={() => setQrPanelOpen((v) => !v)}
-														aria-label={t("qr_btn_label")}
-														aria-expanded={qrPanelOpen}
-														title={t("qr_btn_label")}
-													>
-														<QrCode size={13} strokeWidth={1.5} />
-													</Button>
-												)}
-												<Button
-													type="button"
-													variant="ghost"
-													size="icon"
-													onClick={() => toggleReveal(def.key)}
-													aria-label={
-														reveal ? t("detail_hide") : t("detail_reveal")
-													}
-													title={reveal ? t("detail_hide") : t("detail_reveal")}
-												>
-													{reveal ? (
-														<EyeOff size={13} strokeWidth={1.5} />
-													) : (
-														<Eye size={13} strokeWidth={1.5} />
-													)}
-												</Button>
 											</DialogField>
-											{/* 仅 login.password 显示强度条 */}
-											{showGenerator && value && (
-												<PasswordStrength password={value} size="sm" />
-											)}
-											{/* totp 字段展开的二维码扫描面板(lazy chunk) */}
-											{showQrImport && qrPanelOpen && (
-												<Suspense
-													fallback={
-														<div
-															aria-hidden
-															className="h-40 rounded-(--radius) bg-(--bg-elev-2)"
-														/>
-													}
-												>
-													<QrScannerPanel
-														onClose={() => setQrPanelOpen(false)}
-														onApply={applyQrResult}
-													/>
-												</Suspense>
-											)}
+										);
+									})}
+
+									{/* 自定义字段编辑区 —— 参考 Bitwarden，统一在原生字段下方 */}
+									<CustomFieldsEditor
+										fields={customFields}
+										linkable={linkable}
+										onAdd={addCustomField}
+										onChangeType={changeCustomFieldType}
+										onUpdate={updateCustomField}
+										onRemove={removeCustomField}
+									/>
+
+									{/* 错误提示 */}
+									{errorMsg && (
+										<div className="flex items-start gap-1.5 text-xs leading-relaxed text-(--danger)">
+											<span>{errorMsg}</span>
 										</div>
-									);
-								}
-
-								// "text" 与 "url" 共用普通 input 渲染
-								return (
-									<DialogField key={def.key} label={labelText}>
-										<input
-											type="text"
-											value={value}
-											onChange={(e) => setField(def.key, e.target.value)}
-											placeholder={placeholder}
-											autoComplete="off"
-											className={
-												def.mono
-													? "w-full border-0 bg-transparent font-mono text-sm text-(--text) outline-none placeholder:text-(--text-4)"
-													: "w-full border-0 bg-transparent text-sm text-(--text) outline-none placeholder:text-(--text-4)"
-											}
-										/>
-									</DialogField>
-								);
-							})}
-
-							{/* 自定义字段编辑区 —— 参考 Bitwarden，统一在原生字段下方 */}
-							<CustomFieldsEditor
-								fields={customFields}
-								linkable={linkable}
-								onAdd={addCustomField}
-								onChangeType={changeCustomFieldType}
-								onUpdate={updateCustomField}
-								onRemove={removeCustomField}
-							/>
-
-							{/* 错误提示 */}
-							{errorMsg && (
-								<div className="flex items-start gap-1.5 text-xs leading-relaxed text-(--danger)">
-									<span>{errorMsg}</span>
-								</div>
-							)}
+									)}
 								</>
 							)}
 						</div>
@@ -3381,6 +3513,767 @@ function CustomFieldEditorRow({
 //   - 自动 role="alertdialog"，屏幕阅读器明确播报为告警
 //
 // 视觉与 NewItemDialog 保持一致：zpass-glass + 同款 backdrop + 同款入场动画
+
+// ---------------------------------------------------------------------------
+// 子组件：版本历史弹层
+// ---------------------------------------------------------------------------
+//
+// 两栏布局：
+//   - 左栏：版本列表（ListItemHistory，后端已按 snapshotAt 倒序）。每行展示
+//     操作类型徽章（更新/删除/回退）+ 名称 + 完整时间戳。
+//   - 右栏：选中版本的内容预览（GetItemHistoryVersion，按字段展示，敏感字段
+//     默认遮蔽，与详情页字段风格一致）+ "回退到此版本"按钮。
+//
+// 回退走二次确认（嵌套 AlertDialog），确认后调父级 onRevert（内部走
+// vaultApi.revertItem + 刷新 store）。成功后重拉历史列表并把预览切到最新。
+
+/** 历史操作类型 → i18n key */
+function historyOpLabelKey(op: VaultHistoryEntry["op"]): string {
+	switch (op) {
+		case "delete":
+			return "history_op_delete";
+		case "revert":
+			return "history_op_revert";
+		default:
+			return "history_op_update";
+	}
+}
+
+/** 预览态的只读字段行 —— 敏感字段默认遮蔽 + reveal 切换，无复制按钮 */
+function HistoryFieldRow({
+	label,
+	value,
+	sensitive,
+	mono,
+}: {
+	label: string;
+	value: string;
+	sensitive: boolean;
+	mono?: boolean;
+}) {
+	const { t } = useTranslation();
+	const [reveal, setReveal] = useState(false);
+	const display =
+		sensitive && !reveal ? "•".repeat(Math.min(value.length, 16)) : value;
+	const multiline = value.includes("\n");
+	return (
+		<div className="flex flex-col gap-1.5">
+			<span className="font-mono text-[10.5px] tracking-wider text-(--text-3) uppercase">
+				{label}
+			</span>
+			<div className="flex items-start gap-2 rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) px-3 py-2.5">
+				<span
+					className={clsx(
+						"zpass-selectable flex-1 text-sm text-(--text)",
+						mono && "font-mono",
+						multiline ? "whitespace-pre-wrap break-words" : "truncate",
+					)}
+				>
+					{display}
+				</span>
+				{sensitive && (
+					<Button
+						variant="ghost"
+						size="icon"
+						onClick={() => setReveal((s) => !s)}
+						aria-label={reveal ? t("detail_hide") : t("detail_reveal")}
+						title={reveal ? t("detail_hide") : t("detail_reveal")}
+					>
+						{reveal ? (
+							<EyeOff size={13} strokeWidth={1.5} />
+						) : (
+							<Eye size={13} strokeWidth={1.5} />
+						)}
+					</Button>
+				)}
+			</div>
+		</div>
+	);
+}
+
+function ItemHistoryDialog({
+	itemId,
+	itemName,
+	onRevert,
+	onClose,
+}: {
+	itemId: string;
+	itemName: string;
+	/** 回退到 versionId；返回成功与否，用于 dialog 内刷新历史 */
+	onRevert: (versionId: number) => Promise<boolean>;
+	onClose: () => void;
+}) {
+	const { t } = useTranslation();
+
+	const [entries, setEntries] = useState<VaultHistoryEntry[] | null>(null);
+	const [loadError, setLoadError] = useState(false);
+	const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
+	const [preview, setPreview] = useState<VaultItemPayload | null>(null);
+	const [previewLoading, setPreviewLoading] = useState(false);
+	const [previewError, setPreviewError] = useState(false);
+	// 已加载版本内容的内存缓存 —— 同一弹层生命周期内来回切版本无需重复 IPC，
+	// 命中即同步显示、零闪烁。dialog 卸载随组件一起回收，不会跨条目泄漏。
+	const previewCacheRef = useRef<Map<number, VaultItemPayload>>(new Map());
+	const [confirmOpen, setConfirmOpen] = useState(false);
+	const [reverting, setReverting] = useState(false);
+
+	const portalContainer =
+		typeof document !== "undefined"
+			? document.getElementById("portal-root")
+			: null;
+
+	// 拉历史列表（挂载时 + 回退成功后通过 reloadKey 重拉）
+	const [reloadKey, setReloadKey] = useState(0);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: reloadKey 是"回退成功后重拉历史"的触发依据，effect body 不直接读它
+	useEffect(() => {
+		let cancelled = false;
+		setLoadError(false);
+		setEntries(null);
+		vaultApi
+			.listItemHistory(itemId)
+			.then((list) => {
+				if (cancelled) return;
+				setEntries(list);
+				// 默认选中最新版本（列表首条）
+				setSelectedVersion(list.length > 0 ? list[0].versionId : null);
+			})
+			.catch(() => {
+				if (cancelled) return;
+				setLoadError(true);
+				setEntries([]);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [itemId, reloadKey]);
+
+	// 选中版本变化时拉该版本内容预览
+	//
+	// 防闪烁（Bug 修复）：切换版本时**不再**把 preview 清空再异步加载 —— 那会让
+	// 右侧预览区整块卸载、落到 loading 占位再重挂，肉眼即一次明显闪烁。改为：
+	//   1. 命中内存缓存 → 同步替换，完全无 loading、无闪烁
+	//   2. 未命中 → 保留上一版本内容继续显示，仅打开局部 loading 指示，
+	//      新内容到位后平滑替换；预览 DOM 全程不卸载
+	useEffect(() => {
+		if (selectedVersion === null) {
+			setPreview(null);
+			setPreviewLoading(false);
+			setPreviewError(false);
+			return;
+		}
+		// 缓存命中：同步切换，不触发任何 loading/卸载
+		const cached = previewCacheRef.current.get(selectedVersion);
+		if (cached) {
+			setPreview(cached);
+			setPreviewError(false);
+			setPreviewLoading(false);
+			return;
+		}
+		let cancelled = false;
+		// 保留旧 preview 显示（不 setPreview(null)），只开局部 loading 指示
+		setPreviewLoading(true);
+		setPreviewError(false);
+		vaultApi
+			.getItemHistoryVersion(itemId, selectedVersion)
+			.then((payload) => {
+				if (cancelled) return;
+				if (payload) {
+					previewCacheRef.current.set(selectedVersion, payload);
+					setPreview(payload);
+				} else {
+					setPreviewError(true);
+				}
+			})
+			.catch(() => {
+				if (cancelled) return;
+				setPreviewError(true);
+			})
+			.finally(() => {
+				if (!cancelled) setPreviewLoading(false);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [itemId, selectedVersion]);
+
+	// 回退成功后历史会新增一条记录、各版本快照可能位移，作废预览缓存避免显示陈旧内容
+	// biome-ignore lint/correctness/useExhaustiveDependencies: reloadKey 是作废缓存的触发依据
+	useEffect(() => {
+		previewCacheRef.current.clear();
+	}, [reloadKey]);
+
+	const confirmRevert = async () => {
+		if (selectedVersion === null) return;
+		setReverting(true);
+		const ok = await onRevert(selectedVersion);
+		setReverting(false);
+		setConfirmOpen(false);
+		if (ok) {
+			// 重拉历史（回退会新增一条 revert 记录），预览切到最新
+			setReloadKey((k) => k + 1);
+		}
+	};
+
+	// 预览字段渲染：先内置字段（与详情页顺序一致），再兜底其它字符串字段。
+	// 跳过自定义字段保留键 + passkey 内部 key，避免噪声。
+	const previewRows = (() => {
+		if (!preview) return null;
+		const f = preview.fields;
+		const HIDDEN_KEYS = new Set([
+			CUSTOM_FIELDS_KEY,
+			"fav",
+			"privateKeyPkcs8",
+			"publicKeyCose",
+			"publicKeySpki",
+			"schema",
+			"createdBy",
+			"coseAlgorithm",
+			"transports",
+			"userVerification",
+			"residentKey",
+			"attestationFormat",
+		]);
+		const ORDER = ["username", "password", "totp", "url", "notes"];
+		const seen = new Set<string>();
+		const rows: { key: string; label: string }[] = [];
+		for (const k of ORDER) {
+			if (typeof f[k] === "string" && (f[k] as string).length > 0) {
+				rows.push({ key: k, label: k.toUpperCase() });
+				seen.add(k);
+			}
+		}
+		for (const [k, v] of Object.entries(f)) {
+			if (seen.has(k) || HIDDEN_KEYS.has(k)) continue;
+			if (typeof v === "string" && v.length > 0) {
+				rows.push({ key: k, label: k.toUpperCase() });
+			}
+		}
+		return rows;
+	})();
+
+	return (
+		<RadixDialog.Root
+			open
+			onOpenChange={(o) => {
+				if (!o) onClose();
+			}}
+		>
+			<RadixDialog.Portal container={portalContainer}>
+				<RadixDialog.Overlay
+					className={clsx(
+						"fixed inset-0 z-50 zpass-backdrop",
+						"data-[state=open]:animate-[zpass-overlay-in_140ms_ease-out]",
+					)}
+				/>
+				<RadixDialog.Content
+					aria-describedby={undefined}
+					className={clsx(
+						"fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2",
+						"w-full max-w-3xl max-h-[85vh] overflow-hidden",
+						"zpass-glass rounded-(--radius-xl)",
+						"flex flex-col",
+						"data-[state=open]:animate-[zpass-dialog-in_180ms_ease-out]",
+						"focus:outline-none",
+					)}
+				>
+					{/* 头部 */}
+					<div className="flex shrink-0 items-start justify-between gap-3 border-b border-(--line-soft) px-6 pt-5 pb-3.5">
+						<div className="flex flex-col gap-0.5">
+							<RadixDialog.Title className="flex items-center gap-2 text-[15px] font-semibold tracking-tight text-(--text)">
+								{t("history_title")}
+								<span className="truncate font-mono text-[12px] font-normal text-(--text-3)">
+									{itemName}
+								</span>
+							</RadixDialog.Title>
+							<RadixDialog.Description className="text-[11.5px] leading-snug text-(--text-3)">
+								{t("history_sub")}
+							</RadixDialog.Description>
+						</div>
+						<RadixDialog.Close asChild>
+							<Button
+								variant="ghost"
+								size="icon"
+								aria-label={t("common_close")}
+								className="-mt-0.5 -mr-1.5"
+							>
+								<X size={14} strokeWidth={1.5} />
+							</Button>
+						</RadixDialog.Close>
+					</div>
+
+					{/* 主体：左列表 + 右预览 */}
+					<div className="flex min-h-0 flex-1">
+						{/* 左：版本列表 */}
+						<div className="flex w-64 shrink-0 flex-col overflow-y-auto border-r border-(--line-soft) py-2">
+							{entries === null ? (
+								<div className="px-4 py-3 text-[13px] text-(--text-3)">
+									{t("history_loading")}
+								</div>
+							) : loadError ? (
+								<div className="px-4 py-3 text-[13px] text-(--text-3)">
+									{t("history_error")}
+								</div>
+							) : entries.length === 0 ? (
+								<div className="px-4 py-3 text-[13px] text-(--text-3)">
+									{t("history_empty")}
+								</div>
+							) : (
+								<ul className="flex flex-col gap-0.5 px-2">
+									{entries.map((e) => (
+										<li key={e.versionId}>
+											<button
+												type="button"
+												onClick={() => setSelectedVersion(e.versionId)}
+												className={clsx(
+													"flex w-full flex-col items-start gap-1 rounded-(--radius) px-2.5 py-2 text-left transition-colors",
+													selectedVersion === e.versionId
+														? "bg-(--bg-active)"
+														: "hover:bg-(--bg-hover)",
+												)}
+											>
+												<span className="flex items-center gap-1.5">
+													<span className="zpass-hero-tag">
+														{t(historyOpLabelKey(e.op))}
+													</span>
+													<span className="truncate text-[12.5px] text-(--text)">
+														{e.name}
+													</span>
+												</span>
+												<span className="font-mono text-[10.5px] tracking-wider text-(--text-3)">
+													{formatTimestamp(e.snapshotAt || e.updatedAt)}
+												</span>
+											</button>
+										</li>
+									))}
+								</ul>
+							)}
+						</div>
+
+						{/* 右：选中版本预览 */}
+						<div className="flex min-w-0 flex-1 flex-col">
+							<div className="relative min-h-0 flex-1 overflow-y-auto px-6 py-5">
+								{selectedVersion === null ? (
+									<div className="text-[13px] text-(--text-3)">
+										{t("history_empty")}
+									</div>
+								) : preview ? (
+									// 防闪烁：只要有可显示的 preview 就保持渲染。切到尚未缓存的
+									// 版本时这里继续显示上一版本内容，新数据加载中由右上角的
+									// 局部 loading 指示提示，加载完成后平滑替换 —— 预览 DOM 不卸载。
+									<div className="flex flex-col gap-3">
+										<HistoryFieldRow
+											label={t("newlogin_name")}
+											value={preview.name}
+											sensitive={false}
+										/>
+										{previewRows?.map((r) => (
+											<HistoryFieldRow
+												key={r.key}
+												label={r.label}
+												value={String(preview.fields[r.key] ?? "")}
+												sensitive={SENSITIVE_FIELDS.has(r.key)}
+												mono={SENSITIVE_FIELDS.has(r.key) || r.key === "url"}
+											/>
+										))}
+									</div>
+								) : previewLoading ? (
+									// 仅"首次还没有任何 preview 可显示"时才用整块 loading 占位
+									<div className="text-[13px] text-(--text-3)">
+										{t("history_preview_loading")}
+									</div>
+								) : (
+									<div className="text-[13px] text-(--text-3)">
+										{t("history_preview_error")}
+									</div>
+								)}
+
+								{/* 局部 loading 指示：保留旧内容继续显示时，右上角浮一个轻提示，
+								 * 告知"正在加载新版本"，避免用户以为切换没反应。 */}
+								{preview && previewLoading && (
+									<div className="pointer-events-none absolute right-4 top-4 rounded-(--radius) bg-(--bg-elev-2) px-2 py-1 font-mono text-[10.5px] tracking-wider text-(--text-3) uppercase shadow-sm">
+										{t("history_preview_loading")}
+									</div>
+								)}
+							</div>
+
+							{/* 底部：回退按钮 */}
+							<div className="flex shrink-0 items-center justify-end border-t border-(--line-soft) px-6 py-3.5">
+								<Button
+									variant="secondary"
+									size="md"
+									disabled={
+										selectedVersion === null ||
+										previewLoading ||
+										previewError ||
+										!preview
+									}
+									onClick={() => setConfirmOpen(true)}
+									leftIcon={<RotateCcw size={13} strokeWidth={1.5} />}
+								>
+									{t("history_revert_btn")}
+								</Button>
+							</div>
+						</div>
+					</div>
+				</RadixDialog.Content>
+			</RadixDialog.Portal>
+
+			{/* 回退二次确认 */}
+			<RadixAlertDialog.Root
+				open={confirmOpen}
+				onOpenChange={(o) => {
+					if (!o && !reverting) setConfirmOpen(false);
+				}}
+			>
+				<RadixAlertDialog.Portal container={portalContainer}>
+					<RadixAlertDialog.Overlay
+						className={clsx(
+							"fixed inset-0 z-[60] zpass-backdrop",
+							"data-[state=open]:animate-[zpass-overlay-in_140ms_ease-out]",
+						)}
+					/>
+					<RadixAlertDialog.Content
+						className={clsx(
+							"fixed left-1/2 top-1/2 z-[60] -translate-x-1/2 -translate-y-1/2",
+							"w-full max-w-sm",
+							"zpass-glass rounded-(--radius-xl) p-6",
+							"flex flex-col gap-4",
+							"data-[state=open]:animate-[zpass-dialog-in_180ms_ease-out]",
+							"focus:outline-none",
+						)}
+					>
+						<div className="flex flex-col gap-1.5">
+							<RadixAlertDialog.Title className="text-base font-semibold tracking-tight text-(--text)">
+								{t("history_revert_confirm")}
+							</RadixAlertDialog.Title>
+							<RadixAlertDialog.Description className="text-[12.5px] leading-snug text-(--text-3)">
+								{t("history_revert_confirm_sub")}
+							</RadixAlertDialog.Description>
+						</div>
+						<div className="flex items-center justify-end gap-2 border-t border-(--line-soft) pt-4">
+							<Button
+								variant="secondary"
+								size="md"
+								disabled={reverting}
+								onClick={() => setConfirmOpen(false)}
+							>
+								{t("newlogin_cancel")}
+							</Button>
+							<Button
+								variant="default"
+								size="md"
+								loading={reverting}
+								onClick={confirmRevert}
+								leftIcon={<RotateCcw size={13} strokeWidth={1.5} />}
+							>
+								{reverting ? t("history_reverting") : t("history_revert_btn")}
+							</Button>
+						</div>
+					</RadixAlertDialog.Content>
+				</RadixAlertDialog.Portal>
+			</RadixAlertDialog.Root>
+		</RadixDialog.Root>
+	);
+}
+
+// ---------------------------------------------------------------------------
+// 子组件：条目附件区（AttachmentsSection）
+// ---------------------------------------------------------------------------
+//
+// 职责：
+//   - 选中条目后拉取附件列表（ListAttachments）
+//   - 展示文件名、大小（KB/MB）、同步状态、下载、删除按钮
+//   - "添加附件"：隐藏 <input type="file">，FileReader 读 base64，
+//     >5MiB 前端先拦截，调 AddAttachment 后刷新列表
+//   - 下载：GetAttachmentData → base64 → Blob → <a download>
+//   - 删除：AlertDialog 二次确认后删除
+//
+// 不引入新依赖：仅 lucide-react 图标 + Radix AlertDialog（已引入）+ vaultApi
+
+function AttachmentsSection({ itemId }: { itemId: string }) {
+	const { t } = useTranslation();
+	const pushToast = useUIStore((s) => s.pushToast);
+
+	const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
+	const [loading, setLoading] = useState(false);
+	const [deleteTarget, setDeleteTarget] = useState<AttachmentMeta | null>(null);
+	const [deleting, setDeleting] = useState(false);
+
+	const fileInputRef = useRef<HTMLInputElement>(null);
+
+	const load = useCallback(async () => {
+		setLoading(true);
+		try {
+			const list = await vaultApi.listAttachments(itemId);
+			setAttachments(list);
+		} catch {
+			// 静默失败：附件列表加载失败不阻塞主界面
+		} finally {
+			setLoading(false);
+		}
+	}, [itemId]);
+
+	useEffect(() => {
+		void load();
+	}, [load]);
+
+	// 附件上传后 cloud_id 由后台云同步异步写入（reconcileAttachments）；本组件
+	// 只在挂载/切换条目时拉取一次，否则「待同步 → 已同步」的状态翻转不会反映到
+	// UI（用户得重新选条目才看到）。订阅 cloud:sync:done，在每轮同步收敛后重拉
+	// 一次列表，让 synced 徽标即时更新。
+	useEffect(() => {
+		const off = Events.On("cloud:sync:done", () => {
+			void load();
+		});
+		return () => {
+			if (typeof off === "function") off();
+		};
+	}, [load]);
+
+	function formatSize(bytes: number): string {
+		if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+		return `${Math.ceil(bytes / 1024)} KB`;
+	}
+
+	const handleFileChange = useCallback(
+		async (e: React.ChangeEvent<HTMLInputElement>) => {
+			const file = e.target.files?.[0];
+			if (!file) return;
+			// 重置 input 以允许同一个文件再次选择
+			e.target.value = "";
+
+			if (file.size > ATTACHMENT_MAX_BYTES) {
+				pushToast({ text: t("attachment_too_large"), icon: "x" });
+				return;
+			}
+
+			try {
+				const dataB64 = await new Promise<string>((resolve, reject) => {
+					const reader = new FileReader();
+					reader.onload = () => {
+						const result = reader.result as string;
+						// 去掉 "data:<mime>;base64," 前缀
+						const idx = result.indexOf(",");
+						resolve(idx !== -1 ? result.slice(idx + 1) : result);
+					};
+					reader.onerror = () => reject(reader.error);
+					reader.readAsDataURL(file);
+				});
+				await vaultApi.addAttachment(itemId, file.name, dataB64);
+				await load();
+			} catch (err) {
+				const msg = translateCloudError(
+					err instanceof Error ? err.message : String(err),
+					t,
+				);
+				pushToast({
+					text: `${t("attachment_upload_failed")}: ${msg}`,
+					icon: "x",
+				});
+			}
+		},
+		[itemId, load, pushToast, t],
+	);
+
+	const handleDownload = useCallback(
+		async (att: AttachmentMeta) => {
+			try {
+				const { fileName, dataB64 } = await vaultApi.getAttachmentData(att.id);
+				// base64 → Uint8Array → Blob → objectURL → <a download>
+				const raw = atob(dataB64);
+				const bytes = new Uint8Array(raw.length);
+				for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+				const blob = new Blob([bytes]);
+				const url = URL.createObjectURL(blob);
+				const a = document.createElement("a");
+				a.href = url;
+				a.download = fileName || att.fileName;
+				a.click();
+				URL.revokeObjectURL(url);
+			} catch (err) {
+				const msg = translateCloudError(
+					err instanceof Error ? err.message : String(err),
+					t,
+				);
+				pushToast({
+					text: `${t("attachment_download_failed")}: ${msg}`,
+					icon: "x",
+				});
+			}
+		},
+		[pushToast, t],
+	);
+
+	const confirmDelete = useCallback(async () => {
+		if (!deleteTarget) return;
+		setDeleting(true);
+		try {
+			await vaultApi.deleteAttachment(deleteTarget.id);
+			setDeleteTarget(null);
+			await load();
+		} catch (err) {
+			const msg = translateCloudError(
+				err instanceof Error ? err.message : String(err),
+				t,
+			);
+			pushToast({
+				text: `${t("attachment_delete_failed")}: ${msg}`,
+				icon: "x",
+			});
+		} finally {
+			setDeleting(false);
+		}
+	}, [deleteTarget, load, pushToast, t]);
+
+	const portalContainer =
+		typeof document !== "undefined"
+			? document.getElementById("portal-root")
+			: null;
+
+	return (
+		<div className="mt-2 flex flex-col gap-3 border-t border-(--line-soft) pt-4">
+			{/* 标题行 + 添加按钮 */}
+			<div className="flex items-center justify-between">
+				<span className="font-mono text-[10.5px] tracking-wider text-(--text-3) uppercase flex items-center gap-1.5">
+					<Paperclip size={10} strokeWidth={1.6} />
+					{t("attachment_section")}
+				</span>
+				<Button
+					variant="ghost"
+					size="sm"
+					onClick={() => fileInputRef.current?.click()}
+					leftIcon={<Plus size={12} strokeWidth={1.5} />}
+				>
+					{t("attachment_add")}
+				</Button>
+				{/* 隐藏的文件选择器 */}
+				<input
+					ref={fileInputRef}
+					type="file"
+					className="sr-only"
+					aria-hidden
+					tabIndex={-1}
+					onChange={handleFileChange}
+				/>
+			</div>
+
+			{/* 附件列表 */}
+			{loading ? (
+				<div className="text-[12.5px] text-(--text-3)">
+					{t("vault_loading")}
+				</div>
+			) : attachments.length === 0 ? (
+				<div className="text-[12.5px] text-(--text-3)">
+					{t("attachment_empty")}
+				</div>
+			) : (
+				<ul className="flex flex-col gap-1.5">
+					{attachments.map((att) => (
+						<li
+							key={att.id}
+							className="flex items-center gap-2 rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2) px-3 py-2"
+						>
+							<Paperclip
+								size={13}
+								strokeWidth={1.5}
+								className="shrink-0 text-(--text-3)"
+							/>
+							<span className="min-w-0 flex-1 truncate text-[13px] text-(--text)">
+								{att.fileName}
+							</span>
+							<span className="shrink-0 font-mono text-[10.5px] tracking-wider text-(--text-4)">
+								{formatSize(att.sizeBytes)}
+							</span>
+							<span
+								className={clsx(
+									"shrink-0 rounded-full px-1.5 py-0.5 font-mono text-[9.5px] tracking-wider uppercase",
+									att.synced
+										? "bg-(--bg-active) text-(--text-2)"
+										: "bg-(--bg-elev) text-(--text-4)",
+								)}
+							>
+								{att.synced ? t("attachment_synced") : t("attachment_pending")}
+							</span>
+							<Button
+								variant="ghost"
+								size="icon"
+								onClick={() => void handleDownload(att)}
+								aria-label={t("attachment_download")}
+								title={t("attachment_download")}
+							>
+								<Download size={13} strokeWidth={1.5} />
+							</Button>
+							<Button
+								variant="ghost"
+								size="icon"
+								onClick={() => setDeleteTarget(att)}
+								aria-label={t("attachment_delete")}
+								title={t("attachment_delete")}
+							>
+								<Trash2 size={13} strokeWidth={1.5} />
+							</Button>
+						</li>
+					))}
+				</ul>
+			)}
+
+			{/* 删除确认 AlertDialog */}
+			<RadixAlertDialog.Root
+				open={deleteTarget !== null}
+				onOpenChange={(o) => {
+					if (!o && !deleting) setDeleteTarget(null);
+				}}
+			>
+				<RadixAlertDialog.Portal container={portalContainer}>
+					<RadixAlertDialog.Overlay
+						className={clsx(
+							"fixed inset-0 z-50 zpass-backdrop",
+							"data-[state=open]:animate-[zpass-overlay-in_140ms_ease-out]",
+						)}
+					/>
+					<RadixAlertDialog.Content
+						className={clsx(
+							"fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2",
+							"w-full max-w-sm",
+							"zpass-glass rounded-(--radius-xl) p-6",
+							"flex flex-col gap-4",
+							"data-[state=open]:animate-[zpass-dialog-in_180ms_ease-out]",
+							"focus:outline-none",
+						)}
+					>
+						<div className="flex flex-col gap-1.5">
+							<RadixAlertDialog.Title className="text-base font-semibold tracking-tight text-(--text)">
+								{t("attachment_delete_confirm")}
+							</RadixAlertDialog.Title>
+							{deleteTarget && (
+								<RadixAlertDialog.Description className="font-mono text-[12px] text-(--text-3)">
+									{deleteTarget.fileName}
+								</RadixAlertDialog.Description>
+							)}
+						</div>
+						<div className="flex items-center justify-end gap-2 border-t border-(--line-soft) pt-4">
+							<RadixAlertDialog.Cancel asChild>
+								<Button variant="secondary" size="md" disabled={deleting}>
+									{t("newlogin_cancel")}
+								</Button>
+							</RadixAlertDialog.Cancel>
+							<RadixAlertDialog.Action asChild>
+								<Button
+									variant="danger"
+									size="md"
+									loading={deleting}
+									onClick={() => void confirmDelete()}
+								>
+									{t("attachment_delete")}
+								</Button>
+							</RadixAlertDialog.Action>
+						</div>
+					</RadixAlertDialog.Content>
+				</RadixAlertDialog.Portal>
+			</RadixAlertDialog.Root>
+		</div>
+	);
+}
 
 function DeleteConfirmDialog({
 	open,

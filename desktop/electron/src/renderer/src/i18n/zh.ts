@@ -90,6 +90,27 @@ export const zh: Strings = {
   detail_delete: "删除",
   detail_delete_confirm: "永久删除该条目？",
 
+  // 版本历史与回退
+  history_btn: "历史",
+  history_title: "版本历史",
+  history_sub: "每次改动都会保留，便于你恢复到更早的版本。",
+  history_loading: "正在加载历史…",
+  history_empty: "暂无历史版本",
+  history_error: "加载历史失败",
+  history_op_update: "更新",
+  history_op_delete: "删除",
+  history_op_revert: "回退",
+  history_preview_title: "版本预览",
+  history_preview_loading: "正在加载该版本…",
+  history_preview_error: "加载该版本失败",
+  history_revert_btn: "回退到此版本",
+  history_revert_confirm: "回退到此版本？",
+  history_revert_confirm_sub:
+    "当前内容会作为新版本保留，因此之后仍可撤销本次回退。",
+  history_reverting: "正在回退…",
+  history_reverted: "已回退到该版本",
+  history_revert_failed: "回退失败",
+
   // 新建 / 编辑条目弹窗 —— 多类型表单
   newlogin_title: "新建登录",
   // 动态标题：用 i18next 插值组合，{{type}} 由调用方传入对应 newlogin_type_xxx 的翻译值。
@@ -890,6 +911,38 @@ export const zh: Strings = {
   cloud_err_secretkey_required: "登录需要提供 Secret Key。",
   cloud_err_secretkey_format:
     "Secret Key 格式不对 —— 应以 Z1- 开头,后接 account id 与 key 主体。请粘贴你创建账户时拿到的那串完整 key;还没有账户请选择「创建新账户」。",
+  // 同步 / 服务端错误文案（lib/cloud-errors.ts translateCloudError）
+  cloud_err_session_expired: "登录会话已过期，请重新登录。",
+  cloud_err_account_disabled: "账号已被禁用，请联系管理员。",
+  cloud_err_tenant_suspended: "组织已被停用，请联系管理员。",
+  cloud_err_email_taken: "该邮箱已被注册。",
+  cloud_err_mfa_code: "验证码错误。",
+  cloud_err_vault_not_found: "云端空间不存在或无访问权限。",
+  cloud_err_not_member: "你不是该云端空间的成员，请重新绑定。",
+  cloud_err_item_not_found: "条目在云端不存在。",
+  cloud_err_resync: "本地同步游标已过期，将自动执行一次全量同步。",
+  cloud_err_plan_limit:
+    "数据量已超出当前套餐限额，请升级套餐或删除部分数据后重试。",
+  cloud_err_plan_limit_storage:
+    "附件存储空间已超出当前套餐限额，请升级套餐或删除部分附件。",
+  cloud_err_server: "服务器内部错误，请稍后重试。",
+  cloud_err_maintenance: "服务维护中，请稍后重试。",
+  cloud_err_rate_limited: "操作过于频繁，请稍后再试。",
+  cloud_err_bad_request: "请求数据格式错误。",
+  cloud_err_forbidden: "没有权限执行此操作。",
+  cloud_err_network: "无法连接到同步服务器，请检查网络后重试。",
+  cloud_err_not_signed_in: "尚未登录云账户，请先登录。",
+  cloud_err_server_proof: "服务器身份校验失败，已拒绝本次连接。",
+  cloud_err_weak_password: "主密码长度不足，至少需要 8 个字符。",
+  cloud_err_decrypt: "数据解密失败 —— 密钥不匹配或数据已损坏。",
+  cloud_err_space_already_linked:
+    "该本地空间已绑定其他云端空间，请先解除绑定。",
+  cloud_err_vault_already_linked:
+    "该云端空间已绑定到其他本地空间，请先解除绑定。",
+  cloud_err_unresolved_conflicts: "仍有未解决的冲突，请先处理全部冲突。",
+  cloud_err_vault_locked: "保险库已锁定，解锁后将继续同步。",
+  cloud_err_vault_unavailable: "本地保险库服务不可用，请重启应用后重试。",
+  cloud_err_unknown: "同步出错：{{detail}}",
   // 设置区块
   cloud_settings_title: "云端同步",
   cloud_settings_desc: "通过 ZPass 账户在多设备间安全同步保险库。",
@@ -905,6 +958,15 @@ export const zh: Strings = {
   // 会话被远端吊销（SaaS 侧“退出全部设备” / 改主密码）
   cloud_session_revoked:
     "你已被远端登出（例如在其他设备上退出了全部设备）。请重新登录以恢复同步。",
+  // 标题栏云端连接状态指示器（components/CloudTitlebarStatus.tsx）
+  cloud_titlebar_revoked: "登录失效",
+  cloud_titlebar_error: "同步失败",
+  cloud_titlebar_conflicts: "{{count}} 个冲突",
+  cloud_titlebar_syncing: "同步中…",
+  cloud_titlebar_connecting: "连接中…",
+  cloud_titlebar_offline: "离线",
+  cloud_titlebar_synced: "已同步",
+  cloud_titlebar_click_to_sync: "点击立即同步",
   // 空间同步
   cloud_enable_for_space: "为此空间启用云同步",
   cloud_synced: "云同步已启用",
@@ -945,4 +1007,20 @@ export const zh: Strings = {
   cloud_conflict_skip: "跳过",
   cloud_conflict_skip_hint: "保留本机版本，忽略云端版本",
   cloud_conflict_apply: "应用全部",
+
+  // ---------------------------------------------------------------------------
+  // 条目附件 (Attachments)
+  // ---------------------------------------------------------------------------
+  attachment_section: "附件",
+  attachment_add: "添加附件",
+  attachment_empty: "暂无附件",
+  attachment_download: "下载",
+  attachment_delete: "删除",
+  attachment_delete_confirm: "确认删除该附件？",
+  attachment_synced: "已同步",
+  attachment_pending: "待同步",
+  attachment_too_large: "文件过大（上限 5 MB）",
+  attachment_upload_failed: "附件上传失败",
+  attachment_delete_failed: "附件删除失败",
+  attachment_download_failed: "附件下载失败",
 };

@@ -1718,6 +1718,12 @@ func (s *VaultService) UpdateItem(in ItemPayload) (*ItemSummary, error) {
 	}
 	WipeBytes(plaintext)
 
+	// 覆盖前把旧版密文原样快照入历史（aad 一致，直接复制 BLOB）。失败不阻断
+	// 更新 —— 历史是便利特性，主写入优先。
+	if err := s.snapshotItemHistoryLocked(existing, "update"); err != nil {
+		fmt.Printf("[vault] snapshot history (update) %s failed: %v\n", in.ID, err)
+	}
+
 	row := &VaultItemRow{
 		ID:        in.ID,
 		Payload:   ciphertext,
@@ -1829,6 +1835,15 @@ func (s *VaultService) softDeleteRowLocked(id string, existingRow *VaultItemRow)
 		if dbErr := s.db.DeleteItem(id); dbErr != nil {
 			return dbErr
 		}
+		// 物理删除条目时一并清理其历史，避免孤儿历史
+		if hErr := s.db.DeleteItemHistory(id); hErr != nil {
+			fmt.Printf("[vault] delete item history %s failed: %v\n", id, hErr)
+		}
+		// 同理清理其附件（物理删，云端绑定的附件会在云端 GC / 用户已无法访问，
+		// 与「条目密文损坏只能物理删」的兼容路径一致）。
+		if aErr := s.db.DeleteAttachmentsByItem(id); aErr != nil {
+			fmt.Printf("[vault] delete item attachments %s failed: %v\n", id, aErr)
+		}
 		s.notifyVaultChanged("delete", "", id)
 		return nil
 	}
@@ -1854,6 +1869,10 @@ func (s *VaultService) softDeleteRowLocked(id string, existingRow *VaultItemRow)
 	if err != nil {
 		return fmt.Errorf("seal tombstone: %w", err)
 	}
+	// 软删除前把旧（活动）版密文原样快照入历史，让用户能从历史回退已删条目。
+	if err := s.snapshotItemHistoryLocked(existingRow, "delete"); err != nil {
+		fmt.Printf("[vault] snapshot history (delete) %s failed: %v\n", id, err)
+	}
 	if err := s.db.SoftDeleteItem(id, ciphertext, now, now); err != nil {
 		return fmt.Errorf("soft delete: %w", err)
 	}
@@ -1865,6 +1884,251 @@ func (s *VaultService) softDeleteRowLocked(id string, existingRow *VaultItemRow)
 	})
 	s.notifyVaultChanged("delete", "", id)
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// 条目版本历史与回退（History / Revert）
+// ---------------------------------------------------------------------------
+
+// ItemHistorySummary 是 ListItemHistory 返回的「历史版本摘要」
+//
+// 故意**不含完整敏感字段**（password / totp / seed 等）—— 列表只需要足够展示
+// 「哪个版本、什么操作、什么时候」。前端要预览某版完整内容时再调
+// GetItemHistoryVersion 单独取。
+//
+//   - VersionID  : vault_item_history.id，回退 / 预览时回传给后端
+//   - Op         : 触发该快照的操作（update|delete|restore|revert）
+//   - Name / Type: 该历史版本的条目名与类型（用于列表展示与 diff 概览）
+//   - UpdatedAt  : 该版本的 updatedAt（被快照那一刻条目的修改时间）
+//   - SnapshotAt : 快照写入时刻
+type ItemHistorySummary struct {
+	VersionID  int64    `json:"versionId"`
+	Op         string   `json:"op"`
+	Name       string   `json:"name"`
+	Type       ItemType `json:"type"`
+	UpdatedAt  int64    `json:"updatedAt"`
+	SnapshotAt int64    `json:"snapshotAt"`
+}
+
+// ListItemHistory 返回指定条目的历史版本摘要（最新在前）
+//
+// 仅作用于当前激活空间的条目（与 GetItem 同样的空间门禁）—— 防止越权查看别的
+// 空间条目的历史。解密各历史 payload 取 name/type，单条解密失败时降级（用密文
+// 行的 op/时间戳填摘要，name 留空），不让一条坏数据中断整张列表。
+func (s *VaultService) ListItemHistory(itemID string) ([]ItemHistorySummary, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.dek == nil {
+		return nil, ErrVaultLocked
+	}
+	if itemID == "" {
+		return nil, errors.New("item id cannot be empty")
+	}
+	// 空间门禁：确认该条目存在且属于当前激活空间。GetItem 不过滤 tombstone
+	// 在 db 层，但这里用行的 space_id 判定即可（历史属于条目，与删除状态无关）。
+	itemRow, err := s.db.GetItem(itemID)
+	if err != nil {
+		return nil, fmt.Errorf("get item: %w", err)
+	}
+	if itemRow == nil {
+		return nil, ErrItemNotFound
+	}
+	if s.currentSpaceID == "" || itemRow.SpaceID != s.currentSpaceID {
+		return nil, ErrItemNotFound
+	}
+
+	rows, err := s.db.ListItemHistory(itemID, itemHistoryMaxVersions)
+	if err != nil {
+		return nil, fmt.Errorf("list item history: %w", err)
+	}
+	out := make([]ItemHistorySummary, 0, len(rows))
+	for i := range rows {
+		h := &rows[i]
+		sum := ItemHistorySummary{
+			VersionID:  h.ID,
+			Op:         h.Op,
+			UpdatedAt:  h.UpdatedAt,
+			SnapshotAt: h.SnapshotAt,
+		}
+		// 历史密文 aad = item_id，复用 decryptItem 的解密路径（构造临时行）。
+		payload, derr := s.decryptItem(&VaultItemRow{ID: h.ItemID, Payload: h.Payload})
+		if derr == nil {
+			migrateLegacyTypeInPlace(payload)
+			sum.Name = payload.Name
+			sum.Type = payload.Type
+		} else {
+			fmt.Printf("[vault] history decrypt %s v%d failed: %v\n", itemID, h.ID, derr)
+		}
+		out = append(out, sum)
+	}
+	return out, nil
+}
+
+// GetItemHistoryVersion 返回指定历史版本的完整解密 ItemPayload（供前端预览 / diff）
+//
+// 空间门禁同 ListItemHistory。返回的是该历史版本的完整字段（含敏感字段）——
+// 与 GetItem 对待当前版本一致，前端在已解锁会话内可见。versionID 必须属于
+// itemID（db 层 GetItemHistoryVersion 带 item_id 校验），否则 ErrItemNotFound。
+func (s *VaultService) GetItemHistoryVersion(itemID string, versionID int64) (*ItemPayload, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.dek == nil {
+		return nil, ErrVaultLocked
+	}
+	if itemID == "" {
+		return nil, errors.New("item id cannot be empty")
+	}
+	itemRow, err := s.db.GetItem(itemID)
+	if err != nil {
+		return nil, fmt.Errorf("get item: %w", err)
+	}
+	if itemRow == nil {
+		return nil, ErrItemNotFound
+	}
+	if s.currentSpaceID == "" || itemRow.SpaceID != s.currentSpaceID {
+		return nil, ErrItemNotFound
+	}
+
+	h, err := s.db.GetItemHistoryVersion(itemID, versionID)
+	if err != nil {
+		return nil, fmt.Errorf("get item history version: %w", err)
+	}
+	if h == nil {
+		return nil, ErrItemNotFound
+	}
+	payload, err := s.decryptItem(&VaultItemRow{ID: h.ItemID, Payload: h.Payload})
+	if err != nil {
+		return nil, fmt.Errorf("decrypt history version: %w", err)
+	}
+	migrateLegacyTypeInPlace(payload)
+	// SpaceID 以当前条目行为准（历史密文里的可能是旧值）。
+	payload.SpaceID = itemRow.SpaceID
+	return payload, nil
+}
+
+// RevertItem 把条目回退到指定历史版本
+//
+// 流程：
+//  1. 空间门禁 + 取当前条目行（事实来源：id / createdAt / spaceID）
+//  2. 把当前版本快照入历史（op='revert'）—— 回退本身可被再回退
+//  3. 用历史版本的 Name / Type / Fields 覆盖当前条目；UpdatedAt=now、Revision+1、
+//     ID / CreatedAt / SpaceID 保持不变，DeletedAt 清空（回退即「复活成活动版」）
+//  4. 走与 UpdateItem 相同的加密（aad=id）+ db.UpdateItem 持久化路径
+//  5. 通知 SSH agent（若 ssh 类型）+ notifyVaultChanged → 触发云同步推送
+//
+// 返回回退后的条目摘要。需要 dek（已解锁）。
+func (s *VaultService) RevertItem(itemID string, versionID int64) (*ItemSummary, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dek == nil {
+		return nil, ErrVaultLocked
+	}
+	if itemID == "" {
+		return nil, errors.New("item id cannot be empty")
+	}
+
+	curRow, err := s.db.GetItem(itemID)
+	if err != nil {
+		return nil, fmt.Errorf("get item: %w", err)
+	}
+	if curRow == nil {
+		return nil, ErrItemNotFound
+	}
+	if s.currentSpaceID == "" || curRow.SpaceID != s.currentSpaceID {
+		return nil, ErrItemNotFound
+	}
+
+	hist, err := s.db.GetItemHistoryVersion(itemID, versionID)
+	if err != nil {
+		return nil, fmt.Errorf("get history version: %w", err)
+	}
+	if hist == nil {
+		return nil, ErrItemNotFound
+	}
+	histPayload, err := s.decryptItem(&VaultItemRow{ID: hist.ItemID, Payload: hist.Payload})
+	if err != nil {
+		return nil, fmt.Errorf("decrypt history version: %w", err)
+	}
+	migrateLegacyTypeInPlace(histPayload)
+	if _, ok := validItemTypes[histPayload.Type]; !ok {
+		return nil, fmt.Errorf("invalid item type in history version: %q", histPayload.Type)
+	}
+
+	// 先把「当前版本」快照入历史（op='revert'），保证回退可被再回退。
+	if err := s.snapshotItemHistoryLocked(curRow, "revert"); err != nil {
+		fmt.Printf("[vault] snapshot history (revert) %s failed: %v\n", itemID, err)
+	}
+
+	// 用历史版本的内容覆盖当前条目；ID / CreatedAt / SpaceID 保持当前行不变。
+	if curRow.UpdatedAt > s.lastTsMs {
+		s.lastTsMs = curRow.UpdatedAt
+	}
+	now := s.nowMs()
+	out := ItemPayload{
+		ID:        itemID,
+		Type:      histPayload.Type,
+		Name:      histPayload.Name,
+		SpaceID:   curRow.SpaceID,
+		Fields:    histPayload.Fields,
+		CreatedAt: curRow.CreatedAt,
+		UpdatedAt: now,
+		DeletedAt: nil,
+	}
+	if out.Fields == nil {
+		out.Fields = map[string]any{}
+	}
+	// Revision：基于当前条目的 revision 自增（解密失败用墙钟兜底，保证严格递增）。
+	if curPayload, derr := s.decryptItem(curRow); derr == nil {
+		out.Revision = curPayload.Revision + 1
+	} else {
+		out.Revision = now
+	}
+
+	plaintext, err := json.Marshal(&out)
+	if err != nil {
+		return nil, fmt.Errorf("marshal revert payload: %w", err)
+	}
+	ciphertext, err := SealAEAD(s.dek, plaintext, []byte(itemID))
+	WipeBytes(plaintext)
+	if err != nil {
+		return nil, fmt.Errorf("seal revert payload: %w", err)
+	}
+
+	row := &VaultItemRow{
+		ID:        itemID,
+		Payload:   ciphertext,
+		CreatedAt: curRow.CreatedAt,
+		UpdatedAt: now,
+	}
+	// db.UpdateItem 不改 deleted_at —— 若当前条目本是 tombstone，回退需要复活它。
+	// 用 RestoreItem 统一走「活动版」落盘（活动行调用 RestoreItem 把 deleted_at
+	// 置 NULL 也是幂等无害）。
+	if curRow.DeletedAt != nil {
+		if err := s.db.RestoreItem(itemID, ciphertext, now); err != nil {
+			return nil, fmt.Errorf("restore on revert: %w", err)
+		}
+	} else if err := s.db.UpdateItem(row); err != nil {
+		return nil, fmt.Errorf("update on revert: %w", err)
+	}
+
+	if out.Type == ItemTypeSSH {
+		s.notifySshAgentSafe(func(n SshAgentNotifier) {
+			go func() { _ = n.PushVaultKeys() }()
+		})
+	}
+
+	totpSecret, _ := out.Fields["totp"].(string)
+	summary := &ItemSummary{
+		ID:        itemID,
+		Type:      out.Type,
+		Name:      out.Name,
+		CreatedAt: curRow.CreatedAt,
+		UpdatedAt: now,
+		HasTOTP:   strings.TrimSpace(totpSecret) != "",
+	}
+	// 通知前端 + 触发云同步（main.go 的 emit 在 vault:changed 时调 NudgeSync）。
+	s.notifyVaultChanged("revert", out.Type, itemID)
+	return summary, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -1967,6 +2231,11 @@ func (s *VaultService) ingestForeignPayload(id string, payload *ItemPayload, cre
 	if !force && existing.UpdatedAt >= updatedAt {
 		return false, nil // LWW: 本端更新或一样新，不覆盖
 	}
+	// 同步把远端变更应用到本端已有条目之前，先把本端旧版密文原样快照入历史
+	// （op='update'），让用户能回退被同步覆盖 / 复活掉的本地版本。失败不阻断同步。
+	if err := s.snapshotItemHistoryLocked(existing, "update"); err != nil {
+		fmt.Printf("[vault] snapshot history (sync) %s failed: %v\n", id, err)
+	}
 	// db.RestoreItem / db.UpdateItem 都不改 space_id 列；上面已令 spaceID =
 	// existing.SpaceID，列保持不变即正确，密文内 SpaceID 也已对齐。
 	if existing.DeletedAt != nil {
@@ -2001,7 +2270,21 @@ func (s *VaultService) ingestForeignPayload(id string, payload *ItemPayload, cre
 const (
 	aadDEK      = "zpass:dek"
 	aadVerifier = "zpass:verifier"
+
+	// 附件加密上下文前缀 —— 文件名与内容分别绑定到 attachment id，使密文不可在
+	// 「名 ↔ 内容」「附件 ↔ 附件」之间互换（aad mismatch 立即暴露）。完整 aad 为
+	// 前缀 + attachment.id（见 attachmentNameAAD / attachmentBlobAAD）。
+	aadAttachmentNamePrefix = "zpass/attachment-name:v1:"
+	aadAttachmentBlobPrefix = "zpass/attachment-blob:v1:"
+
+	// attachmentMaxBytes 是单附件明文内容上限（5 MiB），与云端 DB 模式硬上限一致。
+	// 本地先拦截，避免上传到云端才被 413 拒。
+	attachmentMaxBytes = 5 * 1024 * 1024
 )
+
+// attachmentNameAAD / attachmentBlobAAD 构造附件文件名 / 内容的 AEAD 上下文。
+func attachmentNameAAD(id string) []byte { return []byte(aadAttachmentNamePrefix + id) }
+func attachmentBlobAAD(id string) []byte { return []byte(aadAttachmentBlobPrefix + id) }
 
 // TOTPResult 是 BatchGenerateTOTP 每条条目的返回结果
 //
@@ -2085,6 +2368,39 @@ func (s *VaultService) BatchGenerateTOTP(itemIDs []string) ([]TOTPResult, error)
 	}
 
 	return results, nil
+}
+
+// snapshotItemHistoryLocked 把一行的「当前密文」原样存进 vault_item_history
+//
+// 调用方须已持有 s.mu 写锁。设计要点：
+//   - aad 一致性：vault_items.payload 与历史表 payload 的 aad 都是 item.id，
+//     因此**直接复制旧密文 BLOB**，不重新解密 / 加密 —— 既省一次 AEAD 往返，
+//     也避免「解密失败的损坏行无法被快照」的边界问题（损坏行也值得留档）。
+//   - op：标记触发快照的操作（'update'|'delete'|'restore'|'revert'）。
+//   - updatedAt：取 row.UpdatedAt（被快照那一版的 updatedAt）。
+//   - 写后立即 Prune 到 itemHistoryMaxVersions 上限。
+//
+// best-effort：历史是审计 / 便利特性，写失败 log 后返回 err 由调用方决定是否
+// 容忍。当前所有调用点都把它当「失败也不阻断主写入」处理（见各调用处注释）。
+func (s *VaultService) snapshotItemHistoryLocked(row *VaultItemRow, op string) error {
+	if row == nil || len(row.Payload) == 0 {
+		return nil
+	}
+	h := &ItemHistoryRow{
+		ItemID:     row.ID,
+		Payload:    row.Payload,
+		Op:         op,
+		UpdatedAt:  row.UpdatedAt,
+		SnapshotAt: s.nowMs(),
+	}
+	if err := s.db.InsertItemHistory(h); err != nil {
+		return err
+	}
+	// 压在每条目上限内，超出删最旧。Prune 失败不影响刚写入的快照可用性。
+	if err := s.db.PruneItemHistory(row.ID, itemHistoryMaxVersions); err != nil {
+		fmt.Printf("[vault] prune item history %s failed: %v\n", row.ID, err)
+	}
+	return nil
 }
 
 // decryptItem 把数据库里的密文行还原成 ItemPayload

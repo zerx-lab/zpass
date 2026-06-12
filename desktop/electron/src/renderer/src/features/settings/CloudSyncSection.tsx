@@ -36,12 +36,16 @@ import {
   syncNow,
   unlinkSpace,
 } from "@/lib/cloud-api";
+import { translateCloudError } from "@/lib/cloud-errors";
 import { CLOUD_BASE_URL_LOCKED, useCloudStore } from "@/stores/cloud";
 import { useActiveSpace, useSpacesStore } from "@/stores/spaces";
 import { dialogPortalContainer } from "./shared";
 
 /* ----------------------------------------------------------------------------
  * Helper: 错误消息提取
+ *
+ * state 里存后端原文（英文），展示点统一走 translateCloudError(raw, t)
+ * 翻译成当前语言 —— 切换语言后已有错误文案也会实时更新。
  * -------------------------------------------------------------------------- */
 
 function messageOf(e: unknown): string {
@@ -277,7 +281,7 @@ export function CloudSyncSection() {
                   strokeWidth={1.5}
                   className="mt-0.5 shrink-0 text-(--text-3)"
                 />
-                <span>{urlError}</span>
+                <span>{translateCloudError(urlError, t)}</span>
               </div>
             )}
           </div>
@@ -371,7 +375,7 @@ export function CloudSyncSection() {
                     strokeWidth={1.5}
                     className="mt-0.5 shrink-0 text-(--text-3)"
                   />
-                  <span>{linkError}</span>
+                  <span>{translateCloudError(linkError, t)}</span>
                 </div>
               )}
             </div>
@@ -421,7 +425,7 @@ export function CloudSyncSection() {
                       strokeWidth={1.5}
                       className="mt-0.5 shrink-0 text-(--text-3)"
                     />
-                    <span>{syncError}</span>
+                    <span>{translateCloudError(syncError, t)}</span>
                   </div>
                 )}
               </div>
@@ -460,7 +464,7 @@ export function CloudSyncSection() {
                 )}
                 {progress.error && (
                   <div className="text-[11.5px] text-(--text-3)">
-                    {progress.error}
+                    {translateCloudError(progress.error, t)}
                   </div>
                 )}
               </div>
@@ -614,7 +618,7 @@ function RemoteVaultsPanel({
             strokeWidth={1.5}
             className="mt-0.5 shrink-0 text-(--text-3)"
           />
-          <span>{error}</span>
+          <span>{translateCloudError(error, t)}</span>
         </div>
       )}
 
@@ -909,7 +913,9 @@ function CloudConflictResolverDialog({
             </div>
             <div className="flex items-center gap-3">
               {error && (
-                <span className="text-[11.5px] text-(--text-2)">{error}</span>
+                <span className="text-[11.5px] text-(--text-2)">
+                  {translateCloudError(error, t)}
+                </span>
               )}
               <Button
                 disabled={!allChosen || applying}

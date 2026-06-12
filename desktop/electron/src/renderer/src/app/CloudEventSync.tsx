@@ -72,6 +72,7 @@ export function CloudEventSync() {
             "idle",
           processed: p.processed ?? 0,
           total: p.total ?? 0,
+          error: p.error,
         });
       },
     );

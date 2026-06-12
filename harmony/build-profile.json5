@@ -5,13 +5,13 @@
         "name": "default",
         "type": "HarmonyOS",
         "material": {
-          "storeFile": "C:/Users/zero/Documents/zpass_release.p12",
-          "storePassword": "0000001C8E86D63D30F162E4E1A084D43E2A77C6E5E53BACA930E8CDF8DC98E7FBEBB71585F2330EB10F14C9",
-          "keyAlias": "zpass_release",
-          "keyPassword": "0000001CC2088A3ACBDFC568475853F3622334BB3530355B378B7A16070F43F9BB929DDE569801DC631B4F3C",
+          "certpath": "C:\\Users\\zero\\.ohos\\config\\default_harmony_rQzWoehyNH0lEM7tLI25T5GiUuepRxaX6nDcoODjMAk=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001BE03152010CE568AD5CD9E7F870CB54C48DA05EB56E3B8E284CB106AD4EEF915061C59981699B62",
+          "profile": "C:\\Users\\zero\\.ohos\\config\\default_harmony_rQzWoehyNH0lEM7tLI25T5GiUuepRxaX6nDcoODjMAk=.p7b",
           "signAlg": "SHA256withECDSA",
-          "profile": "C:/Users/zero/Documents/zpass_release_profileRelease.p7b",
-          "certpath": "C:/Users/zero/Documents/zpass_release.cer"
+          "storeFile": "C:\\Users\\zero\\.ohos\\config\\default_harmony_rQzWoehyNH0lEM7tLI25T5GiUuepRxaX6nDcoODjMAk=.p12",
+          "storePassword": "0000001BA4ABFC7EA8EF733BA2CE49842853932DB6B3645336652BE6613F0DBFD4C7C9582CB8B4206E6492"
         }
       },
       {
@@ -31,6 +31,19 @@
     "products": [
       {
         "name": "default",
+        "signingConfig": "default",
+        "compatibleSdkVersion": "5.0.0(12)",
+        "targetSdkVersion": "6.0.0(20)",
+        "runtimeOS": "HarmonyOS",
+        "buildOption": {
+          "strictMode": {
+            "caseSensitiveCheck": true,
+            "useNormalizedOHMUrl": true
+          }
+        }
+      },
+      {
+        "name": "release",
         "signingConfig": "release",
         "compatibleSdkVersion": "5.0.0(12)",
         "targetSdkVersion": "6.0.0(20)",
@@ -60,7 +73,8 @@
         {
           "name": "default",
           "applyToProducts": [
-            "default"
+            "default",
+            "release"
           ]
         }
       ]

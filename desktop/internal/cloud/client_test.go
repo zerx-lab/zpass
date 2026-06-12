@@ -86,6 +86,50 @@ func TestLoginStartFieldNames(t *testing.T) {
 	}
 }
 
+func TestUploadAttachmentSendsPlaintextSizeAndDecodes(t *testing.T) {
+	// Regression: the wire body must carry the PLAINTEXT size_bytes (not the
+	// ciphertext length), and a 200 {attachment_id, size_bytes} must decode into
+	// the returned id — the path that records cloud_id locally. A field-name or
+	// status mismatch here would silently leave the attachment "待同步" forever
+	// while the server kept the committed row (the original bug's shape).
+	c, _ := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/vaults/v1/items/i1/attachments" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		var raw map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+			t.Fatalf("decode req: %v", err)
+		}
+		if _, ok := raw["file_name_enc"]; !ok {
+			t.Errorf("missing file_name_enc: %v", raw)
+		}
+		if _, ok := raw["blob"]; !ok {
+			t.Errorf("missing blob: %v", raw)
+		}
+		// size_bytes must be the plaintext length (97), not the 137-byte blob.
+		if got, _ := raw["size_bytes"].(float64); int64(got) != 97 {
+			t.Errorf("size_bytes = %v, want 97 (plaintext)", raw["size_bytes"])
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"attachment_id": "att-uuid-1", "size_bytes": 97,
+		})
+	})
+	c.SetToken("tok-1")
+	// blob here is 137 bytes (simulated ciphertext) but the declared plaintext
+	// size is 97 — the value that must hit the wire.
+	id, size, err := c.UploadAttachment(context.Background(), "v1", "i1",
+		[]byte("namecipher"), make([]byte, 137), 97)
+	if err != nil {
+		t.Fatalf("UploadAttachment: %v", err)
+	}
+	if id != "att-uuid-1" {
+		t.Fatalf("attachment id = %q, want att-uuid-1", id)
+	}
+	if size != 97 {
+		t.Fatalf("size = %d, want 97", size)
+	}
+}
+
 func TestChangeConflictIsInBand(t *testing.T) {
 	// A CAS conflict is HTTP 200 with status:"conflict" — must NOT be an error.
 	c, _ := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {

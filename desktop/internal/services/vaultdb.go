@@ -102,7 +102,20 @@ const (
 	// 归属，同步只处理当前登录账户的绑定 —— 否则换账户登录后旧绑定指向的
 	// vault 当前账户非成员，member/self 返 404 打断同步。老绑定 account_id
 	// 回填为 ''，被当前账户过滤掉（需重新 link），不再产生 404。
-	vaultSchemaVersion = 7
+	// v7 → v8：新增 vault_item_history 表（条目版本历史）。每次 update / delete /
+	// restore / revert 前把旧版 vault_items.payload 原样快照入此表，让用户能查看
+	// 历史版本并回退。payload 沿用与 vault_items 完全相同的 DEK 加密（aad=item_id），
+	// 直接复制旧密文 BLOB，不重加密。老 vault 无历史，表为空即可。
+	// v8 → v9：新增 vault_attachments 表（条目附件）。每条附件存 DEK 加密的
+	// file_name_enc + blob（aad 分别为 attachment-name / attachment-blob 上下文，
+	// 见 vaultservice.go），size_bytes 明文（≤5MiB，与云端 DB 模式一致）。
+	// deleted_at 软删除 tombstone；cloud_id 记云端 attachment_id（未同步为空），
+	// synced_at 记最近同步时刻。加 item_id 索引。老 vault 无附件，表为空即可。
+	vaultSchemaVersion = 9
+
+	// itemHistoryMaxVersions 是每个条目保留的历史版本上限。
+	// 超出后由 PruneItemHistory 删最旧版本，防止单条目历史无限增长。
+	itemHistoryMaxVersions = 50
 
 	// kdfNameArgon2id 写入 vault_meta.kdf 字段的标识
 	// 未来若引入新 KDF（比如 PHC 接班的算法），这里增加新常量并在
@@ -355,6 +368,34 @@ func (db *VaultDB) initSchema() error {
 
 		CREATE INDEX IF NOT EXISTS idx_vault_audit_created_at
 			ON vault_audit (created_at DESC);
+
+		CREATE TABLE IF NOT EXISTS vault_item_history (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			item_id     TEXT    NOT NULL,
+			payload     BLOB    NOT NULL,            -- DEK 加密的旧版 ItemPayload（aad=item_id，直接复制旧密文）
+			op          TEXT    NOT NULL,            -- 'update' | 'delete' | 'restore' | 'revert'
+			updated_at  INTEGER NOT NULL,            -- 被快照那一版的 updatedAt
+			snapshot_at INTEGER NOT NULL             -- 快照写入时刻 unix ms
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_vault_item_history_item
+			ON vault_item_history (item_id, id DESC);
+
+		CREATE TABLE IF NOT EXISTS vault_attachments (
+			id            TEXT    PRIMARY KEY,         -- 本地 UUID（hex 32 字符）
+			item_id       TEXT    NOT NULL,            -- 所属条目 id
+			file_name_enc BLOB    NOT NULL,            -- DEK 加密的文件名（aad=attachment-name 上下文）
+			blob          BLOB    NOT NULL,            -- DEK 加密的文件内容（aad=attachment-blob 上下文）
+			size_bytes    INTEGER NOT NULL,            -- 明文字节数（≤5MiB）
+			created_at    INTEGER NOT NULL,
+			updated_at    INTEGER NOT NULL,
+			deleted_at    INTEGER,                     -- 软删除 tombstone：NULL = 未删除
+			cloud_id      TEXT,                        -- 云端 attachment_id；未同步为空
+			synced_at     INTEGER                      -- 最近一次成功同步时刻 unix ms
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_vault_attachments_item
+			ON vault_attachments (item_id);
 	`)
 	if err != nil {
 		return fmt.Errorf("create tables: %w", err)
@@ -382,6 +423,15 @@ func (db *VaultDB) initSchema() error {
 	// 幂等 CREATE TABLE IF NOT EXISTS，丢失可由下一次全量 reconcile 重建。
 	if err := db.ensureCloudItemStateSchema(); err != nil {
 		return fmt.Errorf("ensure cloud_item_state schema: %w", err)
+	}
+	// v8 的 vault_item_history 表（条目版本历史）—— 幂等 CREATE TABLE IF NOT EXISTS。
+	// 实际建表已在上面的 CREATE TABLE 段执行；此处再调一次保证迁移路径独立可用。
+	if err := db.ensureItemHistorySchema(); err != nil {
+		return fmt.Errorf("ensure vault_item_history v8 schema: %w", err)
+	}
+	// v9 的 vault_attachments 表（条目附件）—— 幂等 CREATE TABLE IF NOT EXISTS。
+	if err := db.ensureAttachmentSchema(); err != nil {
+		return fmt.Errorf("ensure vault_attachments v9 schema: %w", err)
 	}
 
 	// 若 vault_meta 已有行，检查 version；落后就跑 migrate
@@ -521,6 +571,58 @@ func (db *VaultDB) ensureVaultItemsV5Schema() error {
 	return nil
 }
 
+// ensureItemHistorySchema 幂等地建好 vault_item_history 表与索引（v8 条目版本历史）
+//
+// 与其它 ensureXxxSchema 同样的幂等模式：CREATE TABLE / CREATE INDEX 都带
+// IF NOT EXISTS，反复跑无副作用。从 initSchema 头部与 migrate(case 8) 两处调用，
+// 保证「全新库」与「老库迁移」两条路径都能建好表。
+func (db *VaultDB) ensureItemHistorySchema() error {
+	_, err := db.handle.Exec(`
+		CREATE TABLE IF NOT EXISTS vault_item_history (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			item_id     TEXT    NOT NULL,
+			payload     BLOB    NOT NULL,
+			op          TEXT    NOT NULL,
+			updated_at  INTEGER NOT NULL,
+			snapshot_at INTEGER NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_vault_item_history_item
+			ON vault_item_history (item_id, id DESC);
+	`)
+	if err != nil {
+		return fmt.Errorf("create vault_item_history: %w", err)
+	}
+	return nil
+}
+
+// ensureAttachmentSchema 幂等地建好 vault_attachments 表与索引（v9 条目附件）
+//
+// 与其它 ensureXxxSchema 同样的幂等模式：CREATE TABLE / CREATE INDEX 都带
+// IF NOT EXISTS，反复跑无副作用。从 initSchema 头部与 migrate(case 9) 两处调用，
+// 保证「全新库」与「老库迁移」两条路径都能建好表。
+func (db *VaultDB) ensureAttachmentSchema() error {
+	_, err := db.handle.Exec(`
+		CREATE TABLE IF NOT EXISTS vault_attachments (
+			id            TEXT    PRIMARY KEY,
+			item_id       TEXT    NOT NULL,
+			file_name_enc BLOB    NOT NULL,
+			blob          BLOB    NOT NULL,
+			size_bytes    INTEGER NOT NULL,
+			created_at    INTEGER NOT NULL,
+			updated_at    INTEGER NOT NULL,
+			deleted_at    INTEGER,
+			cloud_id      TEXT,
+			synced_at     INTEGER
+		);
+		CREATE INDEX IF NOT EXISTS idx_vault_attachments_item
+			ON vault_attachments (item_id);
+	`)
+	if err != nil {
+		return fmt.Errorf("create vault_attachments: %w", err)
+	}
+	return nil
+}
+
 // migrate 顺序执行从 from+1 到 to 的迁移步骤
 //
 // v1 是首版，没有任何迁移分支。未来加列时按下例：
@@ -611,6 +713,20 @@ func (db *VaultDB) migrate(from, to int) error {
 			// 幂等执行过；此处只需确认成功。
 			if err := db.ensureCloudVaultsAccountColumn(); err != nil {
 				return fmt.Errorf("v7: ensure cloud_vaults account_id: %w", err)
+			}
+		case 8:
+			// v7 → v8：新增 vault_item_history 表（条目版本历史）。
+			// 实际改动已在 initSchema 头部的 ensureItemHistorySchema() 幂等
+			// 执行过；此处只需确认成功。老 vault 无历史，表为空即可。
+			if err := db.ensureItemHistorySchema(); err != nil {
+				return fmt.Errorf("v8: ensure vault_item_history schema: %w", err)
+			}
+		case 9:
+			// v8 → v9：新增 vault_attachments 表（条目附件）。
+			// 实际改动已在 initSchema 头部的 ensureAttachmentSchema() 幂等
+			// 执行过；此处只需确认成功。老 vault 无附件，表为空即可。
+			if err := db.ensureAttachmentSchema(); err != nil {
+				return fmt.Errorf("v9: ensure vault_attachments schema: %w", err)
 			}
 		}
 		// 落版本号 —— 每个分支结束后单独 UPDATE，避免某个分支内部
@@ -1450,3 +1566,456 @@ func (db *VaultDB) PruneAuditEntries(keep int) error {
 	}
 	return nil
 }
+
+// ---------------------------------------------------------------------------
+// vault_item_history 读写（条目版本历史）
+// ---------------------------------------------------------------------------
+
+// ItemHistoryRow 是 vault_item_history 一行的原始形式
+//
+// Payload 是密文 BLOB —— 直接复制自被快照那一刻的 vault_items.payload，
+// 沿用相同的 DEK 加密与 aad（= ItemID），db 层不感知明文（与 vault_items
+// 同样的「加密在外、存储在内」原则）。op 取 'update'|'delete'|'restore'|'revert'。
+// UpdatedAt 是被快照那一版的 updatedAt；SnapshotAt 是写入历史的时刻。
+type ItemHistoryRow struct {
+	ID         int64
+	ItemID     string
+	Payload    []byte
+	Op         string
+	UpdatedAt  int64
+	SnapshotAt int64
+}
+
+// InsertItemHistory 写入一条历史快照
+//
+// id 由 SQLite AUTOINCREMENT 生成。调用方（vaultservice）在覆盖 / 软删除 /
+// 复活 / 回退条目「之前」调用，把旧版密文原样存档。SnapshotAt 为 0 时填墙钟。
+func (db *VaultDB) InsertItemHistory(r *ItemHistoryRow) error {
+	if r == nil {
+		return errors.New("nil item history row")
+	}
+	if r.ItemID == "" {
+		return errors.New("history item_id cannot be empty")
+	}
+	if len(r.Payload) == 0 {
+		return errors.New("history payload cannot be empty")
+	}
+	if r.Op == "" {
+		return errors.New("history op cannot be empty")
+	}
+	if r.SnapshotAt == 0 {
+		r.SnapshotAt = time.Now().UnixMilli()
+	}
+	_, err := db.handle.Exec(`
+		INSERT INTO vault_item_history (item_id, payload, op, updated_at, snapshot_at)
+		VALUES (?, ?, ?, ?, ?)
+	`, r.ItemID, r.Payload, r.Op, r.UpdatedAt, r.SnapshotAt)
+	if err != nil {
+		return fmt.Errorf("insert item history %s: %w", r.ItemID, err)
+	}
+	return nil
+}
+
+// ListItemHistory 返回指定条目的历史版本（按 id DESC，即最新快照在前）
+//
+// limit <= 0 返回空。走 idx_vault_item_history_item 复合索引。db 层只吐密文行，
+// 解密 / 摘要由 vaultservice 完成。
+func (db *VaultDB) ListItemHistory(itemID string, limit int) ([]ItemHistoryRow, error) {
+	if itemID == "" {
+		return nil, errors.New("item id cannot be empty")
+	}
+	if limit <= 0 {
+		return nil, nil
+	}
+	rows, err := db.handle.Query(`
+		SELECT id, item_id, payload, op, updated_at, snapshot_at
+		FROM vault_item_history
+		WHERE item_id = ?
+		ORDER BY id DESC
+		LIMIT ?
+	`, itemID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query item history %s: %w", itemID, err)
+	}
+	defer rows.Close()
+
+	out := make([]ItemHistoryRow, 0, limit)
+	for rows.Next() {
+		var r ItemHistoryRow
+		if err := rows.Scan(&r.ID, &r.ItemID, &r.Payload, &r.Op, &r.UpdatedAt, &r.SnapshotAt); err != nil {
+			return nil, fmt.Errorf("scan item history: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// GetItemHistoryVersion 按历史版本 id 读取单条（校验 itemID 归属）
+//
+// 找不到返回 (nil, nil) —— 与 GetItem 同样的「key not found」语义。校验 item_id
+// 防止前端用别的条目的 versionID 取到不属于该条目的历史（越权 / 脏数据防御）。
+func (db *VaultDB) GetItemHistoryVersion(itemID string, versionID int64) (*ItemHistoryRow, error) {
+	if itemID == "" {
+		return nil, errors.New("item id cannot be empty")
+	}
+	var r ItemHistoryRow
+	err := db.handle.QueryRow(`
+		SELECT id, item_id, payload, op, updated_at, snapshot_at
+		FROM vault_item_history WHERE id = ? AND item_id = ?
+	`, versionID, itemID).Scan(&r.ID, &r.ItemID, &r.Payload, &r.Op, &r.UpdatedAt, &r.SnapshotAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get item history version %d: %w", versionID, err)
+	}
+	return &r, nil
+}
+
+// DeleteItemHistory 物理删除指定条目的全部历史
+//
+// 调用场景：物理删除条目（vault_items 行真删）时一并清理其历史，避免留下
+// 永远访问不到的孤儿历史。幂等：无历史时 DELETE 也不报错。
+func (db *VaultDB) DeleteItemHistory(itemID string) error {
+	if itemID == "" {
+		return errors.New("item id cannot be empty")
+	}
+	_, err := db.handle.Exec(`DELETE FROM vault_item_history WHERE item_id = ?`, itemID)
+	if err != nil {
+		return fmt.Errorf("delete item history %s: %w", itemID, err)
+	}
+	return nil
+}
+
+// PruneItemHistory 保留指定条目最新 keep 个历史版本，其余删除
+//
+// 调用场景：每次 InsertItemHistory 后调一次，把单条目历史压在 keep 上限内，
+// 防止高频编辑的条目历史无限增长。keep < 0 是 noop；keep = 0 删全部。
+func (db *VaultDB) PruneItemHistory(itemID string, keep int) error {
+	if itemID == "" {
+		return errors.New("item id cannot be empty")
+	}
+	if keep < 0 {
+		return nil
+	}
+	_, err := db.handle.Exec(`
+		DELETE FROM vault_item_history
+		WHERE item_id = ?
+		  AND id NOT IN (
+		    SELECT id FROM vault_item_history
+		    WHERE item_id = ? ORDER BY id DESC LIMIT ?
+		  )
+	`, itemID, itemID, keep)
+	if err != nil {
+		return fmt.Errorf("prune item history %s: %w", itemID, err)
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// vault_attachments 读写（条目附件）
+// ---------------------------------------------------------------------------
+
+// AttachmentRow 是 vault_attachments 一行的原始形式
+//
+// FileNameEnc / Blob 是密文 BLOB（DEK 加密，aad 见 vaultservice.go），db 层
+// 不感知明文（与 vault_items 同样的「加密在外、存储在内」原则）。SizeBytes 是
+// 明文内容字节数。DeletedAt 软删除 tombstone（nil = 未删）。CloudID 是云端
+// attachment_id（未同步为空），SyncedAt 是最近同步时刻。
+type AttachmentRow struct {
+	ID          string
+	ItemID      string
+	FileNameEnc []byte
+	Blob        []byte
+	SizeBytes   int64
+	CreatedAt   int64
+	UpdatedAt   int64
+	DeletedAt   *int64
+	CloudID     string
+	SyncedAt    *int64
+}
+
+// scanAttachmentRow 把一行扫成 *AttachmentRow（共用 NullInt64 / NullString 转换）。
+func scanAttachmentRow(sc interface {
+	Scan(dest ...any) error
+}) (*AttachmentRow, error) {
+	var r AttachmentRow
+	var deletedAt, syncedAt sql.NullInt64
+	var cloudID sql.NullString
+	if err := sc.Scan(
+		&r.ID, &r.ItemID, &r.FileNameEnc, &r.Blob, &r.SizeBytes,
+		&r.CreatedAt, &r.UpdatedAt, &deletedAt, &cloudID, &syncedAt,
+	); err != nil {
+		return nil, err
+	}
+	if deletedAt.Valid {
+		v := deletedAt.Int64
+		r.DeletedAt = &v
+	}
+	if syncedAt.Valid {
+		v := syncedAt.Int64
+		r.SyncedAt = &v
+	}
+	if cloudID.Valid {
+		r.CloudID = cloudID.String
+	}
+	return &r, nil
+}
+
+// attachmentSelectCols 是所有附件 SELECT 共用的列顺序（与 scanAttachmentRow 对应）。
+const attachmentSelectCols = `id, item_id, file_name_enc, blob, size_bytes, created_at, updated_at, deleted_at, cloud_id, synced_at`
+
+// InsertAttachment 插入新附件行
+//
+// id 由调用方生成（vaultservice 用 UUID v4 风格）。created_at / updated_at 调用方
+// 传入（0 时填墙钟）。重复 id 因 PRIMARY KEY 约束失败。
+func (db *VaultDB) InsertAttachment(r *AttachmentRow) error {
+	if r == nil {
+		return errors.New("nil attachment row")
+	}
+	if r.ID == "" {
+		return errors.New("attachment id cannot be empty")
+	}
+	if r.ItemID == "" {
+		return errors.New("attachment item_id cannot be empty")
+	}
+	if len(r.FileNameEnc) == 0 || len(r.Blob) == 0 {
+		return errors.New("attachment file_name_enc / blob cannot be empty")
+	}
+	now := time.Now().UnixMilli()
+	if r.CreatedAt == 0 {
+		r.CreatedAt = now
+	}
+	if r.UpdatedAt == 0 {
+		r.UpdatedAt = now
+	}
+	var deletedAt, syncedAt sql.NullInt64
+	if r.DeletedAt != nil {
+		deletedAt = sql.NullInt64{Int64: *r.DeletedAt, Valid: true}
+	}
+	if r.SyncedAt != nil {
+		syncedAt = sql.NullInt64{Int64: *r.SyncedAt, Valid: true}
+	}
+	var cloudID sql.NullString
+	if r.CloudID != "" {
+		cloudID = sql.NullString{String: r.CloudID, Valid: true}
+	}
+	_, err := db.handle.Exec(`
+		INSERT INTO vault_attachments
+			(id, item_id, file_name_enc, blob, size_bytes, created_at, updated_at, deleted_at, cloud_id, synced_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, r.ID, r.ItemID, r.FileNameEnc, r.Blob, r.SizeBytes, r.CreatedAt, r.UpdatedAt, deletedAt, cloudID, syncedAt)
+	if err != nil {
+		return fmt.Errorf("insert attachment %s: %w", r.ID, err)
+	}
+	return nil
+}
+
+// ListAttachmentsByItem 返回指定条目的「未删除」附件（按 created_at 升序）
+//
+// 软删除 tombstone 默认过滤（deleted_at IS NULL）。走 idx_vault_attachments_item。
+func (db *VaultDB) ListAttachmentsByItem(itemID string) ([]AttachmentRow, error) {
+	if itemID == "" {
+		return nil, errors.New("item id cannot be empty")
+	}
+	rows, err := db.handle.Query(`
+		SELECT `+attachmentSelectCols+`
+		FROM vault_attachments
+		WHERE item_id = ? AND deleted_at IS NULL
+		ORDER BY created_at ASC
+	`, itemID)
+	if err != nil {
+		return nil, fmt.Errorf("query attachments by item %s: %w", itemID, err)
+	}
+	defer rows.Close()
+	out := make([]AttachmentRow, 0, 8)
+	for rows.Next() {
+		r, err := scanAttachmentRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan attachment: %w", err)
+		}
+		out = append(out, *r)
+	}
+	return out, rows.Err()
+}
+
+// GetAttachment 按 id 读取单条（含 tombstone）
+//
+// 找不到返回 (nil, nil)（与 GetItem 同样的「key not found」语义）。不过滤 tombstone，
+// 让调用方按语境决定（删除路径需要看到墓碑做幂等判断）。
+func (db *VaultDB) GetAttachment(id string) (*AttachmentRow, error) {
+	if id == "" {
+		return nil, errors.New("attachment id cannot be empty")
+	}
+	row := db.handle.QueryRow(`
+		SELECT `+attachmentSelectCols+`
+		FROM vault_attachments WHERE id = ?
+	`, id)
+	r, err := scanAttachmentRow(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get attachment %s: %w", id, err)
+	}
+	return r, nil
+}
+
+// ListUnsyncedAttachments 返回所有需要推送到云端的附件（未删 + cloud_id 为空）
+//
+// 同步补偿用：reconcileAttachments 据此推送本地新增但尚未上传的附件。
+func (db *VaultDB) ListUnsyncedAttachments() ([]AttachmentRow, error) {
+	rows, err := db.handle.Query(`
+		SELECT ` + attachmentSelectCols + `
+		FROM vault_attachments
+		WHERE deleted_at IS NULL AND (cloud_id IS NULL OR cloud_id = '')
+		ORDER BY created_at ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query unsynced attachments: %w", err)
+	}
+	defer rows.Close()
+	out := make([]AttachmentRow, 0, 8)
+	for rows.Next() {
+		r, err := scanAttachmentRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan attachment: %w", err)
+		}
+		out = append(out, *r)
+	}
+	return out, rows.Err()
+}
+
+// ListDeletedSyncedAttachments 返回所有「已软删但有 cloud_id」的附件
+//
+// 同步补偿用：reconcileAttachments 据此对云端执行删除，成功后硬删本地 tombstone。
+func (db *VaultDB) ListDeletedSyncedAttachments() ([]AttachmentRow, error) {
+	rows, err := db.handle.Query(`
+		SELECT ` + attachmentSelectCols + `
+		FROM vault_attachments
+		WHERE deleted_at IS NOT NULL AND cloud_id IS NOT NULL AND cloud_id != ''
+		ORDER BY deleted_at ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query deleted synced attachments: %w", err)
+	}
+	defer rows.Close()
+	out := make([]AttachmentRow, 0, 8)
+	for rows.Next() {
+		r, err := scanAttachmentRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan attachment: %w", err)
+		}
+		out = append(out, *r)
+	}
+	return out, rows.Err()
+}
+
+// AttachmentCloudIDs 返回指定条目所有「活动且已同步」附件的 cloud_id → 本地 id 映射
+//
+// 拉取补偿用：reconcileAttachments 据此判断云端 list 出现而本地没有的附件
+// （避免重复下载），以及本地持有而云端已删的附件（反向清理本地行）。
+func (db *VaultDB) AttachmentCloudIDs(itemID string) (map[string]string, error) {
+	if itemID == "" {
+		return nil, errors.New("item id cannot be empty")
+	}
+	rows, err := db.handle.Query(`
+		SELECT cloud_id, id FROM vault_attachments
+		WHERE item_id = ? AND deleted_at IS NULL AND cloud_id IS NOT NULL AND cloud_id != ''
+	`, itemID)
+	if err != nil {
+		return nil, fmt.Errorf("query attachment cloud ids %s: %w", itemID, err)
+	}
+	defer rows.Close()
+	out := make(map[string]string)
+	for rows.Next() {
+		var cid, id string
+		if err := rows.Scan(&cid, &id); err != nil {
+			return nil, fmt.Errorf("scan cloud id: %w", err)
+		}
+		out[cid] = id
+	}
+	return out, rows.Err()
+}
+
+// SetAttachmentCloud 记录附件的云端绑定（cloud_id + synced_at）
+//
+// 上传成功后调用。找不到 id 返回 ErrAttachmentNotFound。
+func (db *VaultDB) SetAttachmentCloud(id, cloudID string, syncedAt int64) error {
+	if id == "" {
+		return errors.New("attachment id cannot be empty")
+	}
+	res, err := db.handle.Exec(`
+		UPDATE vault_attachments SET cloud_id = ?, synced_at = ?, updated_at = ? WHERE id = ?
+	`, cloudID, syncedAt, syncedAt, id)
+	if err != nil {
+		return fmt.Errorf("set attachment cloud %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrAttachmentNotFound
+	}
+	return nil
+}
+
+// SoftDeleteAttachment 把活动附件行改为 tombstone（deleted_at = now）
+//
+// 找不到 id 返回 ErrAttachmentNotFound；已 tombstone 的行幂等覆盖。
+func (db *VaultDB) SoftDeleteAttachment(id string, deletedAt int64) error {
+	if id == "" {
+		return errors.New("attachment id cannot be empty")
+	}
+	if deletedAt <= 0 {
+		return errors.New("deletedAt must be positive")
+	}
+	res, err := db.handle.Exec(`
+		UPDATE vault_attachments SET deleted_at = ?, updated_at = ? WHERE id = ?
+	`, deletedAt, deletedAt, id)
+	if err != nil {
+		return fmt.Errorf("soft delete attachment %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrAttachmentNotFound
+	}
+	return nil
+}
+
+// DeleteAttachmentRow 物理删除附件行（真删，secure_delete 填零）
+//
+// 调用场景：云端删除成功后清理本地 tombstone；或无云绑定时直接硬删。
+// 幂等：找不到不报错（DELETE 0 行返回 nil）。
+func (db *VaultDB) DeleteAttachmentRow(id string) error {
+	if id == "" {
+		return errors.New("attachment id cannot be empty")
+	}
+	_, err := db.handle.Exec(`DELETE FROM vault_attachments WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete attachment %s: %w", id, err)
+	}
+	return nil
+}
+
+// DeleteAttachmentsByItem 物理删除指定条目的全部附件
+//
+// 调用场景：物理删除条目（vault_items 行真删）时一并清理其附件，避免孤儿。
+// 幂等：无附件时也不报错。
+func (db *VaultDB) DeleteAttachmentsByItem(itemID string) error {
+	if itemID == "" {
+		return errors.New("item id cannot be empty")
+	}
+	_, err := db.handle.Exec(`DELETE FROM vault_attachments WHERE item_id = ?`, itemID)
+	if err != nil {
+		return fmt.Errorf("delete attachments by item %s: %w", itemID, err)
+	}
+	return nil
+}
+
+// ErrAttachmentNotFound 表示按 id 查找 / 更新附件时不存在
+var ErrAttachmentNotFound = errors.New("vault attachment not found")

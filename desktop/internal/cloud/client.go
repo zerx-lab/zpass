@@ -62,9 +62,15 @@ func (c *Client) SetToken(token string) { c.token.Store(token) }
 func (c *Client) HasToken() bool { return c.token.Load() != "" }
 
 // APIError is a non-2xx response carrying the server's {"error":"..."} body.
+//
+// PlanLimitRaw holds the raw response body for 403 responses only, so the
+// attachment layer can recover the plan_limit_exceeded sibling fields
+// (dimension/limit/current/plan) that Message (= the "error" value) drops. It
+// is nil for every other status to avoid retaining bodies unnecessarily.
 type APIError struct {
-	Status  int
-	Message string
+	Status       int
+	Message      string
+	PlanLimitRaw []byte
 }
 
 func (e *APIError) Error() string {
@@ -418,7 +424,13 @@ func (c *Client) do(ctx context.Context, method, path string, authed bool, body,
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &APIError{Status: resp.StatusCode, Message: parseErrorBody(raw)}
+		apiErr := &APIError{Status: resp.StatusCode, Message: parseErrorBody(raw)}
+		// Keep the raw 403 body so the attachment layer can recover the
+		// plan_limit_exceeded dimensions (limit/current/plan) that Message drops.
+		if resp.StatusCode == http.StatusForbidden {
+			apiErr.PlanLimitRaw = raw
+		}
+		return apiErr
 	}
 	if out != nil && len(raw) > 0 {
 		if err := json.Unmarshal(raw, out); err != nil {

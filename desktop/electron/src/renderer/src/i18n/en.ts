@@ -77,6 +77,27 @@ export const en = {
   detail_delete: "Delete",
   detail_delete_confirm: "Delete this item permanently?",
 
+  // Version history & revert
+  history_btn: "History",
+  history_title: "Version history",
+  history_sub: "Every change is kept so you can restore an earlier version.",
+  history_loading: "Loading history…",
+  history_empty: "No previous versions yet",
+  history_error: "Failed to load history",
+  history_op_update: "Updated",
+  history_op_delete: "Deleted",
+  history_op_revert: "Reverted",
+  history_preview_title: "Version preview",
+  history_preview_loading: "Loading version…",
+  history_preview_error: "Failed to load this version",
+  history_revert_btn: "Restore this version",
+  history_revert_confirm: "Restore this version?",
+  history_revert_confirm_sub:
+    "The current content becomes a new version, so you can undo this later.",
+  history_reverting: "Restoring…",
+  history_reverted: "Version restored",
+  history_revert_failed: "Failed to restore version",
+
   // New / Edit item dialog —— 多类型条目表单
   newlogin_title: "New login",
   // 动态标题：用 i18next 插值组合，{{type}} 由调用方传入对应 newlogin_type_xxx 的翻译值。
@@ -489,6 +510,47 @@ export const en = {
   cloud_err_secretkey_required: "Secret Key is required to sign in.",
   cloud_err_secretkey_format:
     "That Secret Key doesn't look right — it starts with Z1- followed by your account id and the key body. Paste the exact key from when you created your account; if you don't have one yet, choose Create account.",
+  // 同步 / 服务端错误文案（lib/cloud-errors.ts translateCloudError）
+  cloud_err_session_expired: "Your session has expired. Please sign in again.",
+  cloud_err_account_disabled:
+    "This account has been disabled. Contact your administrator.",
+  cloud_err_tenant_suspended:
+    "This organization has been suspended. Contact your administrator.",
+  cloud_err_email_taken: "This email is already registered.",
+  cloud_err_mfa_code: "Incorrect verification code.",
+  cloud_err_vault_not_found: "Cloud vault not found or access denied.",
+  cloud_err_not_member:
+    "You are no longer a member of this cloud vault. Please re-link it.",
+  cloud_err_item_not_found: "Item not found on the server.",
+  cloud_err_resync:
+    "The local sync cursor is stale; a full resync will run automatically.",
+  cloud_err_plan_limit:
+    "Your data exceeds the current plan limit. Upgrade your plan or remove some data and try again.",
+  cloud_err_plan_limit_storage:
+    "Attachment storage exceeds the current plan limit. Upgrade your plan or delete some attachments.",
+  cloud_err_server: "Server error. Please try again later.",
+  cloud_err_maintenance: "Service under maintenance. Please retry shortly.",
+  cloud_err_rate_limited: "Too many requests. Please slow down and try again.",
+  cloud_err_bad_request: "Malformed request data.",
+  cloud_err_forbidden: "You don't have permission to do that.",
+  cloud_err_network:
+    "Can't reach the sync server. Check your connection and try again.",
+  cloud_err_not_signed_in: "Not signed in to a cloud account yet.",
+  cloud_err_server_proof:
+    "Server identity verification failed; the connection was refused.",
+  cloud_err_weak_password:
+    "Master password is too short — at least 8 characters required.",
+  cloud_err_decrypt: "Decryption failed — key mismatch or corrupted data.",
+  cloud_err_space_already_linked:
+    "This space is already linked to a different cloud vault. Unlink it first.",
+  cloud_err_vault_already_linked:
+    "This cloud vault is already linked to another space. Unlink it first.",
+  cloud_err_unresolved_conflicts:
+    "Unresolved conflicts remain. Resolve all conflicts first.",
+  cloud_err_vault_locked: "The vault is locked; sync will resume after unlock.",
+  cloud_err_vault_unavailable:
+    "Local vault service unavailable. Restart the app and try again.",
+  cloud_err_unknown: "Sync error: {{detail}}",
   // 设置区块
   cloud_settings_title: "Cloud sync",
   cloud_settings_desc:
@@ -505,6 +567,15 @@ export const en = {
   // 会话被远端吊销（SaaS 侧“退出全部设备” / 改主密码）
   cloud_session_revoked:
     "You were signed out remotely (e.g. signed out of all devices). Sign in again to resume sync.",
+  // 标题栏云端连接状态指示器（components/CloudTitlebarStatus.tsx）
+  cloud_titlebar_revoked: "Signed out",
+  cloud_titlebar_error: "Sync failed",
+  cloud_titlebar_conflicts: "{{count}} conflict(s)",
+  cloud_titlebar_syncing: "Syncing…",
+  cloud_titlebar_connecting: "Connecting…",
+  cloud_titlebar_offline: "Offline",
+  cloud_titlebar_synced: "Synced",
+  cloud_titlebar_click_to_sync: "Click to sync now",
   // 空间同步
   cloud_enable_for_space: "Enable cloud sync for this space",
   cloud_synced: "Cloud sync enabled",
@@ -969,6 +1040,22 @@ export const en = {
   qr_err_not_image: "Only image files are supported.",
   qr_err_too_large: "Image is too large (max 10 MB).",
   qr_err_no_image_in_clipboard: "No image found in clipboard.",
+
+  // ---------------------------------------------------------------------------
+  // 条目附件 (Attachments)
+  // ---------------------------------------------------------------------------
+  attachment_section: "Attachments",
+  attachment_add: "Add attachment",
+  attachment_empty: "No attachments",
+  attachment_download: "Download",
+  attachment_delete: "Delete",
+  attachment_delete_confirm: "Delete this attachment?",
+  attachment_synced: "Synced",
+  attachment_pending: "Pending sync",
+  attachment_too_large: "File is too large (max 5 MB).",
+  attachment_upload_failed: "Failed to upload attachment",
+  attachment_delete_failed: "Failed to delete attachment",
+  attachment_download_failed: "Failed to download attachment",
 } as const;
 
 /** 字典 key 联合类型 —— 用于 i18n t() 的类型约束 */

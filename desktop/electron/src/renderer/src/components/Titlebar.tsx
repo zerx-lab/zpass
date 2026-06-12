@@ -4,6 +4,7 @@ import { Copy as MaxIcon, Minus, Square, X } from "lucide-react";
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { CloudTitlebarStatus } from "@/components/CloudTitlebarStatus";
 import { isMacOS } from "@/lib/platform";
 import { usePrefsStore } from "@/stores/prefs";
 
@@ -297,6 +298,13 @@ export function Titlebar() {
           </g>
         </svg>
       </div>
+
+      {/*
+					云端连接状态指示器 —— 仅在已配置云端且（已登录或会话失效）时渲染。
+					登录失效 / 同步失败 / 冲突 / 同步中一眼可见；点击触发快速同步
+					（失效态点击跳转云同步设置）。组件自身 no-drag 开洞。
+				*/}
+      <CloudTitlebarStatus />
 
       {/* 中央拖拽区 —— 占据剩余空间；双击 Wails 3 原生支持切换最大化 */}
       <div className="h-full flex-1" aria-hidden="true" />

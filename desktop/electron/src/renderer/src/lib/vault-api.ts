@@ -106,6 +106,29 @@ export interface VaultItemSummary {
 }
 
 /**
+ * 单条历史版本摘要 —— 与 Go 后端 ItemHistoryEntry 一一对应
+ *
+ * 后端为每个条目维护一条版本链：每次 update / delete / revert 都会先把
+ * 改动前的快照入历史表，因此历史里记录的是「该版本是被哪种操作覆盖掉的」。
+ *
+ * 字段：
+ *   - versionId  ：版本号（后端自增，越大越新）；传给 GetItemHistoryVersion /
+ *                  RevertItem 定位具体版本
+ *   - op         ：产生该历史记录的操作类型（update / delete / revert）
+ *   - name / type：该版本快照时的条目名称与类型（可能与当前不同）
+ *   - updatedAt  ：该版本快照时条目的 updatedAt（unix 毫秒）
+ *   - snapshotAt ：该历史记录写入的时间（unix 毫秒）
+ */
+export interface VaultHistoryEntry {
+	versionId: number;
+	op: "update" | "delete" | "revert";
+	name: string;
+	type: VaultItemType;
+	updatedAt: number;
+	snapshotAt: number;
+}
+
+/**
  * Vault 当前状态 —— 路由守卫据此分流
  *
  * 三态：
@@ -1783,6 +1806,268 @@ export async function exportAllToFile(): Promise<ExportResult> {
 	};
 }
 
+// ---------------------------------------------------------------------------
+// 条目版本历史 / 回退
+// ---------------------------------------------------------------------------
+//
+// Wails 模式：委托后端 VaultService.ListItemHistory / GetItemHistoryVersion /
+// RevertItem。后端为每个条目维护一条版本链（每次写入前先入历史表）。
+//
+// Mock 模式：浏览器调试态没有真实历史表，返回空列表 / null —— 让 UI 走到
+// 「暂无历史」空态而不是白屏。回退在 mock 下抛错（没有版本可回退）。
+
+/**
+ * 列出某条目的历史版本（后端按 snapshotAt 倒序返回，越新越靠前）
+ *
+ * 找不到条目 / 没有历史时返回空数组（而非抛错）—— 让 UI 展示「暂无历史」。
+ */
+export async function listItemHistory(itemId: string): Promise<VaultHistoryEntry[]> {
+	if (!itemId) throw new Error("item id cannot be empty");
+	if (!isWailsRuntime()) {
+		// mock 没有版本表，返回空列表
+		return [];
+	}
+	const arr = await callWails("ListItemHistory", () =>
+		VaultService.ListItemHistory(itemId),
+	);
+	return (arr ?? []).map(
+		(h: {
+			versionId: number;
+			op: string;
+			name: string;
+			type: string;
+			updatedAt: number;
+			snapshotAt: number;
+		}) => ({
+			versionId: h.versionId,
+			op: (h.op as VaultHistoryEntry["op"]) ?? "update",
+			name: h.name,
+			type: h.type as VaultItemType,
+			updatedAt: h.updatedAt,
+			snapshotAt: h.snapshotAt,
+		}),
+	);
+}
+
+/**
+ * 读取某条目某个历史版本的完整 payload（含 fields），用于预览
+ *
+ * 找不到版本返回 null（与 getItem 契约一致）。
+ */
+export async function getItemHistoryVersion(
+	itemId: string,
+	versionId: number,
+): Promise<VaultItemPayload | null> {
+	if (!itemId) throw new Error("item id cannot be empty");
+	if (!isWailsRuntime()) return null;
+	const p = await callWails("GetItemHistoryVersion", () =>
+		VaultService.GetItemHistoryVersion(itemId, versionId),
+	);
+	if (!p) return null;
+	return {
+		id: p.id,
+		type: p.type as VaultItemType,
+		name: p.name,
+		fields: (p.fields ?? {}) as Record<string, unknown>,
+		createdAt: p.createdAt,
+		updatedAt: p.updatedAt,
+	};
+}
+
+// ---------------------------------------------------------------------------
+// 条目附件 (Attachment)
+// ---------------------------------------------------------------------------
+//
+// 单文件上限 5 MiB（后端强制）；超限前端也做一次本地拦截，避免无谓 IPC。
+// 附件数据以 base64 传输，不在前端写盘。
+//
+// Mock 模式：保持内存 Map，功能可在脱离 Wails 环境时验证 UI 交互。
+
+/**
+ * 条目附件元数据 —— 与后端 AttachmentMeta 对齐
+ *
+ * 字段：
+ *   - id         ：附件唯一 ID（后端生成）
+ *   - fileName   ：原始文件名
+ *   - sizeBytes  ：字节数
+ *   - createdAt  ：unix 毫秒
+ *   - synced     ：是否已同步到云端
+ */
+export interface AttachmentMeta {
+	id: string;
+	fileName: string;
+	sizeBytes: number;
+	createdAt: number;
+	synced: boolean;
+}
+
+/**
+ * GetAttachmentData 返回的数据包 —— 文件名 + base64 编码的内容
+ *
+ * DataB64 不含 `data:<mime>;base64,` 前缀（与 AddAttachment 的入参对称）。
+ */
+export interface AttachmentData {
+	fileName: string;
+	dataB64: string;
+}
+
+/** 5 MiB 前端拦截阈值 —— 与后端强制限制对齐 */
+export const ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
+
+// Mock 内存存储
+interface MockAttachment extends AttachmentMeta {
+	dataB64: string;
+}
+const mockAttachments = new Map<string, MockAttachment[]>(); // itemId → attachments
+
+function mockAttachID(): string {
+	const bytes = new Uint8Array(8);
+	crypto.getRandomValues(bytes);
+	return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * 上传附件到指定条目
+ *
+ * dataB64 不含 `data:` 前缀（FileReader result 去掉 `data:...;base64,` 头即可）。
+ * 超过 5 MiB 后端会报错，调用方应在前端先做 `data.length * 0.75 > ATTACHMENT_MAX_BYTES`
+ * 的字节估算拦截（或直接用 File.size 判断）。
+ *
+ * 成功返回附件元数据；失败上抛（调用方 toast 显示）。
+ */
+export async function addAttachment(
+	itemId: string,
+	fileName: string,
+	dataB64: string,
+): Promise<AttachmentMeta> {
+	if (!itemId) throw new Error("item id cannot be empty");
+	if (!fileName) throw new Error("file name cannot be empty");
+	if (!isWailsRuntime()) {
+		if (!mockState.unlocked) throw new Error("vault is locked");
+		const id = mockAttachID();
+		const meta: MockAttachment = {
+			id,
+			fileName,
+			sizeBytes: Math.round((dataB64.length * 3) / 4),
+			createdAt: mockNow(),
+			synced: false,
+			dataB64,
+		};
+		const list = mockAttachments.get(itemId) ?? [];
+		list.push(meta);
+		mockAttachments.set(itemId, list);
+		return { id: meta.id, fileName: meta.fileName, sizeBytes: meta.sizeBytes, createdAt: meta.createdAt, synced: meta.synced };
+	}
+	const raw = await callWails("AddAttachment", () =>
+		VaultService.AddAttachment(itemId, fileName, dataB64),
+	);
+	if (!raw) throw new Error("add attachment returned null");
+	return {
+		id: String((raw as { ID?: unknown }).ID ?? (raw as { id?: unknown }).id ?? ""),
+		fileName: String((raw as { FileName?: unknown }).FileName ?? (raw as { fileName?: unknown }).fileName ?? fileName),
+		sizeBytes: Number((raw as { SizeBytes?: unknown }).SizeBytes ?? (raw as { sizeBytes?: unknown }).sizeBytes ?? 0),
+		createdAt: Number((raw as { CreatedAt?: unknown }).CreatedAt ?? (raw as { createdAt?: unknown }).createdAt ?? 0),
+		synced: Boolean((raw as { Synced?: unknown }).Synced ?? (raw as { synced?: unknown }).synced ?? false),
+	};
+}
+
+/**
+ * 列出指定条目的所有附件元数据（不含文件内容）
+ */
+export async function listAttachments(itemId: string): Promise<AttachmentMeta[]> {
+	if (!itemId) throw new Error("item id cannot be empty");
+	if (!isWailsRuntime()) {
+		if (!mockState.unlocked) throw new Error("vault is locked");
+		return (mockAttachments.get(itemId) ?? []).map(
+			({ id, fileName, sizeBytes, createdAt, synced }) => ({ id, fileName, sizeBytes, createdAt, synced }),
+		);
+	}
+	const arr = await callWails("ListAttachments", () => VaultService.ListAttachments(itemId));
+	if (!Array.isArray(arr)) return [];
+	return arr.map((r) => ({
+		id: String((r as { ID?: unknown }).ID ?? (r as { id?: unknown }).id ?? ""),
+		fileName: String((r as { FileName?: unknown }).FileName ?? (r as { fileName?: unknown }).fileName ?? ""),
+		sizeBytes: Number((r as { SizeBytes?: unknown }).SizeBytes ?? (r as { sizeBytes?: unknown }).sizeBytes ?? 0),
+		createdAt: Number((r as { CreatedAt?: unknown }).CreatedAt ?? (r as { createdAt?: unknown }).createdAt ?? 0),
+		synced: Boolean((r as { Synced?: unknown }).Synced ?? (r as { synced?: unknown }).synced ?? false),
+	}));
+}
+
+/**
+ * 下载附件内容 —— 返回文件名与 base64 编码的原始字节
+ *
+ * 前端收到后：base64 → Uint8Array → Blob → `<a download>` 触发另存对话框。
+ */
+export async function getAttachmentData(attachmentId: string): Promise<AttachmentData> {
+	if (!attachmentId) throw new Error("attachment id cannot be empty");
+	if (!isWailsRuntime()) {
+		if (!mockState.unlocked) throw new Error("vault is locked");
+		for (const list of mockAttachments.values()) {
+			const a = list.find((x) => x.id === attachmentId);
+			if (a) return { fileName: a.fileName, dataB64: a.dataB64 };
+		}
+		throw new Error("attachment not found");
+	}
+	const raw = await callWails("GetAttachmentData", () =>
+		VaultService.GetAttachmentData(attachmentId),
+	);
+	if (!raw) throw new Error("get attachment data returned null");
+	return {
+		fileName: String((raw as { FileName?: unknown }).FileName ?? (raw as { fileName?: unknown }).fileName ?? ""),
+		dataB64: String((raw as { DataB64?: unknown }).DataB64 ?? (raw as { dataB64?: unknown }).dataB64 ?? ""),
+	};
+}
+
+/**
+ * 删除指定附件
+ */
+export async function deleteAttachment(attachmentId: string): Promise<void> {
+	if (!attachmentId) throw new Error("attachment id cannot be empty");
+	if (!isWailsRuntime()) {
+		if (!mockState.unlocked) throw new Error("vault is locked");
+		for (const [itemId, list] of mockAttachments.entries()) {
+			const idx = list.findIndex((x) => x.id === attachmentId);
+			if (idx !== -1) {
+				list.splice(idx, 1);
+				if (list.length === 0) mockAttachments.delete(itemId);
+				return;
+			}
+		}
+		throw new Error("attachment not found");
+	}
+	await callWails("DeleteAttachment", () => VaultService.DeleteAttachment(attachmentId));
+}
+
+/**
+ * 把条目回退到指定历史版本 —— 产生新版本并同步，返回新的 ItemSummary
+ *
+ * 后端把目标版本的内容写为当前条目的最新版（CreatedAt 不变，UpdatedAt 推进，
+ * 并在历史里记一条 op="revert"）。回退后调用方应重新拉取条目与历史列表。
+ */
+export async function revertItem(
+	itemId: string,
+	versionId: number,
+): Promise<VaultItemSummary> {
+	if (!itemId) throw new Error("item id cannot be empty");
+	if (!isWailsRuntime()) {
+		throw new Error("history revert requires the desktop runtime");
+	}
+	const result = await callWails("RevertItem", () =>
+		VaultService.RevertItem(itemId, versionId),
+	);
+	if (!result) {
+		throw new Error("revert item returned null");
+	}
+	return {
+		id: result.id,
+		type: result.type as VaultItemType,
+		name: result.name,
+		createdAt: result.createdAt,
+		updatedAt: result.updatedAt,
+		hasTOTP: Boolean((result as { hasTOTP?: boolean }).hasTOTP),
+	};
+}
+
 export const vaultApi = {
 	status,
 	initialize,
@@ -1796,6 +2081,9 @@ export const vaultApi = {
 	batchCreateItems,
 	updateItem,
 	deleteItem,
+	listItemHistory,
+	getItemHistoryVersion,
+	revertItem,
 	setActiveSpace,
 	claimOrphanItems,
 	countItemsInSpace,
@@ -1817,6 +2105,11 @@ export const vaultApi = {
 	disableTrustedDevice,
 	tryUnlockWithTrustedDevice,
 	getSystemFonts,
+	/** 条目附件 —— 上传 / 列表 / 下载 / 删除 */
+	addAttachment,
+	listAttachments,
+	getAttachmentData,
+	deleteAttachment,
 	/** 解码一张二维码图片 (后端 gozxing，跨平台一致) */
 	decodeQR,
 	/** 导出整个 vault 为明文 JSON 文件 */
