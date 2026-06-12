@@ -2693,9 +2693,11 @@ function ItemDialog({
 										? t("newitem_title", { type: t(typeLabelKey(type)) })
 										: t("edit_title")}
 								</RadixDialog.Title>
-								<RadixDialog.Description className="text-[11.5px] leading-snug text-(--text-3)">
-									{mode === "new" ? t("newlogin_sub") : t("edit_sub")}
-								</RadixDialog.Description>
+								{mode === "edit" && (
+									<RadixDialog.Description className="text-[11.5px] leading-snug text-(--text-3)">
+										{t("edit_sub")}
+									</RadixDialog.Description>
+								)}
 							</div>
 							<RadixDialog.Close asChild>
 								<Button

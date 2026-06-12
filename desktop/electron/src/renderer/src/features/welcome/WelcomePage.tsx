@@ -37,7 +37,7 @@
 //   - 根节点 h-full overflow-hidden，内容区独立 flex-1 overflow-y-auto，
 //     避免 zoom 子树下 titlebar 被滚走（同 UnlockPage 的经验，详见该文件注释）
 
-import { Cloud, ShieldCheck, UserRound } from "lucide-react";
+import { Cloud, UserRound } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { MiniTitlebar } from "@/components/MiniTitlebar";
@@ -213,20 +213,6 @@ export function WelcomePage() {
 								{t("welcome_skip_badge")}
 							</span>
 						</button>
-					</div>
-
-					{/*
-						底部隐私说明
-						- 左侧 ShieldCheck 图标 + 简短文案，传达"即便登录也是零知识"
-						- 分隔上下用 border-t + pt-5，与卡片整体呼吸一致
-					*/}
-					<div className="flex items-start gap-2.5 border-t border-(--line-soft) pt-5 text-xs leading-relaxed text-(--text-3)">
-						<ShieldCheck
-							size={14}
-							strokeWidth={1.5}
-							className="mt-0.5 shrink-0 text-(--text-3)"
-						/>
-						<p>{t("welcome_privacy")}</p>
 					</div>
 				</div>
 			</div>

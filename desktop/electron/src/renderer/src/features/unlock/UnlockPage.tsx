@@ -490,17 +490,6 @@ export function UnlockPage() {
 								? t("unlock_create_btn")
 								: t("unlock_btn")}
 					</Button>
-
-					{/*
-					 * 底部 foot —— 加 zpass-status-dot（ok 色 + 微光晕）作为"加密
-					 * 就绪"语义锚点。文案保留 t("unlock_foot")（"你的密码永不离开
-					 * 此设备"），但视觉上从单行灰字升级为 dot + 文字组合，
-					 * 与 design 系统其它"在线 / 已加密"状态指示同源。
-					 */}
-					<div className="flex items-center justify-center gap-2 border-t border-(--line-soft) pt-4 text-xs text-(--text-3)">
-						<span className="zpass-status-dot" aria-hidden />
-						<span>{t("unlock_foot")}</span>
-					</div>
 				</form>
 			</div>
 		</main>

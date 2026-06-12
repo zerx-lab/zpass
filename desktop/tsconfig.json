@@ -18,13 +18,14 @@
     "allowImportingTsExtensions": true,
     "noFallthroughCasesInSwitch": true,
     "types": ["node"],
-    "baseUrl": ".",
     "paths": {
-      "@api/*": ["electron/src/api/*"],
-      "@/*": ["electron/src/renderer/src/*"],
-      "@wailsio/runtime": ["electron/src/renderer/src/compat/wails-runtime.ts"],
+      "@api/*": ["./electron/src/api/*"],
+      "@/*": ["./electron/src/renderer/src/*"],
+      "@wailsio/runtime": [
+        "./electron/src/renderer/src/compat/wails-runtime.ts",
+      ],
       "@wailsio/runtime/*": [
-        "electron/src/renderer/src/compat/wails-runtime.ts",
+        "./electron/src/renderer/src/compat/wails-runtime.ts",
       ],
     },
   },
