@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -71,19 +72,27 @@ const (
 	// syncNudgeDelay debounces local-change-driven syncs so a burst of edits
 	// pushes once shortly after the user stops, not once per keystroke.
 	syncNudgeDelay = 2 * time.Second
+	// realtimeSkipPollWindow: while the realtime channel is connected, the
+	// periodic tick is just a safety net — skip it when a sync ran recently.
+	realtimeSkipPollWindow = 10 * time.Minute
+	// fullSyncInterval bounds how long the engine runs on incremental state
+	// alone before forcing a full reconcile. Incremental sync is exact, but a
+	// periodic full pass self-heals any drift (a clock skew, an aborted apply,
+	// a tombstone GC race) without the user noticing.
+	fullSyncInterval = 6 * time.Hour
 )
 
-// NudgeSync schedules a sync a short, debounced delay after a local change (item
-// create/update/delete). Rapid changes coalesce into one run. It is the push
-// half of automatic sync; the periodic loop covers remote pulls.
-func (s *CloudService) NudgeSync() {
-	s.nudgeMu.Lock()
-	defer s.nudgeMu.Unlock()
+// scheduleNudge (re)arms the debounce timer. Caller holds nudgeMu. The fired
+// closure drains the accumulated scope under nudgeMu and runs exactly one sync.
+func (s *CloudService) scheduleNudge() {
 	if s.nudgeTimer != nil {
 		s.nudgeTimer.Stop()
 	}
 	s.nudgeTimer = time.AfterFunc(syncNudgeDelay, func() {
-		if _, err := s.runSync(context.Background()); err != nil {
+		s.nudgeMu.Lock()
+		full, scope := s.consumeNudge()
+		s.nudgeMu.Unlock()
+		if _, err := s.runSync(context.Background(), full, scope); err != nil {
 			s.emitEvent("cloud:sync:error", map[string]any{
 				"message": err.Error(), "updatedAt": nowMillis(),
 			})
@@ -91,18 +100,79 @@ func (s *CloudService) NudgeSync() {
 	})
 }
 
+// consumeNudge collapses the three pending accumulators into a single sync
+// decision and resets them. Priority: a pending FULL reconcile subsumes
+// everything; an all-bindings incremental subsumes any per-vault scope; a
+// nil scope means "every binding". Caller holds nudgeMu. It is a pure-ish
+// helper (only touches the nudge fields) so the collapse rules are unit-testable.
+func (s *CloudService) consumeNudge() (full bool, scope map[string]int64) {
+	full = s.nudgeFull
+	all := s.nudgeAll
+	vaults := s.nudgeVaults
+	s.nudgeFull = false
+	s.nudgeAll = false
+	s.nudgeVaults = nil
+	switch {
+	case full:
+		return true, nil
+	case all:
+		return false, nil // nil scope = incremental over every binding
+	default:
+		return false, vaults // may be nil (nothing pending) → runSync no-ops the scope
+	}
+}
+
+// NudgeSync schedules an incremental sync over ALL bindings a short, debounced
+// delay after a local change (item create/update/delete). Rapid changes
+// coalesce into one run. It is the push half of automatic sync; remote pulls
+// come from the realtime channel (nudgeVaultSync) and the periodic tick.
+func (s *CloudService) NudgeSync() {
+	s.nudgeMu.Lock()
+	defer s.nudgeMu.Unlock()
+	s.nudgeAll = true
+	s.scheduleNudge()
+}
+
+// nudgeVaultSync schedules a debounced incremental sync of a single vault,
+// triggered by an SSE change ping. seq is the event's high-water hint (0 when
+// unknown); repeated pings for the same vault keep the largest seq.
+func (s *CloudService) nudgeVaultSync(vaultID string, seq int64) {
+	if vaultID == "" {
+		s.NudgeSync()
+		return
+	}
+	s.nudgeMu.Lock()
+	defer s.nudgeMu.Unlock()
+	if s.nudgeVaults == nil {
+		s.nudgeVaults = make(map[string]int64)
+	}
+	if seq > s.nudgeVaults[vaultID] {
+		s.nudgeVaults[vaultID] = seq
+	}
+	s.scheduleNudge()
+}
+
+// nudgeFullSync schedules a debounced FULL reconcile (used on an SSE resync
+// event, when the server's broadcast lagged and a delta pull could miss rows).
+func (s *CloudService) nudgeFullSync() {
+	s.nudgeMu.Lock()
+	defer s.nudgeMu.Unlock()
+	s.nudgeFull = true
+	s.scheduleNudge()
+}
+
 // autoSyncOnSignIn gates the immediate post-sign-in sync; tests disable it so an
 // async kick does not race their explicit SyncNow assertions.
 var autoSyncOnSignIn = true
 
-// kickSync runs a sync immediately in the background (used right after sign-in
-// so a freshly unlocked session syncs without waiting for the periodic tick).
+// kickSync runs a FULL sync immediately in the background (used right after
+// sign-in so a freshly unlocked session reconciles without waiting for a tick).
 func (s *CloudService) kickSync() {
 	if !autoSyncOnSignIn {
 		return
 	}
 	go func() {
-		if _, err := s.runSync(context.Background()); err != nil {
+		if _, err := s.runSync(context.Background(), true, nil); err != nil {
 			s.emitEvent("cloud:sync:error", map[string]any{
 				"message": err.Error(), "updatedAt": nowMillis(),
 			})
@@ -340,13 +410,18 @@ func (s *CloudService) BindCloudVault(spaceID, vaultID string) error {
 // Sync entry points
 // ---------------------------------------------------------------------------
 
-// SyncNow runs one sync cycle over every bound space and returns a summary. It
-// is a no-op (not an error) when signed out or the vault is locked.
+// SyncNow runs one FULL reconcile over every bound space and returns a summary.
+// It is a no-op (not an error) when signed out or the vault is locked.
 func (s *CloudService) SyncNow() (CloudSyncSummary, error) {
-	return s.runSync(context.Background())
+	return s.runSync(context.Background(), true, nil)
 }
 
-func (s *CloudService) runSync(parent context.Context) (CloudSyncSummary, error) {
+// runSync reconciles bound spaces with the cloud. full=true forces a full
+// snapshot reconcile per binding (rebuilds incremental state); full=false runs
+// the cheap incremental path (delta pull keyed by the stored cursor). scope,
+// when non-nil, restricts the run to the listed vault ids (the value is an
+// optional seq hint); a nil scope means every binding.
+func (s *CloudService) runSync(parent context.Context, full bool, scope map[string]int64) (CloudSyncSummary, error) {
 	if s.vault == nil {
 		return CloudSyncSummary{}, errors.New("cloud: vault service unavailable")
 	}
@@ -373,13 +448,33 @@ func (s *CloudService) runSync(parent context.Context) (CloudSyncSummary, error)
 	if err != nil {
 		return CloudSyncSummary{SignedIn: true}, err
 	}
+	// Restrict to the requested scope (SSE vault pings). A scoped run with no
+	// matching binding is a clean no-op.
+	if scope != nil {
+		filtered := bindings[:0:0]
+		for _, b := range bindings {
+			if _, ok := scope[b.VaultID]; ok {
+				filtered = append(filtered, b)
+			}
+		}
+		bindings = filtered
+	}
 	summary := CloudSyncSummary{SignedIn: true, Vaults: len(bindings)}
 	s.notifySync("pushing", 0, len(bindings), "")
 
 	var lastErr error
 	for i, b := range bindings {
 		ctx, cancel := context.WithTimeout(parent, 3*cloud.DefaultTimeout)
-		pulled, pushed, err := s.syncVaultOnce(ctx, b.SpaceID, b.VaultID)
+		var pulled, pushed int
+		if full {
+			pulled, pushed, err = s.syncVaultFull(ctx, b.SpaceID, b.VaultID)
+		} else {
+			hint := int64(0)
+			if scope != nil {
+				hint = scope[b.VaultID]
+			}
+			pulled, pushed, err = s.syncVaultIncremental(ctx, b.SpaceID, b.VaultID, hint)
+		}
 		cancel()
 		summary.Pulled += pulled
 		summary.Pushed += pushed
@@ -401,11 +496,12 @@ func (s *CloudService) runSync(parent context.Context) (CloudSyncSummary, error)
 			// Vault locked mid-sync: not an error — the next cycle re-checks.
 			return summary, nil
 		case cloud.IsUnauthorized(err):
-			// The session JWT expired (or was revoked). The private key is still
-			// in memory but the token is dead; nudge the UI to re-sign-in. Stop
-			// this run — every remaining vault would 401 too.
-			s.emitEvent("cloud:auth:expired", map[string]any{"updatedAt": nowMillis()})
+			// The session JWT expired OR was revoked (admin "sign out all
+			// devices"). Tear the session down so the UI stops showing a signed-in
+			// state it can no longer back with syncs, and prompt a re-sign-in.
+			// Stop this run — every remaining vault would 401 too.
 			s.notifySync("error", i+1, len(bindings), "session expired")
+			go s.handleSessionRevoked()
 			return summary, err
 		default:
 			// Keep syncing the other vaults; report the last failure.
@@ -425,6 +521,10 @@ func (s *CloudService) runSync(parent context.Context) (CloudSyncSummary, error)
 	if lastErr != nil {
 		return summary, lastErr
 	}
+	s.lastSyncMs.Store(nowMillis())
+	if full {
+		s.lastFullSyncMs.Store(nowMillis())
+	}
 	s.notifySync("done", len(bindings), len(bindings), "")
 	s.emitEvent("cloud:sync:done", map[string]any{
 		"pulled": summary.Pulled, "pushed": summary.Pushed,
@@ -433,10 +533,13 @@ func (s *CloudService) runSync(parent context.Context) (CloudSyncSummary, error)
 	return summary, nil
 }
 
-// syncVaultOnce reconciles one bound space with its cloud vault. Caller holds
-// syncMu. The client is captured once so a concurrent Configure() cannot split
-// this vault's calls across two clients.
-func (s *CloudService) syncVaultOnce(ctx context.Context, spaceID, vaultID string) (pulled, pushed int, err error) {
+// syncVaultFull reconciles one bound space with its cloud vault via a complete
+// snapshot pull, and rebuilds the per-item incremental state as a side effect.
+// Caller holds syncMu. The client is captured once so a concurrent Configure()
+// cannot split this vault's calls across two clients. This is the self-healing
+// path (sign-in, SyncNow, 410, resync, the 6h tick); the hot path is
+// syncVaultIncremental.
+func (s *CloudService) syncVaultFull(ctx context.Context, spaceID, vaultID string) (pulled, pushed int, err error) {
 	s.mu.RLock()
 	client := s.client
 	s.mu.RUnlock()
@@ -451,7 +554,9 @@ func (s *CloudService) syncVaultOnce(ctx context.Context, spaceID, vaultID strin
 	defer zeroBytes(vaultKey)
 
 	// 1. Pull a full snapshot: the server's live set, with per-item seq + ct.
-	remoteItems, err := s.fetchSnapshot(ctx, client, vaultID)
+	//    Tombstones stay filtered here (the historical full view); deletes still
+	//    propagate via the CAS-reveal path in pushItem/bridgePushConflict.
+	remoteItems, currentSeq, err := s.fetchSnapshot(ctx, client, vaultID, false)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -480,6 +585,10 @@ func (s *CloudService) syncVaultOnce(ctx context.Context, spaceID, vaultID strin
 	if err != nil {
 		return 0, 0, err
 	}
+	localByID := make(map[string]SyncManifestEntry, len(local))
+	for _, e := range local {
+		localByID[e.ID] = e
+	}
 	pulls, pushes, conflicts := cloudDecide(local, remote)
 
 	// Items already pending user resolution must not be auto-applied; and a
@@ -489,7 +598,13 @@ func (s *CloudService) syncVaultOnce(ctx context.Context, spaceID, vaultID strin
 	divergent := conflictIDSet(conflicts)
 	s.pruneConvergedConflicts(vaultID, divergent)
 
-	// 3. Apply clean remote-wins changes (pull).
+	// appliedClean tracks ids that converged this cycle (pull-applied or already
+	// equal) so their state can be (re)written; conflicts and failures are left
+	// out so their state is not falsely marked converged.
+	conflictIDs := conflictIDSet(conflicts)
+	pullFailed := false
+
+	// 3. Apply clean remote-wins changes (pull), recording state on success.
 	for _, id := range pulls {
 		if pending[id] {
 			continue
@@ -500,10 +615,14 @@ func (s *CloudService) syncVaultOnce(ctx context.Context, spaceID, vaultID strin
 		}
 		applied, applyErr := s.applyRemoteItem(spaceID, id, it, vaultKey)
 		if applyErr != nil {
+			pullFailed = true
 			s.emitEvent("cloud:sync:warning", map[string]any{"id": id, "message": applyErr.Error()})
-		} else if applied {
+			continue
+		}
+		if applied {
 			pulled++
 		}
+		s.recordItemState(spaceID, id, it.Seq, remoteByID[id], vaultKey, false)
 	}
 
 	// 4. Push clean local-wins changes via optimistic CAS. A CAS rejection with
@@ -516,12 +635,13 @@ func (s *CloudService) syncVaultOnce(ctx context.Context, spaceID, vaultID strin
 		if it, ok := remoteByID[id]; ok {
 			baseSeq = it.Seq
 		}
-		ok, pErr := s.pushItem(ctx, client, spaceID, vaultID, id, baseSeq, vaultKey)
+		ok, assignedSeq, pErr := s.pushItem(ctx, client, spaceID, vaultID, id, baseSeq, vaultKey)
 		if pErr != nil {
 			return pulled, pushed, pErr
 		}
 		if ok {
 			pushed++
+			s.recordLocalState(spaceID, id, assignedSeq, localByID[id])
 		}
 	}
 
@@ -530,7 +650,355 @@ func (s *CloudService) syncVaultOnce(ctx context.Context, spaceID, vaultID strin
 	for _, c := range conflicts {
 		s.recordMergeConflict(spaceID, vaultID, c, remoteByID, vaultKey)
 	}
+
+	// 6. State for items that were already converged (neither pulled, pushed, nor
+	// in conflict): record the server seq + the locally-recomputed hash so the
+	// incremental path can skip them without decrypting next time.
+	for id, it := range remoteByID {
+		if pending[id] || conflictIDs[id] {
+			continue
+		}
+		if _, isLocal := localByID[id]; !isLocal {
+			continue // pull-only items handled above
+		}
+		if !containsID(pulls, id) && !containsID(pushes, id) {
+			s.recordItemState(spaceID, id, it.Seq, it, vaultKey, false)
+		}
+	}
+
+	// 7. Advance the cursor to the snapshot high-water mark so the next
+	// incremental run only pulls newer rows. We use the snapshot's current_seq,
+	// NOT any seq we just pushed: a concurrent writer may hold an intermediate
+	// seq, and skipping it would miss that change. Our own pushes re-appear in
+	// the next delta as hash-equal no-ops. Skip the advance if any pull failed
+	// (re-pull next cycle, idempotent).
+	if !pullFailed {
+		if err := s.vault.db.SetCloudVaultCursor(spaceID, currentSeq); err != nil {
+			s.emitEvent("cloud:sync:warning", map[string]any{"spaceId": spaceID, "message": "set cursor: " + err.Error()})
+		}
+	}
 	return pulled, pushed, nil
+}
+
+// syncVaultIncremental pulls only the rows whose seq advanced past the stored
+// cursor (the delta feed, tombstones included) and reconciles them against the
+// local item set, using a content-hash shortlist so only genuinely changed
+// local items get decrypted. Caller holds syncMu. hintSeq is the SSE event's
+// high-water hint (0 when unknown). A cursor of 0 (never reconciled) or a 410
+// (cursor below the server's retained floor) falls back to a full reconcile.
+func (s *CloudService) syncVaultIncremental(ctx context.Context, spaceID, vaultID string, hintSeq int64) (pulled, pushed int, err error) {
+	s.mu.RLock()
+	client := s.client
+	s.mu.RUnlock()
+	if client == nil {
+		return 0, 0, ErrCloudNotConfigured
+	}
+
+	binding, err := s.vault.db.GetCloudVaultBySpace(spaceID)
+	if err != nil {
+		return 0, 0, err
+	}
+	if binding == nil || binding.Cursor == 0 {
+		// Never reconciled (bootstrap): a full pass establishes the cursor + state.
+		return s.syncVaultFull(ctx, spaceID, vaultID)
+	}
+	cursor := binding.Cursor
+
+	vaultKey, err := s.vaultKey(ctx, client, vaultID)
+	if err != nil {
+		return 0, 0, fmt.Errorf("cloud: vault key: %w", err)
+	}
+	defer zeroBytes(vaultKey)
+
+	// 1. Pull the delta (rows with seq > cursor), tombstones included so remote
+	//    deletes propagate. A 410 means the cursor fell below the GC floor —
+	//    discard local sync state and full-resync.
+	deltaItems, currentSeq, err := s.fetchSnapshotFrom(ctx, client, vaultID, cursor, true)
+	if cloud.IsStatus(err, http.StatusGone) {
+		_ = s.vault.db.SetCloudVaultCursor(spaceID, 0)
+		_ = s.vault.db.DeleteCloudItemStates(spaceID)
+		return s.syncVaultFull(ctx, spaceID, vaultID)
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	deltaByID := make(map[string]cloud.SnapshotItem, len(deltaItems))
+	for _, it := range deltaItems {
+		id := localItemID(it.ItemID)
+		if id == vaultManifestLocalID {
+			continue
+		}
+		deltaByID[id] = it
+	}
+
+	// 2. Load per-item state + local rows, then compute the local-change
+	//    shortlist (only candidates get decrypted/hashed — the O(delta) win).
+	states, err := s.vault.db.GetCloudItemStates(spaceID)
+	if err != nil {
+		return 0, 0, err
+	}
+	rows, err := s.vault.db.SpaceItemRowsForSync(spaceID)
+	if err != nil {
+		return 0, 0, err
+	}
+	candidates, refresh := s.localChangeShortlist(rows, states, vaultKey)
+	// Items confirmed unchanged (hash still matches): just bump synced_at so the
+	// next cycle's timestamp gate skips them without rehashing.
+	for id, at := range refresh {
+		if st, ok := states[id]; ok {
+			st.SyncedAt = at
+			_ = s.vault.db.PutCloudItemState(spaceID, st)
+		}
+	}
+
+	pending := s.pendingConflictIDs(vaultID)
+	pullFailed := false
+
+	// 3. Remote tombstones in the delta.
+	for id, it := range deltaByID {
+		if !it.Deleted || pending[id] {
+			continue
+		}
+		row, _ := s.vault.db.GetItem(id)
+		switch {
+		case row == nil || row.DeletedAt != nil:
+			// Not present locally, or already deleted — converge state (double-delete).
+			s.recordTombstoneState(spaceID, id, it.Seq, it.UpdatedAt)
+		case !candidates[id]:
+			// Locally live, no pending local change → remote delete wins (LWW).
+			if applyErr := s.applyRemoteDelete(id); applyErr != nil {
+				pullFailed = true
+				s.emitEvent("cloud:sync:warning", map[string]any{"id": id, "message": applyErr.Error()})
+				continue
+			}
+			pulled++
+			s.recordTombstoneState(spaceID, id, it.Seq, it.UpdatedAt)
+		default:
+			// Locally edited AND remotely deleted: LWW by timestamp.
+			if row.UpdatedAt > it.UpdatedAt {
+				s.storeConflict(spaceID, vaultID, id, syncMergeConflict{
+					ID: id, Kind: "delete_vs_edit",
+					Local:           SyncManifestEntry{ID: id, UpdatedAt: row.UpdatedAt},
+					Remote:          SyncManifestEntry{ID: id, DeletedAt: it.UpdatedAt, UpdatedAt: it.UpdatedAt},
+					SuggestedRemote: false,
+				}, &cloud.ServerItem{Seq: it.Seq, Deleted: true, UpdatedAt: it.UpdatedAt}, vaultKey)
+			} else if applyErr := s.applyRemoteDelete(id); applyErr != nil {
+				pullFailed = true
+				s.emitEvent("cloud:sync:warning", map[string]any{"id": id, "message": applyErr.Error()})
+			} else {
+				pulled++
+				s.recordTombstoneState(spaceID, id, it.Seq, it.UpdatedAt)
+			}
+		}
+		delete(candidates, id) // handled
+	}
+
+	// 4. Live delta ∪ local candidates → cloudDecide over just this working set.
+	workIDs := make(map[string]bool)
+	for id, it := range deltaByID {
+		if !it.Deleted {
+			workIDs[id] = true
+		}
+	}
+	for id := range candidates {
+		workIDs[id] = true
+	}
+	localWork := make([]SyncManifestEntry, 0, len(workIDs))
+	remoteWork := make([]SyncManifestEntry, 0, len(workIDs))
+	localByID := make(map[string]SyncManifestEntry, len(workIDs))
+	for id := range workIDs {
+		if e, ok := s.localEntryFor(id, vaultKey); ok {
+			localWork = append(localWork, e)
+			localByID[id] = e
+		}
+		if it, ok := deltaByID[id]; ok && !it.Deleted {
+			remoteWork = append(remoteWork, SyncManifestEntry{
+				ID:          id,
+				UpdatedAt:   it.UpdatedAt,
+				ContentHash: s.remoteContentHash(id, it.Ciphertext, it.ContentHash, vaultKey),
+				Revision:    it.Revision,
+			})
+		}
+	}
+	pulls, pushes, conflicts := cloudDecide(localWork, remoteWork)
+	s.pruneConvergedConflictsScoped(vaultID, workIDs, conflictIDSet(conflicts))
+	conflictIDs := conflictIDSet(conflicts)
+
+	for _, id := range pulls {
+		if pending[id] {
+			continue
+		}
+		it, ok := deltaByID[id]
+		if !ok {
+			continue
+		}
+		applied, applyErr := s.applyRemoteItem(spaceID, id, it, vaultKey)
+		if applyErr != nil {
+			pullFailed = true
+			s.emitEvent("cloud:sync:warning", map[string]any{"id": id, "message": applyErr.Error()})
+			continue
+		}
+		if applied {
+			pulled++
+		}
+		s.recordItemState(spaceID, id, it.Seq, it, vaultKey, false)
+	}
+	for _, id := range pushes {
+		if pending[id] {
+			continue
+		}
+		baseSeq := int64(0)
+		if it, ok := deltaByID[id]; ok {
+			baseSeq = it.Seq
+		} else if st, ok := states[id]; ok {
+			baseSeq = st.Seq
+		}
+		ok, assignedSeq, pErr := s.pushItem(ctx, client, spaceID, vaultID, id, baseSeq, vaultKey)
+		if pErr != nil {
+			return pulled, pushed, pErr
+		}
+		if ok {
+			pushed++
+			s.recordLocalState(spaceID, id, assignedSeq, localByID[id])
+		}
+	}
+	for _, c := range conflicts {
+		s.recordMergeConflict(spaceID, vaultID, c, deltaByID, vaultKey)
+	}
+	// Converged live-delta items (in delta, neither pulled/pushed/conflict):
+	// record state so a future delta containing them is a no-op.
+	for id, it := range deltaByID {
+		if it.Deleted || pending[id] || conflictIDs[id] {
+			continue
+		}
+		if !containsID(pulls, id) && !containsID(pushes, id) {
+			s.recordItemState(spaceID, id, it.Seq, it, vaultKey, false)
+		}
+	}
+
+	// 5. Advance the cursor (same rule as the full path: snapshot high-water,
+	// never a pushed seq). Skip on a pull failure so it re-pulls next cycle.
+	if !pullFailed && currentSeq > cursor {
+		if err := s.vault.db.SetCloudVaultCursor(spaceID, currentSeq); err != nil {
+			s.emitEvent("cloud:sync:warning", map[string]any{"spaceId": spaceID, "message": "set cursor: " + err.Error()})
+		}
+	}
+	_ = hintSeq // reserved: a future optimization can short-circuit when hintSeq <= cursor and no local candidates exist
+	return pulled, pushed, nil
+}
+
+// localChangeShortlist classifies local rows against the recorded sync state,
+// returning the set of ids that need pushing (changed/new/locally-deleted) and
+// a map of ids whose hash was confirmed unchanged (only their synced_at should
+// be refreshed). Only rows whose updatedAt advanced past synced_at are
+// decrypted+hashed; everything else is skipped without touching the vault key.
+// Pure over its inputs except for the decrypt/hash it performs via s.
+func (s *CloudService) localChangeShortlist(rows []VaultItemRow, states map[string]CloudItemState, vaultKey []byte) (candidates map[string]bool, refresh map[string]int64) {
+	candidates = make(map[string]bool)
+	refresh = make(map[string]int64)
+	for i := range rows {
+		row := &rows[i]
+		st, hasState := states[row.ID]
+		if row.DeletedAt != nil {
+			// Local tombstone.
+			if !hasState {
+				continue // orphan local delete (never synced) — nothing to push
+			}
+			if !st.Deleted {
+				candidates[row.ID] = true // delete not yet pushed
+			}
+			continue
+		}
+		// Live row.
+		if !hasState {
+			candidates[row.ID] = true // brand-new local item
+			continue
+		}
+		if row.UpdatedAt < st.SyncedAt {
+			continue // older than last converged state — unchanged
+		}
+		// Timestamp advanced (or equal): confirm by hash before deciding.
+		if payload, err := s.vault.getItemAnySpace(row.ID); err == nil && payload != nil {
+			h := cloudContentHash(vaultKey, payload)
+			if h == st.SyncedHash && !st.Deleted {
+				refresh[row.ID] = row.UpdatedAt // unchanged content, stale timestamp
+			} else {
+				candidates[row.ID] = true
+			}
+		} else {
+			candidates[row.ID] = true // can't confirm — treat as changed (safe)
+		}
+	}
+	return candidates, refresh
+}
+
+// localEntryFor builds a manifest entry for one local id (live or tombstone),
+// reporting ok=false if the item does not exist locally.
+func (s *CloudService) localEntryFor(id string, vaultKey []byte) (SyncManifestEntry, bool) {
+	row, err := s.vault.db.GetItem(id)
+	if err != nil || row == nil {
+		return SyncManifestEntry{}, false
+	}
+	entry := SyncManifestEntry{ID: id, UpdatedAt: row.UpdatedAt}
+	if row.DeletedAt != nil {
+		entry.DeletedAt = *row.DeletedAt
+		return entry, true
+	}
+	if payload, err := s.vault.getItemAnySpace(id); err == nil && payload != nil {
+		entry.ContentHash = cloudContentHash(vaultKey, payload)
+		entry.Revision = payload.Revision
+	}
+	return entry, true
+}
+
+// recordItemState writes the converged sync state for a live remote item,
+// recomputing the local-canonical hash from its ciphertext. deletedOverride
+// forces the tombstone flag (callers for live items pass false).
+func (s *CloudService) recordItemState(spaceID, id string, seq int64, it cloud.SnapshotItem, vaultKey []byte, deletedOverride bool) {
+	hash := s.remoteContentHash(id, it.Ciphertext, it.ContentHash, vaultKey)
+	_ = s.vault.db.PutCloudItemState(spaceID, CloudItemState{
+		ItemID: id, Seq: seq, SyncedHash: hash, SyncedAt: it.UpdatedAt, Deleted: deletedOverride,
+	})
+}
+
+// recordLocalState writes state after a successful push of a local item, using
+// the server-assigned seq and the local manifest entry's hash/timestamp.
+func (s *CloudService) recordLocalState(spaceID, id string, assignedSeq int64, local SyncManifestEntry) {
+	_ = s.vault.db.PutCloudItemState(spaceID, CloudItemState{
+		ItemID: id, Seq: assignedSeq, SyncedHash: local.ContentHash,
+		SyncedAt: local.UpdatedAt, Deleted: local.DeletedAt > 0,
+	})
+}
+
+// recordTombstoneState writes state marking an item as converged-deleted.
+func (s *CloudService) recordTombstoneState(spaceID, id string, seq, updatedAt int64) {
+	_ = s.vault.db.PutCloudItemState(spaceID, CloudItemState{
+		ItemID: id, Seq: seq, SyncedHash: "", SyncedAt: updatedAt, Deleted: true,
+	})
+}
+
+// containsID reports whether s contains id (small slices; linear is fine).
+func containsID(s []string, id string) bool {
+	for _, v := range s {
+		if v == id {
+			return true
+		}
+	}
+	return false
+}
+
+// pruneConvergedConflictsScoped drops pending conflicts for a vault that are in
+// the current working set but no longer divergent. Unlike the full-path prune,
+// it leaves conflicts OUTSIDE the working set untouched (an incremental cycle
+// only saw a slice of the vault, so it cannot judge ids it did not examine).
+func (s *CloudService) pruneConvergedConflictsScoped(vaultID string, scope map[string]bool, stillDivergent map[string]bool) {
+	s.conflictsMu.Lock()
+	defer s.conflictsMu.Unlock()
+	for id, c := range s.conflicts {
+		if c.vaultID == vaultID && scope[id] && !stillDivergent[id] {
+			delete(s.conflicts, id)
+		}
+	}
 }
 
 // cloudDecide is the cloud sync decision over a local manifest and the remote
@@ -609,20 +1077,31 @@ func cloudDecide(local, remote []SyncManifestEntry) (pulls, pushes []string, con
 	return pulls, pushes, conflicts
 }
 
-// fetchSnapshot pages a full snapshot. It does NOT trust has_more (which the
-// server computes after tombstone filtering and can false-negative); it pages
-// until the cursor stops advancing or reaches current_seq. It must NOT break on
-// an empty page: a window that is all tombstones yields zero items but its
-// next_cursor still advances past live items that follow.
-func (s *CloudService) fetchSnapshot(ctx context.Context, client *cloud.Client, vaultID string) ([]cloud.SnapshotItem, error) {
+// fetchSnapshot pages a snapshot from cursor 0 (full reconcile). See
+// fetchSnapshotFrom for the paging contract. Returns the items, the snapshot's
+// high-water current_seq (for the cursor), and any error.
+func (s *CloudService) fetchSnapshot(ctx context.Context, client *cloud.Client, vaultID string, includeDeleted bool) ([]cloud.SnapshotItem, int64, error) {
+	return s.fetchSnapshotFrom(ctx, client, vaultID, 0, includeDeleted)
+}
+
+// fetchSnapshotFrom pages a snapshot starting after startCursor. It does NOT
+// trust has_more (which the server computes after tombstone filtering and can
+// false-negative); it pages until the cursor stops advancing or reaches
+// current_seq. It must NOT break on an empty page: a window that is all
+// tombstones yields zero items but its next_cursor still advances past live
+// items that follow. Returns the accumulated items and the last page's
+// current_seq (the high-water mark to store as the new cursor).
+func (s *CloudService) fetchSnapshotFrom(ctx context.Context, client *cloud.Client, vaultID string, startCursor int64, includeDeleted bool) ([]cloud.SnapshotItem, int64, error) {
 	var items []cloud.SnapshotItem
-	cursor := int64(0)
+	cursor := startCursor
+	currentSeq := startCursor
 	for {
-		page, err := client.Snapshot(ctx, vaultID, cursor, snapshotPageLimit)
+		page, err := client.Snapshot(ctx, vaultID, cursor, snapshotPageLimit, includeDeleted)
 		if err != nil {
-			return nil, fmt.Errorf("cloud: snapshot: %w", err)
+			return nil, 0, fmt.Errorf("cloud: snapshot: %w", err)
 		}
 		items = append(items, page.Items...)
+		currentSeq = page.CurrentSeq
 		// Terminate solely on cursor progress: next_cursor not advancing (the
 		// server has no more rows past cursor) or reaching the high-water seq.
 		if page.NextCursor <= cursor || page.NextCursor >= page.CurrentSeq {
@@ -630,7 +1109,7 @@ func (s *CloudService) fetchSnapshot(ctx context.Context, client *cloud.Client, 
 		}
 		cursor = page.NextCursor
 	}
-	return items, nil
+	return items, currentSeq, nil
 }
 
 // applyRemoteItem decrypts a snapshot item with the vault key and ingests the
@@ -694,20 +1173,22 @@ func (s *CloudService) remoteContentHash(localID, ciphertext, stored string, vau
 
 // pushItem encrypts a local item (or tombstone) with the vault key and pushes it
 // with optimistic CAS. A returned conflict is bridged by LWW: differing content
-// becomes a recorded conflict, identical content converges silently.
-func (s *CloudService) pushItem(ctx context.Context, client *cloud.Client, spaceID, vaultID, id string, baseSeq int64, vaultKey []byte) (bool, error) {
+// becomes a recorded conflict, identical content converges silently. Returns
+// (pushed, assignedSeq, err): pushed is true only on a clean CAS accept, in
+// which case assignedSeq is the server-allocated seq (for the sync state).
+func (s *CloudService) pushItem(ctx context.Context, client *cloud.Client, spaceID, vaultID, id string, baseSeq int64, vaultKey []byte) (bool, int64, error) {
 	req, localEntry, err := s.buildChangeRequest(id, baseSeq, vaultKey)
 	if err != nil || req == nil {
-		return false, err
+		return false, 0, err
 	}
 	resp, err := client.PostChange(ctx, vaultID, *req)
 	if err != nil {
-		return false, err
+		return false, 0, err
 	}
 	if !resp.IsConflict() {
-		return true, nil
+		return true, resp.AssignedSeq, nil
 	}
-	return false, s.bridgePushConflict(spaceID, vaultID, id, localEntry, resp.Server, vaultKey)
+	return false, 0, s.bridgePushConflict(spaceID, vaultID, id, localEntry, resp.Server, vaultKey)
 }
 
 // buildChangeRequest assembles a ChangeRequest for the local state of id (live
@@ -782,12 +1263,17 @@ func (s *CloudService) bridgePushConflict(spaceID, vaultID, id string, local Syn
 
 	if server.Deleted {
 		if local.DeletedAt > 0 {
+			s.recordTombstoneState(spaceID, id, server.Seq, server.UpdatedAt)
 			return nil // both deleted — converged
 		}
 		serverTime := server.UpdatedAt
 		localTime := local.UpdatedAt
 		if localTime <= serverTime {
-			return s.applyRemoteDelete(id) // remote delete wins (LWW)
+			if err := s.applyRemoteDelete(id); err != nil {
+				return err
+			}
+			s.recordTombstoneState(spaceID, id, server.Seq, server.UpdatedAt)
+			return nil // remote delete wins (LWW)
 		}
 		// Local edit is newer than the remote delete: a destructive ambiguity.
 		// Record it; ApplyMerge "local" can force-resurrect, "remote" deletes.
@@ -804,12 +1290,25 @@ func (s *CloudService) bridgePushConflict(spaceID, vaultID, id string, local Syn
 	// that no longer matches the local canonical form for identical content).
 	serverHash := s.remoteContentHash(id, server.Ciphertext, server.ContentHash, vaultKey)
 	if local.ContentHash != "" && local.ContentHash == serverHash {
-		return nil // same content, only seq differs — converged
+		// Same content, only seq differs — converged. Record the server seq so
+		// the next incremental cycle treats it as a no-op.
+		_ = s.vault.db.PutCloudItemState(spaceID, CloudItemState{
+			ItemID: id, Seq: server.Seq, SyncedHash: serverHash,
+			SyncedAt: server.UpdatedAt, Deleted: false,
+		})
+		return nil
 	}
 	switch {
 	case local.UpdatedAt < server.UpdatedAt:
 		// Remote strictly newer with different content → remote wins (LWW).
-		return s.applyServerLive(spaceID, id, server, vaultKey)
+		if err := s.applyServerLive(spaceID, id, server, vaultKey); err != nil {
+			return err
+		}
+		_ = s.vault.db.PutCloudItemState(spaceID, CloudItemState{
+			ItemID: id, Seq: server.Seq, SyncedHash: serverHash,
+			SyncedAt: server.UpdatedAt, Deleted: false,
+		})
+		return nil
 	default:
 		// Local newer or same instant, content differs → genuine concurrent
 		// edit. Record it (ApplyMerge "local" force-pushes to win).
@@ -1041,7 +1540,11 @@ func (s *CloudService) applyResolution(ctx context.Context, client *cloud.Client
 		return nil
 	case "remote":
 		if c.remoteDeleted {
-			return s.applyRemoteDelete(c.conflict.ID)
+			if err := s.applyRemoteDelete(c.conflict.ID); err != nil {
+				return err
+			}
+			s.recordTombstoneState(c.spaceID, c.conflict.ID, c.serverSeq, c.conflict.RemoteManifest.UpdatedAt)
+			return nil
 		}
 		if c.remote == nil {
 			return errors.New("cloud: remote payload unavailable")
@@ -1050,8 +1553,15 @@ func (s *CloudService) applyResolution(ctx context.Context, client *cloud.Client
 		payload.SpaceID = c.spaceID
 		// Forced: a concurrent_edit conflict is equal-timestamp by definition, so a
 		// plain LWW ingest would no-op and the conflict would recur every sync.
-		_, err := s.vault.IngestForeignPayloadForced(c.conflict.ID, &payload, payload.CreatedAt, c.conflict.RemoteManifest.UpdatedAt)
-		return err
+		if _, err := s.vault.IngestForeignPayloadForced(c.conflict.ID, &payload, payload.CreatedAt, c.conflict.RemoteManifest.UpdatedAt); err != nil {
+			return err
+		}
+		_ = s.vault.db.PutCloudItemState(c.spaceID, CloudItemState{
+			ItemID: c.conflict.ID, Seq: c.serverSeq,
+			SyncedHash: c.conflict.RemoteManifest.ContentHash,
+			SyncedAt:   c.conflict.RemoteManifest.UpdatedAt, Deleted: false,
+		})
+		return nil
 	case "local":
 		if client == nil {
 			return ErrCloudNotConfigured
@@ -1061,7 +1571,7 @@ func (s *CloudService) applyResolution(ctx context.Context, client *cloud.Client
 			return err
 		}
 		defer zeroBytes(vaultKey)
-		return s.forcePushLocal(ctx, client, c.vaultID, c.conflict.ID, c.serverSeq, vaultKey)
+		return s.forcePushLocal(ctx, client, c.spaceID, c.vaultID, c.conflict.ID, c.serverSeq, vaultKey)
 	case "duplicate":
 		if c.remote == nil {
 			return errors.New("cloud: remote payload unavailable")
@@ -1078,11 +1588,12 @@ func (s *CloudService) applyResolution(ctx context.Context, client *cloud.Client
 // forcePushLocal pushes the local version of id, retrying against the server's
 // reported current seq on each CAS rejection until it wins (or gives up). This
 // is how a user's explicit "keep local" decision overrides a server that moved
-// under us — it never falls back to applying the remote version.
-func (s *CloudService) forcePushLocal(ctx context.Context, client *cloud.Client, vaultID, id string, startSeq int64, vaultKey []byte) error {
+// under us — it never falls back to applying the remote version. On a win it
+// records the converged sync state under spaceID.
+func (s *CloudService) forcePushLocal(ctx context.Context, client *cloud.Client, spaceID, vaultID, id string, startSeq int64, vaultKey []byte) error {
 	baseSeq := startSeq
 	for attempt := 0; attempt < forcePushMaxRetry; attempt++ {
-		req, _, err := s.buildChangeRequest(id, baseSeq, vaultKey)
+		req, localEntry, err := s.buildChangeRequest(id, baseSeq, vaultKey)
 		if err != nil {
 			return err
 		}
@@ -1094,6 +1605,7 @@ func (s *CloudService) forcePushLocal(ctx context.Context, client *cloud.Client,
 			return err
 		}
 		if !resp.IsConflict() {
+			s.recordLocalState(spaceID, id, resp.AssignedSeq, localEntry)
 			return nil // local version won
 		}
 		if resp.Server == nil {
@@ -1257,7 +1769,23 @@ func (s *CloudService) StartBackgroundSync() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if _, err := s.runSync(ctx); err != nil {
+				// While realtime is connected the tick is only a safety net; skip
+				// it when a sync completed recently so we do not hammer the server.
+				if s.realtimeConnected.Load() {
+					last := s.lastSyncMs.Load()
+					if last > 0 && time.Since(time.UnixMilli(last)) < realtimeSkipPollWindow {
+						continue
+					}
+				}
+				// Normal ticks run the cheap incremental path; once fullSyncInterval
+				// has elapsed (or no full has ever run) upgrade to a full reconcile
+				// so any incremental drift self-heals.
+				full := false
+				lastFull := s.lastFullSyncMs.Load()
+				if lastFull == 0 || time.Since(time.UnixMilli(lastFull)) >= fullSyncInterval {
+					full = true
+				}
+				if _, err := s.runSync(ctx, full, nil); err != nil {
 					s.emitEvent("cloud:sync:error", map[string]any{
 						"message": err.Error(), "updatedAt": nowMillis(),
 					})

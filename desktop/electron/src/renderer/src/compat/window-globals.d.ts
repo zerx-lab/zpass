@@ -79,7 +79,14 @@ export interface DesktopBridgeShape {
 		 * Pushed by ThemeSync on hydrate and whenever `prefs.launchAtLogin`
 		 * changes. No-op in dev (unpackaged) builds.
 		 */
-		setLaunchAtLogin(enabled: boolean): Promise<void>;
+		setLaunchAtLogin(enabled: boolean, hidden?: boolean): Promise<void>;
+		/**
+		 * Subscribe to "system resumed" notifications (powerMonitor
+		 * `resume` / `unlock-screen`). Consumed by CloudEventSync to poke
+		 * the cloud realtime channel after suspend/unlock. Returns an
+		 * unsubscribe function.
+		 */
+		onSystemResumed(cb: () => void): () => void;
 	};
 }
 

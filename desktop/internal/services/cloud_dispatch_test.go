@@ -108,6 +108,12 @@ func TestCloudServiceWailsDispatch(t *testing.T) {
 		t.Fatalf("SignOut = (%s, %q), want (null, \"\")", res, errMsg)
 	}
 
+	// PokeRealtime() — zero args, no return; the system-resume / network-online
+	// frontend hook calls this. Signed out it is a clean no-op (null result).
+	if res, errMsg := dispatch(t, h, "main.CloudService.PokeRealtime"); errMsg != "" || string(res) != "null" {
+		t.Fatalf("PokeRealtime = (%s, %q), want (null, \"\")", res, errMsg)
+	}
+
 	// SignIn(string,string,string) (AccountResult,error) — three args; a bad
 	// secret key errors before any network, proving 3-arg decode works.
 	if _, errMsg := dispatch(t, h, "main.CloudService.SignIn", "user@example.com", "a strong password", "not-a-key"); errMsg == "" {

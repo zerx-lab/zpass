@@ -160,7 +160,7 @@ func TestCloudLiveRoundTrip(t *testing.T) {
 	// Device 2 pulls the snapshot and decrypts. The server returns item_id as a
 	// Postgres UUID (hyphenated), so we MUST canonicalize before using it as the
 	// aad — this is the silent-failure pin the dossier flagged.
-	snap, err := c2.Snapshot(ctx, vaultID, 0, 100)
+	snap, err := c2.Snapshot(ctx, vaultID, 0, 100, false)
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}

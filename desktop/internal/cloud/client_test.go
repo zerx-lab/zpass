@@ -123,16 +123,42 @@ func TestSnapshotQueryParams(t *testing.T) {
 		if q.Get("cursor") != "42" || q.Get("limit") != "100" {
 			t.Errorf("query = %v, want cursor=42 limit=100", q)
 		}
+		if q.Has("include_deleted") {
+			t.Errorf("include_deleted sent without being requested: %v", q)
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"items": []any{}, "has_more": false, "next_cursor": 42, "current_seq": 42,
 		})
 	})
 	c.SetToken("t")
-	resp, err := c.Snapshot(context.Background(), "v1", 42, 100)
+	resp, err := c.Snapshot(context.Background(), "v1", 42, 100, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if resp.CurrentSeq != 42 {
 		t.Fatalf("current_seq = %d", resp.CurrentSeq)
+	}
+}
+
+func TestSnapshotIncludeDeleted(t *testing.T) {
+	c, _ := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("include_deleted"); got != "true" {
+			t.Errorf("include_deleted = %q, want true", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"items": []any{map[string]any{
+				"item_id": "i-1", "seq": 7, "ciphertext": "",
+				"content_hash": "", "updated_at": 5, "revision": 1, "deleted": true,
+			}},
+			"has_more": false, "next_cursor": 7, "current_seq": 7,
+		})
+	})
+	c.SetToken("t")
+	resp, err := c.Snapshot(context.Background(), "v1", 0, 100, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Items) != 1 || !resp.Items[0].Deleted {
+		t.Fatalf("items = %+v, want one tombstone", resp.Items)
 	}
 }

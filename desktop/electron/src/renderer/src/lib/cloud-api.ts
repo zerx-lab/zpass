@@ -23,6 +23,9 @@ const SVC = "main.CloudService";
  * 字节对齐
  * -------------------------------------------------------------------------- */
 
+/** 实时推送通道（SSE 长连接）状态枚举 —— 与 Go 端 cloud:realtime:state 事件对齐 */
+export type CloudRealtimeState = "offline" | "connecting" | "connected" | "reconnecting";
+
 export interface CloudStatus {
   configured: boolean;
   baseUrl: string;
@@ -35,6 +38,8 @@ export interface CloudStatus {
   storePersist: boolean;
   /** 当前 server 已缓存一个持久化 token（快速解锁可用），但尚无活动会话 */
   hasCachedToken: boolean;
+  /** 实时推送通道状态：offline / connecting / connected / reconnecting */
+  realtime?: CloudRealtimeState;
 }
 
 export interface RegisterResult {
@@ -197,6 +202,11 @@ export async function unlinkSpace(spaceId: string): Promise<void> {
 
 export async function syncNow(): Promise<CloudSyncSummary> {
   return callCloud("SyncNow", () => $WailsCall.ByName(`${SVC}.SyncNow`) as Promise<CloudSyncSummary>);
+}
+
+/** 唤醒实时通道：杀掉可能半开的 SSE 流立即重连并补偿同步（幂等、廉价）。 */
+export async function pokeCloudRealtime(): Promise<void> {
+  return callCloud("PokeRealtime", () => $WailsCall.ByName(`${SVC}.PokeRealtime`) as Promise<void>);
 }
 
 export async function listCloudConflicts(): Promise<SyncConflict[]> {

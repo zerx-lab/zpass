@@ -64,6 +64,110 @@ func (db *VaultDB) ensureCloudVaultsAccountColumn() error {
 	return nil
 }
 
+// cloud_item_state tracks, per (space, item), the last server state this client
+// converged to. It is what makes incremental sync O(changes) instead of
+// O(vault size):
+//
+//	seq          the item's last known server seq (the CAS base_seq source)
+//	synced_hash  the local canonical content hash at convergence time
+//	synced_at    the local row's updated_at at convergence time — a row whose
+//	             updated_at moved past this is a local-change candidate
+//	deleted      whether the server side was a tombstone at convergence
+//
+// Rows carry no secret material (the hash is already the vault-keyed opaque
+// token sent to the server). The table is rebuilt for free by the next full
+// reconcile, so dropping it is always safe.
+
+// CloudItemState is one per-item sync convergence record.
+type CloudItemState struct {
+	ItemID     string
+	Seq        int64
+	SyncedHash string
+	SyncedAt   int64
+	Deleted    bool
+}
+
+// ensureCloudItemStateSchema creates the cloud_item_state table idempotently.
+func (db *VaultDB) ensureCloudItemStateSchema() error {
+	_, err := db.handle.Exec(`
+		CREATE TABLE IF NOT EXISTS cloud_item_state (
+			space_id    TEXT    NOT NULL,
+			item_id     TEXT    NOT NULL,
+			seq         INTEGER NOT NULL,
+			synced_hash TEXT    NOT NULL DEFAULT '',
+			synced_at   INTEGER NOT NULL DEFAULT 0,
+			deleted     INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (space_id, item_id)
+		);
+	`)
+	if err != nil {
+		return fmt.Errorf("create cloud_item_state: %w", err)
+	}
+	return nil
+}
+
+// GetCloudItemStates returns the full per-item sync state map for a space.
+func (db *VaultDB) GetCloudItemStates(spaceID string) (map[string]CloudItemState, error) {
+	rows, err := db.handle.Query(
+		`SELECT item_id, seq, synced_hash, synced_at, deleted
+		   FROM cloud_item_state WHERE space_id = ?`, spaceID)
+	if err != nil {
+		return nil, fmt.Errorf("query cloud item state: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]CloudItemState)
+	for rows.Next() {
+		var st CloudItemState
+		var deleted int
+		if err := rows.Scan(&st.ItemID, &st.Seq, &st.SyncedHash, &st.SyncedAt, &deleted); err != nil {
+			return nil, fmt.Errorf("scan cloud item state: %w", err)
+		}
+		st.Deleted = deleted != 0
+		out[st.ItemID] = st
+	}
+	return out, rows.Err()
+}
+
+// PutCloudItemState UPSERTs one per-item sync state row.
+func (db *VaultDB) PutCloudItemState(spaceID string, st CloudItemState) error {
+	deleted := 0
+	if st.Deleted {
+		deleted = 1
+	}
+	_, err := db.handle.Exec(
+		`INSERT INTO cloud_item_state (space_id, item_id, seq, synced_hash, synced_at, deleted)
+		 VALUES (?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(space_id, item_id) DO UPDATE SET
+			seq = excluded.seq, synced_hash = excluded.synced_hash,
+			synced_at = excluded.synced_at, deleted = excluded.deleted`,
+		spaceID, st.ItemID, st.Seq, st.SyncedHash, st.SyncedAt, deleted,
+	)
+	if err != nil {
+		return fmt.Errorf("put cloud item state: %w", err)
+	}
+	return nil
+}
+
+// DeleteCloudItemStates drops all per-item sync state for a space (unbind, or
+// a 410 cursor reset before a full resync).
+func (db *VaultDB) DeleteCloudItemStates(spaceID string) error {
+	_, err := db.handle.Exec(`DELETE FROM cloud_item_state WHERE space_id = ?`, spaceID)
+	if err != nil {
+		return fmt.Errorf("delete cloud item states: %w", err)
+	}
+	return nil
+}
+
+// DeleteCloudItemState drops one item's sync state row.
+func (db *VaultDB) DeleteCloudItemState(spaceID, itemID string) error {
+	_, err := db.handle.Exec(
+		`DELETE FROM cloud_item_state WHERE space_id = ? AND item_id = ?`, spaceID, itemID)
+	if err != nil {
+		return fmt.Errorf("delete cloud item state: %w", err)
+	}
+	return nil
+}
+
 // hasColumn reports whether table has a column of the given name (PRAGMA
 // table_info), used by the idempotent column-add migrations.
 func (db *VaultDB) hasColumn(table, column string) (bool, error) {
@@ -179,13 +283,15 @@ func (db *VaultDB) SetCloudVaultCursor(spaceID string, cursor int64) error {
 	return nil
 }
 
-// DeleteCloudVault removes a space↔vault binding (local data untouched).
+// DeleteCloudVault removes a space↔vault binding (local data untouched). The
+// space's per-item sync state goes with it — it describes convergence against
+// the unbound vault and would poison a future rebind.
 func (db *VaultDB) DeleteCloudVault(spaceID string) error {
 	_, err := db.handle.Exec(`DELETE FROM cloud_vaults WHERE space_id = ?`, spaceID)
 	if err != nil {
 		return fmt.Errorf("delete cloud vault: %w", err)
 	}
-	return nil
+	return db.DeleteCloudItemStates(spaceID)
 }
 
 // SpaceItemRowsForSync returns all rows (including tombstones) belonging to a

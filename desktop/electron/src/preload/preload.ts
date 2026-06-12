@@ -182,11 +182,26 @@ const api = {
      * `app.setLoginItemSettings` (macOS/Windows) or an XDG autostart
      * `.desktop` file (Linux). No-op in dev (unpackaged) builds.
      */
-    setLaunchAtLogin: (enabled: boolean) =>
+    setLaunchAtLogin: (enabled: boolean, hidden = false) =>
       ipcRenderer.invoke(
         "desktop:app:set-launch-at-login",
         enabled,
+        hidden,
       ) as Promise<void>,
+    /**
+     * Subscribe to "system resumed" notifications (powerMonitor `resume` /
+     * `unlock-screen` in the main process). After suspend/unlock the SSE
+     * realtime channel to the cloud is likely half-open; CloudEventSync
+     * uses this to poke the Go backend into reconnecting immediately.
+     * Returns an unsubscribe function.
+     */
+    onSystemResumed: (cb: () => void) => {
+      const listener = () => cb();
+      ipcRenderer.on("zpass:system-resumed", listener);
+      return () => {
+        ipcRenderer.removeListener("zpass:system-resumed", listener);
+      };
+    },
   },
 };
 

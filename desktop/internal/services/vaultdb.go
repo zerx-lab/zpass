@@ -378,6 +378,11 @@ func (db *VaultDB) initSchema() error {
 	if err := db.ensureCloudVaultsAccountColumn(); err != nil {
 		return fmt.Errorf("ensure cloud_vaults v7 account_id: %w", err)
 	}
+	// cloud_item_state 表（云同步 per-item 收敛状态，增量同步的基础）——
+	// 幂等 CREATE TABLE IF NOT EXISTS，丢失可由下一次全量 reconcile 重建。
+	if err := db.ensureCloudItemStateSchema(); err != nil {
+		return fmt.Errorf("ensure cloud_item_state schema: %w", err)
+	}
 
 	// 若 vault_meta 已有行，检查 version；落后就跑 migrate
 	// 没有行（首次启动 / 未 Initialize）则跳过迁移，由 Initialize 直接

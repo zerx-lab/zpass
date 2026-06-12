@@ -9,7 +9,12 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { type CloudStatus, configureCloud, getCloudStatus } from "@/lib/cloud-api";
+import {
+  type CloudRealtimeState,
+  type CloudStatus,
+  configureCloud,
+  getCloudStatus,
+} from "@/lib/cloud-api";
 import { createWailsConfigStorage } from "@/lib/config-storage";
 
 export interface CloudSyncProgress {
@@ -32,6 +37,15 @@ interface CloudState {
   progress: CloudSyncProgress;
   /** 待解决冲突数（运行时）。 */
   conflictCount: number;
+  /** 实时通道状态（运行时），由 cloud:realtime:state 事件与 refresh() 更新；不持久化。 */
+  realtime: CloudRealtimeState;
+  /**
+   * 会话被远端吊销标记（运行时，不持久化）。由 cloud:auth:revoked 置位——
+   * 管理员在 SaaS 侧“退出全部设备”或修改主密码会吊销本设备 session，后端据此
+   * 主动登出并置此标记，UI 展示“已被远端登出，请重新登录”，而非静默同步失败。
+   * 下一次成功登录（applyAuthChanged 见到 signedIn）时清除。
+   */
+  revoked: boolean;
 
   /** 设置并应用 server origin（持久化 + 通知后端 Configure + 刷新状态）。 */
   setBaseUrl: (baseUrl: string) => Promise<void>;
@@ -45,6 +59,10 @@ interface CloudState {
   applyAuthChanged: () => void;
   /** 设置待解决冲突数。 */
   setConflictCount: (n: number) => void;
+  /** 设置实时通道状态。 */
+  setRealtime: (s: CloudRealtimeState) => void;
+  /** 设置“会话被远端吊销”标记（cloud:auth:revoked 事件）。 */
+  setRevoked: (v: boolean) => void;
 }
 
 function genDeviceId(): string {
@@ -90,6 +108,8 @@ export const useCloudStore = create<CloudState>()(
       status: null,
       progress: idleProgress,
       conflictCount: 0,
+      realtime: "offline",
+      revoked: false,
 
       setBaseUrl: async (baseUrl) => {
         const trimmed = baseUrl.trim().replace(/\/+$/, "");
@@ -118,29 +138,48 @@ export const useCloudStore = create<CloudState>()(
       refresh: async () => {
         try {
           const status = await getCloudStatus();
-          set({ status });
+          set({
+            status,
+            realtime: (status.realtime as CloudRealtimeState) ?? "offline",
+          });
         } catch {
-          set({ status: null });
+          set({ status: null, realtime: "offline" });
         }
       },
 
       applyProgress: (p) =>
         set((s) => ({
-          progress: { ...s.progress, ...p, updatedAt: p.updatedAt ?? Date.now() } as CloudSyncProgress,
+          progress: {
+            ...s.progress,
+            ...p,
+            updatedAt: p.updatedAt ?? Date.now(),
+          } as CloudSyncProgress,
         })),
 
       applyAuthChanged: () => {
-        void get().refresh();
+        void get()
+          .refresh()
+          .then(() => {
+            // 一旦重新登录成功，清除远端吊销标记。
+            if (get().status?.signedIn) set({ revoked: false });
+          });
       },
 
       setConflictCount: (n) => set({ conflictCount: n }),
+
+      setRealtime: (r) => set({ realtime: r }),
+
+      setRevoked: (v) => set({ revoked: v }),
     }),
     {
       name: "zpass.cloud",
       version: 1,
       storage: createWailsConfigStorage<Partial<CloudState>>(),
       // 只持久化非敏感配置；运行时状态（status/progress/conflictCount）不落盘。
-      partialize: (state) => ({ baseUrl: state.baseUrl, deviceId: state.deviceId }),
+      partialize: (state) => ({
+        baseUrl: state.baseUrl,
+        deviceId: state.deviceId,
+      }),
       // 持久化是异步的（配置文件读写）；rehydrate 完成后再把持久化的地址下发给
       // Go 后端并拉取状态 —— 避免 init() 在 rehydrate 之前读到空地址，导致刚启动
       // 误显示“未配置”。

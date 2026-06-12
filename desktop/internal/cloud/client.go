@@ -276,15 +276,18 @@ func (c *Client) ListVaults(ctx context.Context) ([]VaultSummary, error) {
 // Sync: snapshot (pull) + changes (push, CAS)
 // ---------------------------------------------------------------------------
 
-// SnapshotItem is one item in a snapshot page (latest version per item_id, with
-// tombstones already filtered out server-side).
+// SnapshotItem is one item in a snapshot page (latest version per item_id).
+// Tombstones are filtered out server-side unless the request asked for them
+// with include_deleted=true, in which case Deleted marks them (with an empty
+// Ciphertext).
 type SnapshotItem struct {
 	ItemID      string `json:"item_id"`
 	Seq         int64  `json:"seq"`
-	Ciphertext  string `json:"ciphertext"`   // base64(STANDARD)
+	Ciphertext  string `json:"ciphertext"`   // base64(STANDARD); "" for tombstones
 	ContentHash string `json:"content_hash"` // hex or "" (null → "")
 	UpdatedAt   int64  `json:"updated_at"`
 	Revision    int64  `json:"revision"`
+	Deleted     bool   `json:"deleted"` // only with include_deleted=true
 }
 
 // SnapshotResponse is GET /v1/vaults/{id}/snapshot. NOTE: has_more is computed
@@ -299,15 +302,21 @@ type SnapshotResponse struct {
 }
 
 // Snapshot fetches one page of the latest-version-per-item snapshot starting
-// after cursor (0 for first page). limit is clamped server-side to [1,500]. A
+// after cursor (0 for first page). limit is clamped server-side to [1,500].
+// includeDeleted=true asks the server to include tombstones (Deleted=true,
+// empty ciphertext) — the incremental-pull path needs them to propagate remote
+// deletes; the full-reconcile path keeps the historical filtered view. A
 // 410 means the cursor fell below the server's oldest retained seq and the
 // client must discard its cache and full-resync from cursor 0.
-func (c *Client) Snapshot(ctx context.Context, vaultID string, cursor, limit int64) (SnapshotResponse, error) {
+func (c *Client) Snapshot(ctx context.Context, vaultID string, cursor, limit int64, includeDeleted bool) (SnapshotResponse, error) {
 	var out SnapshotResponse
 	q := url.Values{}
 	q.Set("cursor", strconv.FormatInt(cursor, 10))
 	if limit > 0 {
 		q.Set("limit", strconv.FormatInt(limit, 10))
+	}
+	if includeDeleted {
+		q.Set("include_deleted", "true")
 	}
 	path := "/v1/vaults/" + url.PathEscape(vaultID) + "/snapshot?" + q.Encode()
 	err := c.do(ctx, http.MethodGet, path, true, nil, &out)

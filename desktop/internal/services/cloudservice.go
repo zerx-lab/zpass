@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zerx-lab/zpass/internal/cloud"
@@ -67,10 +68,33 @@ type CloudService struct {
 	// loopCancel stops the background sync loop (P3); nil until started.
 	loopCancel context.CancelFunc
 
-	// nudgeMu guards the debounce timer that coalesces local-change-driven
-	// syncs into one run shortly after the last change.
-	nudgeMu    sync.Mutex
-	nudgeTimer *time.Timer
+	// nudgeMu guards the debounce timer AND the pending-scope accumulators that
+	// coalesce sync triggers (local edits, SSE vault pings, resync) into one run
+	// shortly after the last trigger. consumeNudge collapses the three into a
+	// single (full, scope) decision.
+	nudgeMu     sync.Mutex
+	nudgeTimer  *time.Timer
+	nudgeFull   bool             // a full reconcile was requested (resync / safety)
+	nudgeAll    bool             // an incremental sync over ALL bindings (local edit)
+	nudgeVaults map[string]int64 // per-vault incremental, value = max seq hint
+
+	// realtimeCancel stops the SSE watcher goroutine; nil when not running.
+	// Guarded by mu (same as loopCancel).
+	realtimeCancel context.CancelFunc
+	// realtimeConnected lets the poll loop stretch its interval while the
+	// realtime channel is healthy (read lock-free from the ticker).
+	realtimeConnected atomic.Bool
+	// realtimeMu guards realtimeState (the last emitted connection state).
+	realtimeMu    sync.Mutex
+	realtimeState string
+
+	// lastSyncMs is the unix-millis timestamp of the last completed runSync,
+	// read lock-free by the poll loop to decide whether a tick is redundant.
+	lastSyncMs atomic.Int64
+	// lastFullSyncMs is the unix-millis timestamp of the last completed FULL
+	// reconcile; the poll loop upgrades a tick to full once fullSyncInterval has
+	// elapsed (self-heals any drift incremental state could accumulate).
+	lastFullSyncMs atomic.Int64
 }
 
 // cloudSession is the live state of a signed-in account. It is replaced
@@ -179,6 +203,11 @@ func (s *CloudService) Configure(baseURL string) error {
 	s.cachedToken = ""
 	s.mu.Unlock()
 
+	// The watcher (if any) authenticated against the OLD server with a now-
+	// cleared session; stop it so it does not keep reconnecting there.
+	// (Outside mu: stopRealtime takes mu itself.)
+	s.stopRealtime()
+
 	if hadSession && oldBaseURL != "" {
 		// Best-effort: a server switch invalidates the previous server's token.
 		_ = s.store.Delete(tokenStoreKey(oldBaseURL))
@@ -222,6 +251,9 @@ type CloudStatus struct {
 	StoreBackend   string `json:"storeBackend"`
 	StorePersist   bool   `json:"storePersist"`
 	HasCachedToken bool   `json:"hasCachedToken"`
+	// Realtime is the realtime channel state: offline/connecting/connected/
+	// reconnecting.
+	Realtime string `json:"realtime"`
 }
 
 // Status reports the current configuration and session state.
@@ -234,6 +266,7 @@ func (s *CloudService) Status() CloudStatus {
 		StoreBackend:   s.store.Name(),
 		StorePersist:   s.store.Available(),
 		HasCachedToken: s.cachedToken != "",
+		Realtime:       s.realtimeStateNow(),
 	}
 	if s.session != nil {
 		st.SignedIn = true
@@ -628,6 +661,11 @@ func (s *CloudService) Stop() error {
 // no-ops while signed out). Caller holds opMu; mu is taken internally. No
 // keychain I/O.
 func (s *CloudService) teardownSession() {
+	// Stop the SSE watcher first: the session it authenticated with is going
+	// away (sign-out / server switch), so keeping the stream open would only
+	// reconnect with a dead token.
+	s.stopRealtime()
+
 	s.nudgeMu.Lock()
 	if s.nudgeTimer != nil {
 		s.nudgeTimer.Stop()
@@ -738,6 +776,9 @@ func (s *CloudService) establishSession(email, accountID, token, secretKey, clou
 	// Sync immediately on sign-in so the user sees their cloud data without
 	// waiting for the periodic tick (the push half is driven by NudgeSync).
 	s.kickSync()
+	// And open the realtime channel so remote changes land without waiting
+	// for the next poll tick.
+	s.startRealtime()
 }
 
 // emitAuthChanged broadcasts the signed-in/out transition for the frontend.
@@ -747,6 +788,54 @@ func (s *CloudService) emitAuthChanged(signedIn bool, email, accountID string) {
 		"email":     email,
 		"accountId": accountID,
 		"updatedAt": time.Now().UnixMilli(),
+	})
+}
+
+// handleSessionRevoked reacts to a server 401 (the session JWT expired OR was
+// revoked by an admin "sign out all devices"). It drops the in-memory session
+// and cached token so Status().SignedIn flips to false immediately — closing
+// the "looks signed in but every sync 401s" gap — and tells the UI to require a
+// re-sign-in.
+//
+// It deliberately does NOT silently re-login: a revoked session would just be
+// resurrected, defeating the admin action. It also does NOT delete the stored
+// email / Secret Key / wrapped password — those make the re-sign-in one-click
+// (the user does not have to re-enter their Secret Key). It is idempotent:
+// concurrent 401s from several vault syncs collapse to a single teardown +
+// event because teardownSession on an already-cleared session is a no-op and
+// the emit is gated on there having been a live session.
+//
+// Safe to call from a sync goroutine: it does NOT take opMu (which Register /
+// SignIn / SignOut hold), only the short mu critical sections inside
+// teardownSession, so it cannot deadlock against an in-flight sync holding
+// syncMu.
+func (s *CloudService) handleSessionRevoked() {
+	s.mu.RLock()
+	hadSession := s.session != nil
+	email := ""
+	if s.session != nil {
+		email = s.session.email
+	}
+	s.mu.RUnlock()
+	if !hadSession {
+		return // already torn down by a racing 401 — emit once
+	}
+
+	s.teardownSession()
+	// Drop the persisted JWT so the next launch does not present a dead token
+	// (and the quick-unlock path re-derives a fresh session via stored creds).
+	// Keep email / Secret Key / wrapped password for the one-click re-sign-in.
+	s.mu.RLock()
+	baseURL := s.baseURL
+	s.mu.RUnlock()
+	_ = s.store.Delete(tokenStoreKey(baseURL))
+
+	// signedIn=false flips the UI out of the synced state immediately.
+	s.emitAuthChanged(false, "", "")
+	// A distinct signal lets the UI explain "you were signed out remotely" and
+	// offer a one-click re-sign-in, rather than a generic sync error.
+	s.emitEvent("cloud:auth:revoked", map[string]any{
+		"email": email, "updatedAt": nowMillis(),
 	})
 }
 

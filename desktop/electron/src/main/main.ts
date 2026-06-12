@@ -6,6 +6,7 @@ import {
   Menu,
   type MenuItemConstructorOptions,
   nativeImage,
+  powerMonitor,
   shell,
   Tray,
 } from "electron";
@@ -112,6 +113,13 @@ const RELOAD_FILE = join(app.getAppPath(), ".dev-reload");
 let closeBehavior: "quit" | "tray" = "quit";
 let quittingForReal = false;
 let tray: Tray | null = null;
+// 开机免打扰启动：登录项注册时带上 `--hidden`（Linux autostart 的 Exec 同理），
+// 本次进程若由登录项以该参数拉起，首个窗口创建为隐藏、直接驻留托盘。
+// macOS 额外认 `wasOpenedAsHidden`（openAsHidden 登录项不传 argv）。
+const startHidden =
+  process.argv.includes("--hidden") ||
+  (process.platform === "darwin" &&
+    app.getLoginItemSettings().wasOpenedAsHidden);
 // We track the primary window globally so the tray (which is created in
 // `app.whenReady`, not inside `createWindow`) can show/focus it without
 // re-querying BrowserWindow.getAllWindows() every click.
@@ -285,11 +293,14 @@ function linuxAutostartFile(): string {
  * 应用"开机启动"偏好到操作系统。enabled=true 注册登录项，false 移除。
  * 任何失败都吞掉并记录到 stderr —— 登录项写入不该阻断应用主流程。
  */
-async function applyLaunchAtLogin(enabled: boolean): Promise<void> {
+async function applyLaunchAtLogin(
+  enabled: boolean,
+  hidden: boolean,
+): Promise<void> {
   // dev 下不碰系统登录项，避免把开发用 electron 二进制注册进去。
   if (!app.isPackaged) {
     process.stderr.write(
-      `[autostart] skipped in dev (isPackaged=false), would set openAtLogin=${enabled}\n`,
+      `[autostart] skipped in dev (isPackaged=false), would set openAtLogin=${enabled} hidden=${hidden}\n`,
     );
     return;
   }
@@ -306,7 +317,7 @@ async function applyLaunchAtLogin(enabled: boolean): Promise<void> {
           "Version=1.0",
           "Name=ZPass",
           "Comment=ZPass password manager",
-          `Exec="${exec}"`,
+          `Exec="${exec}"${hidden ? " --hidden" : ""}`,
           "Icon=zpass",
           "Terminal=false",
           "X-GNOME-Autostart-enabled=true",
@@ -325,9 +336,14 @@ async function applyLaunchAtLogin(enabled: boolean): Promise<void> {
     return;
   }
 
-  // macOS / Windows：Electron 原生 API。
+  // macOS / Windows：Electron 原生 API。Windows 通过 args 传 `--hidden`，
+  // macOS 用 openAsHidden（登录项不传 argv，启动侧认 wasOpenedAsHidden）。
   try {
-    app.setLoginItemSettings({ openAtLogin: enabled });
+    app.setLoginItemSettings({
+      openAtLogin: enabled,
+      openAsHidden: hidden,
+      args: hidden ? ["--hidden"] : [],
+    });
   } catch (err) {
     process.stderr.write(
       `[autostart] setLoginItemSettings failed: ${String(err)}\n`,
@@ -335,10 +351,13 @@ async function applyLaunchAtLogin(enabled: boolean): Promise<void> {
   }
 }
 
-ipcMain.handle("desktop:app:set-launch-at-login", async (_ev, enabled) => {
-  if (typeof enabled !== "boolean") return;
-  await applyLaunchAtLogin(enabled);
-});
+ipcMain.handle(
+  "desktop:app:set-launch-at-login",
+  async (_ev, enabled, hidden) => {
+    if (typeof enabled !== "boolean") return;
+    await applyLaunchAtLogin(enabled, hidden === true);
+  },
+);
 
 // Save-file dialog — replaces the Wails 3 ExportService dialog. The Go side
 // now takes a path argument (or empty for cancel); we pick the path here.
@@ -834,7 +853,7 @@ async function saveWindowBounds(win: BrowserWindow) {
   }
 }
 
-async function createWindow() {
+async function createWindow(hidden = false) {
   // Match the Wails 3 window options the ported frontend was designed for:
   //   - frameless + custom titlebar (rendered by React's <Titlebar/>)
   //   - 1280x820 default, 960x620 min — the dashboard layout assumes this
@@ -851,6 +870,8 @@ async function createWindow() {
     minWidth: 960,
     minHeight: 620,
     center: saved?.x === undefined || saved?.y === undefined,
+    // 开机免打扰启动：窗口隐藏创建，直接驻留托盘，由托盘/dock 激活时再显示。
+    show: !hidden,
     frame: false,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
     backgroundColor: "#0c0c0d",
@@ -868,14 +889,21 @@ async function createWindow() {
   // If the persisted state was maximised, re-apply after construction so the
   // saved normal-bounds become the "restore" target.
   if (saved?.maximized) {
-    win.once("ready-to-show", () => {
-      win.maximize();
-    });
-    // ready-to-show may never fire if show:true short-circuits it; also
-    // maximize on first paint via an immediate call as belt + braces.
-    setImmediate(() => {
-      if (!win.isDestroyed() && !win.isMaximized()) win.maximize();
-    });
+    if (hidden) {
+      // maximize() 会把隐藏窗口显示出来，推迟到首次真正 show 时再恢复。
+      win.once("show", () => {
+        if (!win.isDestroyed() && !win.isMaximized()) win.maximize();
+      });
+    } else {
+      win.once("ready-to-show", () => {
+        win.maximize();
+      });
+      // ready-to-show may never fire if show:true short-circuits it; also
+      // maximize on first paint via an immediate call as belt + braces.
+      setImmediate(() => {
+        if (!win.isDestroyed() && !win.isMaximized()) win.maximize();
+      });
+    }
   }
 
   // Persist bounds when the user closes or moves the window. We debounce by
@@ -1024,6 +1052,31 @@ async function createWindow() {
   }
 }
 
+/**
+ * Forward OS power/session events to the renderer.
+ *
+ * 系统挂起恢复 / 锁屏解锁后，Go sidecar 与云端的 SSE 长连接大概率已经半开
+ * （TCP 看似存活但对端早已超时丢弃）。把事件推给渲染层，由 CloudEventSync
+ * 调用 CloudService.PokeRealtime 杀掉旧流立即重连并触发一次补偿同步。
+ *
+ * Called once after `app.whenReady()` — powerMonitor must not be touched
+ * before the ready event. `unlock-screen` only fires on macOS/Windows;
+ * registering it on Linux is harmless (it just never fires).
+ */
+function installPowerMonitor() {
+  const notifyResumed = () => {
+    const win = mainWindow ?? BrowserWindow.getAllWindows()[0] ?? null;
+    if (!win || win.isDestroyed()) return;
+    try {
+      win.webContents.send("zpass:system-resumed");
+    } catch {
+      // webContents may be tearing down — ignore
+    }
+  };
+  powerMonitor.on("resume", notifyResumed);
+  powerMonitor.on("unlock-screen", notifyResumed);
+}
+
 app.whenReady().then(async () => {
   bootTrace("app-ready");
   // Sidecar + IPC handler were registered at module load (above) so they
@@ -1033,8 +1086,11 @@ app.whenReady().then(async () => {
   installDevReloader();
   installTray();
   installAppMenu();
+  installPowerMonitor();
 
-  await createWindow();
+  // 免打扰启动只有在托盘可用时才生效 —— 托盘创建失败（Linux 无 indicator
+  // host）时隐藏窗口会让应用彻底不可见，降级为正常显示。
+  await createWindow(startHidden && tray !== null);
   bootTrace("window-loaded");
 
   app.on("activate", () => {
