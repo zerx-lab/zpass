@@ -9,8 +9,5 @@ desktop-old
 cryptocore/.hvigor/outputs/build-logs/
 phone/.hvigor/outputs/build-logs/
 
-# 闭源云端子项目(独立 .git 仓库,绝不并入本开源仓库的远程)
-# 锚定到仓库根:只忽略顶层 cloud/,不误伤嵌套的同名目录
-# (如 desktop/internal/cloud —— 桌面端云同步 HTTP 客户端,需入库)
-/cloud/
 harmony/.appanalyzer/appanalyzerCardConfig/
+/zpass.code-workspace
