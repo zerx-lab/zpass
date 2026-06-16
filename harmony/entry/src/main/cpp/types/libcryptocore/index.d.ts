@@ -28,6 +28,30 @@ export interface SyncServerInfo {
   hosts: string[];
 }
 
+/** SRP-6a 注册产物：认证盐 + verifier（256B PAD）。 */
+export interface CloudSrpRegistration {
+  salt: ArrayBuffer;
+  verifier: ArrayBuffer;
+}
+
+/** SRP-6a 客户端 start：一次性私钥 a + 公开 A（256B PAD）。 */
+export interface CloudSrpClientStart {
+  secretA: ArrayBuffer;
+  aPub: ArrayBuffer;
+}
+
+/** SRP-6a 客户端 finish：证明 M1 + 会话密钥 K。 */
+export interface CloudSrpClientFinish {
+  m1: ArrayBuffer;
+  k: ArrayBuffer;
+}
+
+/** 账户 X25519 keyset 对（pub32 / priv32）。 */
+export interface CloudKeysetPair {
+  publicKey: ArrayBuffer;
+  privateKey: ArrayBuffer;
+}
+
 interface Cryptocore {
   /**
    * Argon2id 派生 KEK
@@ -141,6 +165,68 @@ interface Cryptocore {
    * reqId 未知（已超时 / 已停止）则忽略；status 不在 100..599 归一为 500。
    */
   respondSyncRequest: (reqId: number, status: number, body: Uint8Array) => void;
+
+  /* -- 云同步：2SKD / SRP-6a / X25519 keyset（由 cryptocore harmony.rs 导出） -- */
+
+  /**
+   * 2SKD 派生 Account Unlock Key（AUK）。
+   *
+   * out = Argon2id(NFKD(trim(password)), saltEnc) XOR
+   *       HKDF-SHA256(ikm=secretKeyRaw, salt=accountId, info="zpass-auk-v1")
+   *
+   * password 走原始串（规范化 trim+NFKD 由原生完成）；Argon2id 重活走 AsyncTask。
+   */
+  deriveAuk: (
+    password: string,
+    saltEnc: ArrayBuffer,
+    secretKeyRaw: ArrayBuffer,
+    accountId: ArrayBuffer,
+    memKib: number,
+    iter: number,
+    par: number,
+  ) => Promise<ArrayBuffer>;
+
+  /** 2SKD 派生 SRP-x（32 字节）—— slow_salt = srp_salt，info="zpass-srpx-v1"。 */
+  deriveSrpX: (
+    password: string,
+    saltAuth: ArrayBuffer,
+    secretKeyRaw: ArrayBuffer,
+    accountId: ArrayBuffer,
+    memKib: number,
+    iter: number,
+    par: number,
+  ) => Promise<ArrayBuffer>;
+
+  /** SRP-6a 注册：x = big-endian(32B SRP-x)，返回 verifier = g^x mod N（256B PAD）。 */
+  srpRegister: (xBytes: ArrayBuffer, salt: ArrayBuffer) => CloudSrpRegistration;
+
+  /** SRP-6a 客户端 start：生成一次性 a 与 A = g^a mod N（256B PAD）。 */
+  srpClientStart: () => CloudSrpClientStart;
+
+  /**
+   * SRP-6a 客户端 finish：算 S / K / M1。identity = 小写邮箱的 UTF-8 字节。
+   * 服务端 M2 校验在 ArkTS 侧用 SHA-256(PAD(A)‖M1‖K) 重算后常数时间比较。
+   */
+  srpClientFinish: (
+    secretA: ArrayBuffer,
+    aPub: ArrayBuffer,
+    bPub: ArrayBuffer,
+    xBytes: ArrayBuffer,
+    salt: ArrayBuffer,
+    identity: ArrayBuffer,
+  ) => CloudSrpClientFinish;
+
+  /** 生成账户 X25519 keyset 对（pub32 / priv32）。 */
+  keysetGenerate: () => CloudKeysetPair;
+
+  /**
+   * X25519 sealed-box 封装：输出 = eph_pub(32) ‖ AEAD（aad="zpass-vaultkey-v1"）。
+   * 用账户公钥包裹 per-vault key。
+   */
+  sealToPubkey: (recipientPub: ArrayBuffer, plaintext: ArrayBuffer) => ArrayBuffer;
+
+  /** 用账户私钥解封 sealToPubkey 输出。 */
+  openWithPrivkey: (privKey: ArrayBuffer, sealed: ArrayBuffer) => ArrayBuffer;
 }
 
 declare const cryptocore: Cryptocore;

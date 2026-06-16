@@ -148,6 +148,12 @@ export function CloudEventSync() {
       },
     );
 
+    // cloud:vault:deleted —— 某 vault 被(本设备或其他设备)主动删除。立即对账一次,
+    // 让删除墓碑传播逻辑自动删除对应本地空间,无需等下个 reconcile 时机(登录/进设置页)。
+    const offVaultDeleted = Events.On("cloud:vault:deleted", () => {
+      void reconcileCloudSpaces();
+    });
+
     // 网络恢复 / 系统挂起恢复 —— SSE 长连接大概率已半开，poke 后端
     // 杀掉旧流立即重连并触发一次补偿同步。两个来源可能几乎同时触发
     // （解锁后网络栈紧跟着上线），用时间戳做 ~2s 节流避免重复 IPC。
@@ -191,6 +197,7 @@ export function CloudEventSync() {
       if (typeof offExpired === "function") offExpired();
       if (typeof offError === "function") offError();
       if (typeof offRealtime === "function") offRealtime();
+      if (typeof offVaultDeleted === "function") offVaultDeleted();
       window.removeEventListener("online", pokeRealtime);
       window.removeEventListener("focus", reconcileOnFocus);
       offSystemResumed?.();

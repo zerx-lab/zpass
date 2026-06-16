@@ -29,12 +29,15 @@ import {
 	deleteRemoteVault,
 	getCloudEntitlements,
 	isPlanLimitError,
+	type LinkedSpace,
+	listDeletedVaults,
 	listLinkedSpaces,
 	listRemoteVaults,
 	setVaultMeta,
 	syncNow,
 	unlinkSpace,
 } from "@/lib/cloud-api";
+import { purgeSpace } from "@/lib/vault-api";
 import { useCloudStore } from "@/stores/cloud";
 import { type Space, useSpacesStore } from "@/stores/spaces";
 
@@ -86,6 +89,53 @@ export function reconcileCloudSpaces(): Promise<void> {
 	return inflight;
 }
 
+/**
+ * 删除墓碑传播(增量): 拉取本账户 seq>游标 的 vault 删除墓碑,命中本地绑定者
+ * 物理删本地空间(purgeSpace 删条目+解绑) + 从 store 移除。把"主动删除"与
+ * "失去访问"区分开 —— 只有进了墓碑的才自动删;仅"失踪但无墓碑"的留给 doReconcile
+ * 的 step1 走 detached 保留。游标按 accountId 持久化推进(只增)。
+ *
+ * 任何单步失败都不抛出:拉取失败本轮跳过下轮再试;单个 purge 失败的空间因其
+ * vault 已删,会在后续 reconcile 落入 detached 兜底(数据保留)。返回是否有改动。
+ */
+async function processDeletionTombstones(accountId: string): Promise<boolean> {
+	if (!accountId) return false;
+	let changed = false;
+	// 多页时一次抽干(删除少见,通常 0~1 页);guard 防御异常死循环。
+	for (let guard = 0; guard < 100; guard++) {
+		const cursor = useCloudStore.getState().tombstoneCursors[accountId] ?? 0;
+		let page: Awaited<ReturnType<typeof listDeletedVaults>>;
+		try {
+			page = await listDeletedVaults(cursor);
+		} catch {
+			return changed; // 拉墓碑失败:本轮跳过,不影响其余对账
+		}
+		if (page.deleted.length === 0) break;
+
+		const linked: LinkedSpace[] = await listLinkedSpaces().catch(() => []);
+		const spaceByVault = new Map<string, string>(linked.map((l) => [l.vaultId, l.spaceId]));
+
+		for (const d of page.deleted) {
+			const spaceId = spaceByVault.get(d.vaultId);
+			if (!spaceId) continue; // 本地无此 vault 绑定:忽略(从未同步过)
+			try {
+				// 物理删本地条目 + 解绑。解绑后下面 removeSpace 触发的 onSpaceRemoved
+				// 因找不到 binding 而空跑,不会再对已删 vault 重复发删除。
+				await purgeSpace(spaceId);
+				useCloudStore.getState().setSpaceDetached(spaceId, false);
+				useSpacesStore.getState().removeSpace(spaceId);
+				changed = true;
+			} catch {
+				// 单个失败留给 detached 兜底(vault 已删,数据保留),不卡住游标。
+			}
+		}
+		// 推进游标到本页末尾(失败项也推进:已读到,靠 detached 兜底,避免反复重拉)。
+		useCloudStore.getState().setTombstoneCursor(accountId, page.nextCursor);
+		if (!page.hasMore) break;
+	}
+	return changed;
+}
+
 async function doReconcile(): Promise<void> {
 	const cloud = useCloudStore.getState();
 	if (!cloud.status?.signedIn) return;
@@ -94,10 +144,35 @@ async function doReconcile(): Promise<void> {
 	let changed = false;
 
 	try {
+		// ── 0. 删除墓碑传播(先于其余对账): 命中本地绑定的"主动删除"墓碑 → 物理删
+		//    本地空间。放最前,使下面 listLinkedSpaces 拿到的是已清理过的绑定,
+		//    被自动删的空间不会再落入 step1 的 detached 分支。
+		const accountId = useCloudStore.getState().status?.accountId ?? "";
+		if (await processDeletionTombstones(accountId)) changed = true;
+
+		// ── 重试待删的云端 vault(此前删除失败的;幂等)。删除必达的兜底:确保删除
+		//    最终到达服务端、写出墓碑、传到其他设备。
+		for (const vid of [...useCloudStore.getState().pendingRemoteDeletes]) {
+			try {
+				await deleteRemoteVault(vid);
+				useCloudStore.getState().clearPendingRemoteDelete(vid);
+				changed = true;
+			} catch (e) {
+				// 404=已不存在(视作成功清理);403=非本人 owner(重试无意义,清理)。
+				// 其余(网络等)保留,下轮再试。
+				const msg = e instanceof Error ? e.message : String(e);
+				if (msg.includes("http 404") || msg.includes("http 403")) {
+					useCloudStore.getState().clearPendingRemoteDelete(vid);
+				}
+			}
+		}
+
 		const [linked, remote] = await Promise.all([listLinkedSpaces(), listRemoteVaults()]);
 		const linkedBySpace = new Map(linked.map((l) => [l.spaceId, l.vaultId]));
 		const remoteIds = new Set(remote.map((v) => v.vaultId));
 		const ignored = new Set(useCloudStore.getState().ignoredVaultIds);
+		// 待删的 vault 不可在 step2 被重新镜像回本地(否则刚删的空间复活)。
+		const pending = new Set(useCloudStore.getState().pendingRemoteDeletes);
 
 		// reconcile 中途 createSpace 会自动切换激活空间;结束后还原,
 		// 避免后台对账偷走用户当前的空间焦点。
@@ -126,7 +201,7 @@ async function doReconcile(): Promise<void> {
 				}
 				continue;
 			}
-			if (ignored.has(v.vaultId)) continue;
+			if (ignored.has(v.vaultId) || pending.has(v.vaultId)) continue;
 			if (!v.name) continue; // 无名旧 vault → 留给设置页手动绑定兜底
 
 			const candidates = useSpacesStore
@@ -229,13 +304,17 @@ async function onSpaceRemoved(spaceId: string): Promise<void> {
 	const l = linked.find((x) => x.spaceId === spaceId);
 	useCloudStore.getState().setSpaceDetached(spaceId, false); // 清理残留标记
 	if (!l) return;
+	await unlinkSpace(spaceId).catch(() => {});
 	try {
-		await unlinkSpace(spaceId);
 		await deleteRemoteVault(l.vaultId);
+		// 删除成功:服务端已写墓碑(其他设备据此自动删本地同名空间)。立即再对账
+		// 一次,让被套餐配额挡住的本地空间马上重试上云 —— free 套餐"删旧腾配额给
+		// 新空间"的换槽由此闭环,不必等下个同步周期。
+		void reconcileCloudSpaces().catch(() => {});
 	} catch {
-		// 删不掉(非 owner / 服务端拒删最后一个)→ 忽略该 vault,
-		// 防止 reconcile 把刚删的空间从云端复活
-		useCloudStore.getState().addIgnoredVault(l.vaultId);
+		// 删不掉(离线 / 瞬时错误)→ 记入待删队列,reconcile 持续幂等重试直至成功。
+		// 不再用 ignoredVaultIds 永久焊死,避免删除到不了服务端、传不到其他设备。
+		useCloudStore.getState().addPendingRemoteDelete(l.vaultId);
 	}
 }
 

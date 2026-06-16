@@ -83,6 +83,19 @@ interface CloudState {
    * 重新启用同步必须用户显式操作(防止删除在设备间来回复活)。
    */
   detachedSpaceIds: string[];
+  /**
+   * 每账户的 vault 删除墓碑游标(持久化,按 accountId 区分)。值 = 已处理到的最大
+   * deletion_seq;reconcile 据此增量拉 GET /v1/vaults/deleted。
+   * 必须按账户区分 —— 服务端 deletion_seq 是跨租户全局序列,共用游标会漏处理
+   * 另一账户 seq 较小的墓碑。
+   */
+  tombstoneCursors: Record<string, number>;
+  /**
+   * 待重试删除的云端 vaultId(持久化)。删除空间时若 deleteRemoteVault 失败
+   * (离线/瞬时错误),记入此处,reconcile 持续幂等重试直至成功 —— 取代旧的
+   * "失败即 ignoredVaultIds 永久忽略",确保删除必达服务端、墓碑能传到其他设备。
+   */
+  pendingRemoteDeletes: string[];
 
   /** 用解析出的环境地址初始化后端并拉取状态（应用启动时调用）。 */
   init: () => Promise<void>;
@@ -106,6 +119,12 @@ interface CloudState {
   removeIgnoredVault: (vaultId: string) => void;
   /** 标记/取消本地空间与云端分离。 */
   setSpaceDetached: (spaceId: string, detached: boolean) => void;
+  /** 推进某账户的删除墓碑游标(只增不减)。 */
+  setTombstoneCursor: (accountId: string, seq: number) => void;
+  /** 记录一个待重试删除的云端 vault。 */
+  addPendingRemoteDelete: (vaultId: string) => void;
+  /** 移除待删记录(删除成功 / 已不存在 / 非本人 owner)。 */
+  clearPendingRemoteDelete: (vaultId: string) => void;
 }
 
 function genDeviceId(): string {
@@ -137,6 +156,8 @@ export const useCloudStore = create<CloudState>()(
       mirror: { running: false, limitBlocked: false, frozenSpaceIds: [] },
       ignoredVaultIds: [],
       detachedSpaceIds: [],
+      tombstoneCursors: {},
+      pendingRemoteDeletes: [],
 
       init: async () => {
         // 首次运行补一个设备 id。
@@ -215,6 +236,27 @@ export const useCloudStore = create<CloudState>()(
               : [...s.detachedSpaceIds, spaceId]
             : s.detachedSpaceIds.filter((v) => v !== spaceId),
         })),
+
+      setTombstoneCursor: (accountId, seq) =>
+        set((s) => ({
+          tombstoneCursors: {
+            ...s.tombstoneCursors,
+            // 只增不减:并发 reconcile 或乱序回包不应回退游标。
+            [accountId]: Math.max(seq, s.tombstoneCursors[accountId] ?? 0),
+          },
+        })),
+
+      addPendingRemoteDelete: (vaultId) =>
+        set((s) =>
+          s.pendingRemoteDeletes.includes(vaultId)
+            ? s
+            : { pendingRemoteDeletes: [...s.pendingRemoteDeletes, vaultId] },
+        ),
+
+      clearPendingRemoteDelete: (vaultId) =>
+        set((s) => ({
+          pendingRemoteDeletes: s.pendingRemoteDeletes.filter((v) => v !== vaultId),
+        })),
     }),
     {
       name: "zpass.cloud",
@@ -226,6 +268,8 @@ export const useCloudStore = create<CloudState>()(
         deviceId: state.deviceId,
         ignoredVaultIds: state.ignoredVaultIds,
         detachedSpaceIds: state.detachedSpaceIds,
+        tombstoneCursors: state.tombstoneCursors,
+        pendingRemoteDeletes: state.pendingRemoteDeletes,
       }),
       // 持久化是异步的（配置文件读写）；rehydrate 完成后把解析出的环境地址
       // 下发给 Go 后端并拉取状态 —— 避免刚启动时误显示“未配置”。

@@ -84,6 +84,11 @@ func (s *CloudService) realtimeLoop(ctx context.Context, client *cloud.Client) {
 					// Tear down and prompt re-sign-in; async because it stops THIS
 					// watcher.
 					go s.handleSessionRevoked()
+				case ev.VaultDeleted:
+					// A vault was deleted (owner action, possibly another device).
+					// Tell the renderer to reconcile spaces now so the bound local
+					// space is auto-removed without waiting for the next reconcile.
+					s.emitEvent("cloud:vault:deleted", map[string]any{"vaultId": ev.VaultID})
 				case ev.Resync:
 					// Broadcast lag: the delta could have a hole — force a full reconcile.
 					s.nudgeFullSync()

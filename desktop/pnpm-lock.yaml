@@ -4,6 +4,14 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  hosted-git-info@4>lru-cache: ^7.18.3
+
+patchedDependencies:
+  extract-zip@2.0.1:
+    hash: 13c4701e62c997d7a90fec1083a9bbc3fc1f409de7059d509a59c2f5e32a4b3e
+    path: patches/extract-zip@2.0.1.patch
+
 importers:
 
   .:
@@ -2649,10 +2657,6 @@ packages:
   lru-cache@5.1.1:
     resolution: {integrity: sha512-KpNARQA3Iwv+jTA0utUVVbrh+Jlrr1Fv0e56GGzAFOXN7dk/FviaDW8LHmK52DlcH4WP2n6gI8vN1aesBFgo9w==}
 
-  lru-cache@6.0.0:
-    resolution: {integrity: sha512-Jo6dJ04CmSjuznwJSS3pUeWmd/H0ffTlkXXgwZi+eq1UCmqQwCh+eLsYOYCwY991i2Fah4h1BEMCx4qThGbsiA==}
-    engines: {node: '>=10'}
-
   lru-cache@7.18.3:
     resolution: {integrity: sha512-jumlc0BIUrS3qJGgIkWZsyfAM7NCWiBcCDhnd+3NNM5KbBmLTgHVfWBcg6W+rLUsIpzpERPsvwUP7CckAQSOoA==}
     engines: {node: '>=12'}
@@ -4373,7 +4377,7 @@ snapshots:
       '@electron/windows-sign': 1.2.2
       '@malept/cross-spawn-promise': 2.0.0
       debug: 4.4.3(supports-color@10.2.2)
-      extract-zip: 2.0.1
+      extract-zip: 2.0.1(patch_hash=13c4701e62c997d7a90fec1083a9bbc3fc1f409de7059d509a59c2f5e32a4b3e)
       filenamify: 4.3.0
       fs-extra: 11.3.5
       galactus: 1.0.0
@@ -6063,7 +6067,7 @@ snapshots:
     dependencies:
       '@electron/get': 5.0.0
       '@types/node': 24.12.4
-      extract-zip: 2.0.1
+      extract-zip: 2.0.1(patch_hash=13c4701e62c997d7a90fec1083a9bbc3fc1f409de7059d509a59c2f5e32a4b3e)
     transitivePeerDependencies:
       - supports-color
 
@@ -6186,7 +6190,7 @@ snapshots:
       iconv-lite: 0.4.24
       tmp: 0.0.33
 
-  extract-zip@2.0.1:
+  extract-zip@2.0.1(patch_hash=13c4701e62c997d7a90fec1083a9bbc3fc1f409de7059d509a59c2f5e32a4b3e):
     dependencies:
       debug: 4.4.3(supports-color@10.2.2)
       get-stream: 5.2.0
@@ -6451,7 +6455,7 @@ snapshots:
 
   hosted-git-info@4.1.0:
     dependencies:
-      lru-cache: 6.0.0
+      lru-cache: 7.18.3
 
   html-parse-stringify@3.0.1:
     dependencies:
@@ -6720,10 +6724,6 @@ snapshots:
   lru-cache@5.1.1:
     dependencies:
       yallist: 3.1.1
-
-  lru-cache@6.0.0:
-    dependencies:
-      yallist: 4.0.0
 
   lru-cache@7.18.3: {}
 

@@ -32,10 +32,11 @@ import (
 
 // SyncEvent is one realtime notification from GET /v1/events.
 type SyncEvent struct {
-	VaultID string // hyphenated server vault UUID ("" for resync/revoked)
-	Seq     int64  // the vault's new high-water seq (0 for resync/revoked)
-	Resync  bool   // true when the server requests a full resync (broadcast lag)
-	Revoked bool   // true when the server signals this session was revoked
+	VaultID      string // hyphenated server vault UUID ("" for resync/revoked)
+	Seq          int64  // the vault's new high-water seq (0 for resync/revoked)
+	Resync       bool   // true when the server requests a full resync (broadcast lag)
+	Revoked      bool   // true when the server signals this session was revoked
+	VaultDeleted bool   // true when a vault was deleted by its owner; VaultID is set
 }
 
 const (
@@ -165,6 +166,16 @@ func dispatchEvent(eventName, data string, onEvent func(SyncEvent)) {
 	case "revoked":
 		// The server signalled this session was revoked (admin sign-out-all, etc).
 		onEvent(SyncEvent{Revoked: true})
+	case "vault_deleted":
+		// A vault was deleted by its owner (possibly on another device). Carries
+		// vault_id; drives cross-device auto-removal of the bound local space.
+		var payload struct {
+			VaultID string `json:"vault_id"`
+		}
+		if json.Unmarshal([]byte(data), &payload) != nil {
+			return
+		}
+		onEvent(SyncEvent{VaultID: payload.VaultID, VaultDeleted: true})
 	default:
 		// Unknown event kind — ignore for forward compat.
 	}

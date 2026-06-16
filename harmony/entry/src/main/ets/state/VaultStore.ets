@@ -80,6 +80,13 @@ export class VaultStore {
   @Trace trustedSupported: boolean = false;
   @Trace trustedEnabled: boolean = false;
 
+  /* ----- 云同步钩子（由 CloudService.hydrate 注册；VaultStore 不反向 import CloudService，避免环） ----- */
+
+  /** 解锁成功后回调（传主密码，用于自动恢复云会话并同步）。 */
+  private cloudOnUnlocked: ((masterPassword: string) => void) | null = null;
+  /** 锁定时回调（清除云会话内存密钥、停周期同步）。 */
+  private cloudOnLocked: (() => void) | null = null;
+
   /* ------------------------------------------------------------------------ */
   /* 状态查询                                                                  */
   /* ------------------------------------------------------------------------ */
@@ -245,6 +252,7 @@ export class VaultStore {
     try {
       await vaultService.unlock(password);
       await this.refresh();
+      if (this.cloudOnUnlocked) this.cloudOnUnlocked(password);
     } finally {
       this.busy = false;
     }
@@ -267,6 +275,13 @@ export class VaultStore {
     this.status = { initialized: this.status.initialized, unlocked: false, itemCount: 0 };
     // 清空 HIBP 扫描缓存 —— 与 phone 锁定时清空 breach cache 行为一致
     clearBreachCache();
+    if (this.cloudOnLocked) this.cloudOnLocked();
+  }
+
+  /** 注册云同步生命周期钩子（CloudService 在 hydrate 时调用一次）。 */
+  registerCloudHooks(onUnlocked: (masterPassword: string) => void, onLocked: () => void): void {
+    this.cloudOnUnlocked = onUnlocked;
+    this.cloudOnLocked = onLocked;
   }
 
   async changeMasterPassword(oldPw: string, newPw: string): Promise<void> {

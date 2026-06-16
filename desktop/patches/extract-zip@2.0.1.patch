@@ -1,0 +1,49 @@
+diff --git a/index.js b/index.js
+index 23384ea16bb848616886f356d8d69f94325535bf..7cfd6ab2cd855f6f34e4c2624ec5867435d31de8 100644
+--- a/index.js
++++ b/index.js
+@@ -7,7 +7,13 @@ const { promisify } = require('util')
+ const stream = require('stream')
+ const yauzl = require('yauzl')
+ 
+-const openZip = promisify(yauzl.open)
++// PATCH(zpass): yauzl.open streams the zip through fd-slicer's fs.read, which
++// stalls mid-entry on Node >=26 (the compressed input to inflateRaw stops being
++// fed before EOF, so deflated entries never finish and the readEntry loop hangs,
++// then the process exits 0 with no output). Reading the whole archive into a
++// Buffer and using yauzl.fromBuffer slices in memory (no fs.read), which extracts
++// every entry correctly. Electron zips are ~150MB, comfortably under Buffer limits.
++const openZip = promisify(yauzl.fromBuffer)
+ const pipeline = promisify(stream.pipeline)
+ 
+ class Extractor {
+@@ -19,7 +25,7 @@ class Extractor {
+   async extract () {
+     debug('opening', this.zipPath, 'with opts', this.opts)
+ 
+-    this.zipfile = await openZip(this.zipPath, { lazyEntries: true })
++    this.zipfile = await openZip(await fs.readFile(this.zipPath), { lazyEntries: true })
+     this.canceled = false
+ 
+     return new Promise((resolve, reject) => {
+@@ -36,6 +42,20 @@ class Extractor {
+         }
+       })
+ 
++      // PATCH(zpass): the yauzl.fromBuffer zipfile (see openZip above) is backed
++      // by an in-memory reader with no fd, so it never emits 'close' — only
++      // 'end' once every entry has been read. Without resolving here the extract
++      // promise hangs forever and @electron/packager silently exits 0 before
++      // writing the app dir. 'end' fires after the final entry's write finished
++      // (readEntry() is only called after extractEntry resolves), so all files
++      // are on disk. resolve() is idempotent if 'close' ever also fires.
++      this.zipfile.on('end', () => {
++        if (!this.canceled) {
++          debug('zip extraction complete (end)')
++          resolve()
++        }
++      })
++
+       this.zipfile.on('entry', async entry => {
+         /* istanbul ignore if */
+         if (this.canceled) {

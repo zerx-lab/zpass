@@ -31,6 +31,27 @@ export interface SyncServerInfo {
   hosts: string[];
 }
 
+/** napi srpRegister 原生返回形态（ArrayBuffer 字段）。 */
+interface CloudSrpRegistrationNative {
+  salt: ArrayBuffer;
+  verifier: ArrayBuffer;
+}
+
+interface CloudSrpClientStartNative {
+  secretA: ArrayBuffer;
+  aPub: ArrayBuffer;
+}
+
+interface CloudSrpClientFinishNative {
+  m1: ArrayBuffer;
+  k: ArrayBuffer;
+}
+
+interface CloudKeysetPairNative {
+  publicKey: ArrayBuffer;
+  privateKey: ArrayBuffer;
+}
+
 interface CryptocoreNative {
   deriveKek: (
     password: string,
@@ -72,6 +93,37 @@ interface CryptocoreNative {
   startSyncServer: () => SyncServerInfo;
   stopSyncServer: () => void;
   respondSyncRequest: (reqId: number, status: number, body: Uint8Array) => void;
+  deriveAuk: (
+    password: string,
+    saltEnc: ArrayBuffer,
+    secretKeyRaw: ArrayBuffer,
+    accountId: ArrayBuffer,
+    memKib: number,
+    iter: number,
+    par: number,
+  ) => Promise<ArrayBuffer>;
+  deriveSrpX: (
+    password: string,
+    saltAuth: ArrayBuffer,
+    secretKeyRaw: ArrayBuffer,
+    accountId: ArrayBuffer,
+    memKib: number,
+    iter: number,
+    par: number,
+  ) => Promise<ArrayBuffer>;
+  srpRegister: (xBytes: ArrayBuffer, salt: ArrayBuffer) => CloudSrpRegistrationNative;
+  srpClientStart: () => CloudSrpClientStartNative;
+  srpClientFinish: (
+    secretA: ArrayBuffer,
+    aPub: ArrayBuffer,
+    bPub: ArrayBuffer,
+    xBytes: ArrayBuffer,
+    salt: ArrayBuffer,
+    identity: ArrayBuffer,
+  ) => CloudSrpClientFinishNative;
+  keysetGenerate: () => CloudKeysetPairNative;
+  sealToPubkey: (recipientPub: ArrayBuffer, plaintext: ArrayBuffer) => ArrayBuffer;
+  openWithPrivkey: (privKey: ArrayBuffer, sealed: ArrayBuffer) => ArrayBuffer;
 }
 
 const native: CryptocoreNative = cryptocore as CryptocoreNative;
@@ -87,6 +139,14 @@ const nativeRegisterSyncRequestHandler = native.registerSyncRequestHandler;
 const nativeStartSyncServerRaw = native.startSyncServer;
 const nativeStopSyncServerRaw = native.stopSyncServer;
 const nativeRespondSyncRequestRaw = native.respondSyncRequest;
+const nativeDeriveAuk = native.deriveAuk;
+const nativeDeriveSrpX = native.deriveSrpX;
+const nativeSrpRegister = native.srpRegister;
+const nativeSrpClientStart = native.srpClientStart;
+const nativeSrpClientFinish = native.srpClientFinish;
+const nativeKeysetGenerate = native.keysetGenerate;
+const nativeSealToPubkey = native.sealToPubkey;
+const nativeOpenWithPrivkey = native.openWithPrivkey;
 
 /* ----------------------------------------------------------------------------
  * 模块可用性探测
@@ -267,4 +327,110 @@ export async function nativeRespondSyncRequest(
   body: Uint8Array,
 ): Promise<void> {
   nativeRespondSyncRequestRaw(reqId, status, body);
+}
+
+/* ----------------------------------------------------------------------------
+ * 云同步专用 —— 2SKD（AUK / SRP-x）+ SRP-6a 握手 + X25519 keyset
+ *
+ * 与 desktop internal/cloudcrypto/* 及服务端字节级一致；ArkTS 侧只做
+ * Uint8Array ↔ ArrayBuffer 转换，不复写任何密码学逻辑（缺 .so 直接抛错）。
+ * -------------------------------------------------------------------------- */
+
+/** SRP-6a 注册产物：认证盐 + verifier（256B PAD）。 */
+export interface SrpRegistration {
+  salt: Uint8Array;
+  verifier: Uint8Array;
+}
+
+/** SRP-6a 客户端 start：一次性私钥 a + 公开 A（256B PAD）。 */
+export interface SrpClientStart {
+  secretA: Uint8Array;
+  aPub: Uint8Array;
+}
+
+/** SRP-6a 客户端 finish：证明 M1 + 会话密钥 K。 */
+export interface SrpClientFinish {
+  m1: Uint8Array;
+  k: Uint8Array;
+}
+
+/** 账户 X25519 keyset 对（pub32 / priv32）。 */
+export interface KeysetPair {
+  publicKey: Uint8Array;
+  privateKey: Uint8Array;
+}
+
+/** 2SKD 派生 AUK；password 走原始串（规范化由原生完成），Argon2id 重活异步。 */
+export async function deriveAuk(
+  password: string,
+  saltEnc: Uint8Array,
+  secretKeyRaw: Uint8Array,
+  accountId: Uint8Array,
+  memKib: number,
+  iter: number,
+  par: number,
+): Promise<Uint8Array> {
+  const out: ArrayBuffer = await nativeDeriveAuk(
+    password, toAB(saltEnc), toAB(secretKeyRaw), toAB(accountId), memKib, iter, par,
+  );
+  return fromAB(out);
+}
+
+/** 2SKD 派生 SRP-x（32B）；slow_salt = srp_salt，info="zpass-srpx-v1"。 */
+export async function deriveSrpX(
+  password: string,
+  saltAuth: Uint8Array,
+  secretKeyRaw: Uint8Array,
+  accountId: Uint8Array,
+  memKib: number,
+  iter: number,
+  par: number,
+): Promise<Uint8Array> {
+  const out: ArrayBuffer = await nativeDeriveSrpX(
+    password, toAB(saltAuth), toAB(secretKeyRaw), toAB(accountId), memKib, iter, par,
+  );
+  return fromAB(out);
+}
+
+/** SRP-6a 注册：x = big-endian(32B SRP-x)，返回 verifier = g^x mod N。 */
+export function srpRegister(xBytes: Uint8Array, salt: Uint8Array): SrpRegistration {
+  const r: CloudSrpRegistrationNative = nativeSrpRegister(toAB(xBytes), toAB(salt));
+  return { salt: fromAB(r.salt), verifier: fromAB(r.verifier) };
+}
+
+/** SRP-6a 客户端 start：生成一次性 a 与 A = g^a mod N。 */
+export function srpClientStart(): SrpClientStart {
+  const r: CloudSrpClientStartNative = nativeSrpClientStart();
+  return { secretA: fromAB(r.secretA), aPub: fromAB(r.aPub) };
+}
+
+/** SRP-6a 客户端 finish：算 S/K/M1。identity = 小写邮箱的 UTF-8 字节。 */
+export function srpClientFinish(
+  secretA: Uint8Array,
+  aPub: Uint8Array,
+  bPub: Uint8Array,
+  xBytes: Uint8Array,
+  salt: Uint8Array,
+  identity: Uint8Array,
+): SrpClientFinish {
+  const r: CloudSrpClientFinishNative = nativeSrpClientFinish(
+    toAB(secretA), toAB(aPub), toAB(bPub), toAB(xBytes), toAB(salt), toAB(identity),
+  );
+  return { m1: fromAB(r.m1), k: fromAB(r.k) };
+}
+
+/** 生成账户 X25519 keyset 对（pub32 / priv32）。 */
+export function keysetGenerate(): KeysetPair {
+  const r: CloudKeysetPairNative = nativeKeysetGenerate();
+  return { publicKey: fromAB(r.publicKey), privateKey: fromAB(r.privateKey) };
+}
+
+/** X25519 sealed-box 封装：eph_pub(32) ‖ AEAD（aad="zpass-vaultkey-v1"）。 */
+export function sealToPubkey(recipientPub: Uint8Array, plaintext: Uint8Array): Uint8Array {
+  return fromAB(nativeSealToPubkey(toAB(recipientPub), toAB(plaintext)));
+}
+
+/** 用账户私钥解封 sealToPubkey 输出。 */
+export function openWithPrivkey(privKey: Uint8Array, sealed: Uint8Array): Uint8Array {
+  return fromAB(nativeOpenWithPrivkey(toAB(privKey), toAB(sealed)));
 }

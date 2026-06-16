@@ -309,11 +309,44 @@ func (c *Client) UpdateVaultMeta(ctx context.Context, vaultID, encryptedMeta str
 	return c.do(ctx, http.MethodPut, path, true, updateVaultMetaRequest{EncryptedMeta: encryptedMeta}, nil)
 }
 
-// DeleteVault deletes an entire server vault (owner only; the server refuses
-// to delete the account's last vault with 409).
+// DeleteVault deletes an entire server vault (owner only). The server now
+// allows deleting the account's last vault (the "keep ≥1 vault" invariant is
+// enforced client-side), and records a deletion tombstone other devices read
+// via ListDeletedVaults.
 func (c *Client) DeleteVault(ctx context.Context, vaultID string) error {
 	path := "/v1/vaults/" + url.PathEscape(vaultID)
 	return c.do(ctx, http.MethodDelete, path, true, nil, nil)
+}
+
+// DeletedVaultItem is one vault deletion tombstone (no ciphertext).
+type DeletedVaultItem struct {
+	VaultID   string `json:"vault_id"`
+	Seq       int64  `json:"seq"`        // global monotonic cursor
+	DeletedAt string `json:"deleted_at"` // RFC3339
+}
+
+// ListDeletedVaultsResponse is the GET /v1/vaults/deleted body.
+type ListDeletedVaultsResponse struct {
+	Deleted    []DeletedVaultItem `json:"deleted"`
+	NextCursor int64              `json:"next_cursor"`
+	HasMore    bool               `json:"has_more"`
+}
+
+// ListDeletedVaults pulls the account's vault deletion tombstones with seq >
+// since (incremental). Other devices use it to tell an intentional deletion
+// (auto-remove the local space) from lost access (keep it, detached).
+func (c *Client) ListDeletedVaults(ctx context.Context, since, limit int64) (ListDeletedVaultsResponse, error) {
+	var out ListDeletedVaultsResponse
+	q := url.Values{}
+	if since > 0 {
+		q.Set("since", strconv.FormatInt(since, 10))
+	}
+	if limit > 0 {
+		q.Set("limit", strconv.FormatInt(limit, 10))
+	}
+	path := "/v1/vaults/deleted?" + q.Encode()
+	err := c.do(ctx, http.MethodGet, path, true, nil, &out)
+	return out, err
 }
 
 // ActivateVault pins a vault as plan-active (POST /v1/vaults/{id}/activate).

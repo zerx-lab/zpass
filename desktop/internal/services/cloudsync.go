@@ -486,6 +486,52 @@ func (s *CloudService) DeleteRemoteVault(vaultID string) error {
 	return client.DeleteVault(ctx, vaultID)
 }
 
+// DeletedVault is one vault deletion tombstone surfaced to the renderer.
+type DeletedVault struct {
+	VaultID   string `json:"vaultId"`
+	Seq       int64  `json:"seq"`
+	DeletedAt string `json:"deletedAt"`
+}
+
+// ListDeletedVaultsResult is the renderer-facing page of deletion tombstones.
+type ListDeletedVaultsResult struct {
+	Deleted    []DeletedVault `json:"deleted"`
+	NextCursor int64          `json:"nextCursor"`
+	HasMore    bool           `json:"hasMore"`
+}
+
+// ListDeletedVaults returns the account's vault deletion tombstones with seq >
+// since. The renderer's reconcile uses this to auto-delete local spaces whose
+// cloud vault was intentionally deleted (vs. merely lost access -> detached).
+func (s *CloudService) ListDeletedVaults(since, limit int64) (ListDeletedVaultsResult, error) {
+	s.mu.RLock()
+	client := s.client
+	signedIn := s.session != nil
+	s.mu.RUnlock()
+	if !signedIn {
+		return ListDeletedVaultsResult{}, ErrCloudNotSignedIn
+	}
+	if client == nil {
+		return ListDeletedVaultsResult{}, ErrCloudNotConfigured
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), cloud.DefaultTimeout)
+	defer cancel()
+	resp, err := client.ListDeletedVaults(ctx, since, limit)
+	if err != nil {
+		return ListDeletedVaultsResult{}, err
+	}
+	out := ListDeletedVaultsResult{
+		Deleted:    make([]DeletedVault, len(resp.Deleted)),
+		NextCursor: resp.NextCursor,
+		HasMore:    resp.HasMore,
+	}
+	for i, d := range resp.Deleted {
+		out.Deleted[i] = DeletedVault{VaultID: d.VaultID, Seq: d.Seq, DeletedAt: d.DeletedAt}
+	}
+	return out, nil
+}
+
 // ActivateRemoteVault pins a vault as plan-active on the server. Under a
 // max_vaults downgrade this is the user's "keep this one writable" choice:
 // the pinned vault unfreezes and the displaced one freezes instead. No data

@@ -23,6 +23,7 @@ import { OnboardingOverlay } from '../views/OnboardingOverlay';
 import { motionStore } from '../state/MotionStore';
 import { securityStore, SecurityStore } from '../state/SecurityStore';
 import { uiStore, UiStore } from '../state/UiStore';
+import { cloudService } from '../lib/CloudService';
 
 interface TabSpec {
   key: string;
@@ -57,6 +58,8 @@ struct Index {
     securityStore.hydrate();
     // 恢复界面布局偏好（「安全」页展示开关）
     uiStore.hydrate();
+    // 恢复云同步账户状态，并注册解锁/锁定钩子（钩子注册在 hydrate 内完成）
+    cloudService.hydrate();
   }
 
   /** 当前实际渲染的 Tab 列表 ——「安全」页随开关增减 */

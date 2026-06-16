@@ -232,6 +232,35 @@ export async function deleteRemoteVault(vaultId: string): Promise<void> {
   );
 }
 
+/** 一条 vault 删除墓碑(零知识:只含 vaultId + seq + 时间)。 */
+export interface DeletedVault {
+  vaultId: string;
+  /** 全局单调游标;客户端保存收到的最大 seq 作下次 since。 */
+  seq: number;
+  deletedAt: string;
+}
+
+/** GET /v1/vaults/deleted 的一页结果。 */
+export interface DeletedVaultsPage {
+  deleted: DeletedVault[];
+  nextCursor: number;
+  hasMore: boolean;
+}
+
+/**
+ * 拉取账户下 seq > since 的 vault 删除墓碑(增量)。reconcile 据此把"主动删除"
+ * (命中本地绑定 → 自动删本地空间)与"失去访问"(保留 detached)区分开。
+ * limit=0 时服务端用默认页大小。
+ */
+export async function listDeletedVaults(since: number, limit = 0): Promise<DeletedVaultsPage> {
+  const page = (await callCloud(
+    "ListDeletedVaults",
+    () =>
+      $WailsCall.ByName(`${SVC}.ListDeletedVaults`, since, limit) as Promise<DeletedVaultsPage | null>,
+  )) as DeletedVaultsPage | null;
+  return page ?? { deleted: [], nextCursor: since, hasMore: false };
+}
+
 /** 判断错误是否为套餐限额(403 plan_limit_exceeded)。 */
 export function isPlanLimitError(e: unknown): boolean {
   const msg = e instanceof Error ? e.message : String(e ?? "");

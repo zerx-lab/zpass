@@ -88,6 +88,27 @@ func TestWatchEventsParsesRevoked(t *testing.T) {
 	}
 }
 
+// TestWatchEventsParsesVaultDeleted verifies the server's vault-deletion push
+// (event: vault_deleted) is surfaced as SyncEvent{VaultID, VaultDeleted:true} so
+// the client can auto-remove the bound local space (cross-device delete).
+func TestWatchEventsParsesVaultDeleted(t *testing.T) {
+	c, _ := newTestServer(t, sseHandler(t, func(w http.ResponseWriter, r *http.Request, flush func()) {
+		fmt.Fprint(w, "event: vault_deleted\ndata: {\"vault_id\":\"v-9\"}\n\n")
+		flush()
+	}))
+	c.SetToken("tok")
+
+	var events []SyncEvent
+	if err := c.WatchEvents(context.Background(), nil, func(ev SyncEvent) {
+		events = append(events, ev)
+	}); err != nil {
+		t.Fatalf("WatchEvents = %v, want nil", err)
+	}
+	if want := (SyncEvent{VaultID: "v-9", VaultDeleted: true}); len(events) != 1 || events[0] != want {
+		t.Fatalf("events = %+v, want one %+v", events, want)
+	}
+}
+
 func TestWatchEventsUnauthorized(t *testing.T) {
 	c, _ := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

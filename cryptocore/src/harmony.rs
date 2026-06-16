@@ -28,6 +28,9 @@ use crate::{
     argon2id_raw, derive_kek, open_aead, open_aead_with_nonce, random_bytes, seal_aead,
     seal_aead_with_nonce,
 };
+use crate::keyset;
+use crate::kdf2::{self, Argon2Params};
+use crate::srp;
 use napi_derive_ohos::napi;
 use napi_ohos::bindgen_prelude::{
     AsyncTask, Buffer, Env, Error, Result as NapiResult, Status, Task, Uint8Array,
@@ -209,6 +212,204 @@ pub fn open_aead_with_nonce_napi(
     nonce: Buffer,
 ) -> NapiResult<Buffer> {
     open_aead_with_nonce(&key, &ciphertext, &aad, &nonce)
+        .map(Buffer::from)
+        .map_err(to_napi)
+}
+
+/* ----------------------------------------------------------------------------
+ * 云同步专用导出 —— 2SKD（AUK / SRP-x）+ SRP-6a 握手 + X25519 keyset sealed-box
+ *
+ * 全部薄包装 crate::kdf2 / crate::srp / crate::keyset 的字节权威实现，让 ArkTS
+ * 云同步层（lib/CloudCrypto.ets）产出与 desktop / web_vault / 服务端完全一致的
+ * 认证物与密文。此处任何字节分叉都是 P0 互通 bug —— 故只搬运字节，不复写逻辑。
+ *
+ *   - deriveAuk / deriveSrpX：2SKD 派生（Argon2id 重活 → AsyncTask，UI 不阻塞）
+ *   - srpRegister / srpClientStart / srpClientFinish：SRP-6a 客户端三步
+ *     （M2 校验在 ArkTS 侧做 SHA-256(PAD(A)‖M1‖K)，无须额外原生函数）
+ *   - keysetGenerate / sealToPubkey / openWithPrivkey：账户 X25519 keyset +
+ *     per-vault key sealed-box；keyset 私钥包裹复用 sealAead，aad=zpass-keyset-priv-v1
+ * -------------------------------------------------------------------------- */
+
+/// 2SKD 派生任务（AUK 或 SRP-x，按 `is_auk` 切换 slow_salt 与 HKDF info）。
+/// Argon2id 重活搬到 libuv worker，ArkTS 侧 await 即可。
+pub struct Derive2skdTask {
+    password: String,
+    slow_salt: Vec<u8>,
+    secret_key_raw: Vec<u8>,
+    account_id: Vec<u8>,
+    mem_kib: u32,
+    iter: u32,
+    par: u32,
+    is_auk: bool,
+}
+
+impl Task for Derive2skdTask {
+    type Output = Vec<u8>;
+    type JsValue = Buffer;
+
+    fn compute(&mut self) -> NapiResult<Self::Output> {
+        let params = Argon2Params::new(self.mem_kib, self.iter, self.par);
+        let out = if self.is_auk {
+            kdf2::derive_auk(
+                &self.password,
+                &self.slow_salt,
+                &self.secret_key_raw,
+                &self.account_id,
+                params,
+            )
+        } else {
+            kdf2::derive_srp_x(
+                &self.password,
+                &self.slow_salt,
+                &self.secret_key_raw,
+                &self.account_id,
+                params,
+            )
+        };
+        out.map(|k| k.to_vec()).map_err(to_napi)
+    }
+
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> NapiResult<Self::JsValue> {
+        Ok(Buffer::from(output))
+    }
+}
+
+/// 派生 Account Unlock Key（AUK）—— 2SKD，slow_salt = salt_enc，info = zpass-auk-v1。
+/// `password` 走原始串，规范化（trim + NFKD）由 kdf2 内部完成。
+#[napi(js_name = "deriveAuk")]
+pub fn derive_auk_napi(
+    password: String,
+    salt_enc: Buffer,
+    secret_key_raw: Buffer,
+    account_id: Buffer,
+    mem_kib: u32,
+    iter: u32,
+    par: u32,
+) -> AsyncTask<Derive2skdTask> {
+    AsyncTask::new(Derive2skdTask {
+        password,
+        slow_salt: salt_enc.to_vec(),
+        secret_key_raw: secret_key_raw.to_vec(),
+        account_id: account_id.to_vec(),
+        mem_kib,
+        iter,
+        par,
+        is_auk: true,
+    })
+}
+
+/// 派生 SRP-x（32 字节）—— 2SKD，slow_salt = srp_salt（salt_auth），info = zpass-srpx-v1。
+#[napi(js_name = "deriveSrpX")]
+pub fn derive_srp_x_napi(
+    password: String,
+    salt_auth: Buffer,
+    secret_key_raw: Buffer,
+    account_id: Buffer,
+    mem_kib: u32,
+    iter: u32,
+    par: u32,
+) -> AsyncTask<Derive2skdTask> {
+    AsyncTask::new(Derive2skdTask {
+        password,
+        slow_salt: salt_auth.to_vec(),
+        secret_key_raw: secret_key_raw.to_vec(),
+        account_id: account_id.to_vec(),
+        mem_kib,
+        iter,
+        par,
+        is_auk: false,
+    })
+}
+
+/// SRP 注册产物：salt（认证盐）+ verifier（v = g^x mod N，PAD 256 字节）。
+#[napi(object)]
+pub struct SrpRegistrationResult {
+    pub salt: Buffer,
+    pub verifier: Buffer,
+}
+
+/// SRP 注册：x = big-endian(32B SRP-x)，返回 verifier = g^x mod N（256B PAD）。
+#[napi(js_name = "srpRegister")]
+pub fn srp_register_napi(x_bytes: Buffer, salt: Buffer) -> NapiResult<SrpRegistrationResult> {
+    let reg = srp::srp_register(&x_bytes, &salt).map_err(to_napi)?;
+    Ok(SrpRegistrationResult {
+        salt: Buffer::from(reg.salt),
+        verifier: Buffer::from(reg.verifier),
+    })
+}
+
+/// SRP 客户端 start 输出：一次性私钥 a + 公开 A = g^a mod N（256B PAD）。
+#[napi(object)]
+pub struct SrpClientStartResult {
+    pub secret_a: Buffer,
+    pub a_pub: Buffer,
+}
+
+/// SRP 客户端 start：生成一次性 a 与 A。a 须用后即焚（ArkTS 侧 wipeBytes）。
+#[napi(js_name = "srpClientStart")]
+pub fn srp_client_start_napi() -> NapiResult<SrpClientStartResult> {
+    let start = srp::srp_client_start().map_err(to_napi)?;
+    Ok(SrpClientStartResult {
+        secret_a: Buffer::from(start.secret_a().to_vec()),
+        a_pub: Buffer::from(start.a_pub.clone()),
+    })
+}
+
+/// SRP 客户端 finish 输出：证明 M1 + 共享会话密钥 K（= H(PAD(S))）。
+#[napi(object)]
+pub struct SrpClientFinishResult {
+    pub m1: Buffer,
+    pub k: Buffer,
+}
+
+/// SRP 客户端 finish：算 S / K / M1。`identity` = 小写邮箱的 UTF-8 字节。
+/// 服务端 M2 校验在 ArkTS 侧用 SHA-256(PAD(A)‖M1‖K) 重算后常数时间比较。
+#[napi(js_name = "srpClientFinish")]
+pub fn srp_client_finish_napi(
+    secret_a: Buffer,
+    a_pub: Buffer,
+    b_pub: Buffer,
+    x_bytes: Buffer,
+    salt: Buffer,
+    identity: Buffer,
+) -> NapiResult<SrpClientFinishResult> {
+    let proof = srp::srp_client_finish(&secret_a, &a_pub, &b_pub, &x_bytes, &salt, &identity)
+        .map_err(to_napi)?;
+    Ok(SrpClientFinishResult {
+        m1: Buffer::from(proof.m1.to_vec()),
+        k: Buffer::from(proof.session_key.to_vec()),
+    })
+}
+
+/// 账户 X25519 keyset 对（pub32 / priv32）。priv 须用后即焚。
+#[napi(object)]
+pub struct KeysetPair {
+    pub public_key: Buffer,
+    pub private_key: Buffer,
+}
+
+/// 生成账户 keyset：X25519 (pub32, priv32)。
+#[napi(js_name = "keysetGenerate")]
+pub fn keyset_generate_napi() -> NapiResult<KeysetPair> {
+    let (pk, sk) = keyset::keyset_generate().map_err(to_napi)?;
+    Ok(KeysetPair {
+        public_key: Buffer::from(pk.to_vec()),
+        private_key: Buffer::from(sk.to_vec()),
+    })
+}
+
+/// 用收件人公钥封装明文（X25519 sealed-box）：输出 = eph_pub(32) ‖ AEAD 密文。
+#[napi(js_name = "sealToPubkey")]
+pub fn seal_to_pubkey_napi(recipient_pub: Buffer, plaintext: Buffer) -> NapiResult<Buffer> {
+    keyset::seal_to_pubkey(&recipient_pub, &plaintext)
+        .map(Buffer::from)
+        .map_err(to_napi)
+}
+
+/// 用私钥解封 [`seal_to_pubkey_napi`] 输出。
+#[napi(js_name = "openWithPrivkey")]
+pub fn open_with_privkey_napi(priv_key: Buffer, sealed: Buffer) -> NapiResult<Buffer> {
+    keyset::open_with_privkey(&priv_key, &sealed)
         .map(Buffer::from)
         .map_err(to_napi)
 }

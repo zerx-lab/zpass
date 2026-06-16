@@ -161,6 +161,18 @@ export class VaultService {
     return next;
   }
 
+  /** 本地用户改动钩子（云同步注册 → 去抖增量推送）。sync 摄取不触发，避免回环。 */
+  private mutationHook: (() => void) | null = null;
+
+  /** 注册本地改动钩子（CloudService.hydrate 调用一次）。 */
+  registerMutationHook(cb: () => void): void {
+    this.mutationHook = cb;
+  }
+
+  private fireMutation(): void {
+    if (this.mutationHook) this.mutationHook();
+  }
+
   async status(): Promise<VaultStatus> {
     const file = await readVaultFile();
     const liveCount = file.items.filter(
@@ -679,6 +691,7 @@ export class VaultService {
     file.spaces = fixed.spaces;
     file.activeSpaceId = fixed.activeSpaceId;
     await writeVaultFile(file);
+    this.fireMutation();
     return payload;
   }
 
@@ -708,6 +721,7 @@ export class VaultService {
     };
     file.items[idx] = this.encryptPayload(next);
     await writeVaultFile(file);
+    this.fireMutation();
     return next;
   }
 
@@ -745,6 +759,7 @@ export class VaultService {
     };
     file.items[idx] = this.encryptPayload(next);
     await writeVaultFile(file);
+    this.fireMutation();
   }
 
   async deleteItem(id: string): Promise<void> {
@@ -761,6 +776,7 @@ export class VaultService {
       // 损坏行物理移除
       file.items = file.items.filter((r) => r.id !== id);
       await writeVaultFile(file);
+      this.fireMutation();
       return;
     }
     const now = this.nowMs();
@@ -776,6 +792,7 @@ export class VaultService {
     };
     file.items[idx] = this.encryptPayload(tombstone);
     await writeVaultFile(file);
+    this.fireMutation();
   }
 
   /** 列出回收站（软删除 tombstone）条目，按删除时间倒序 */
@@ -821,6 +838,7 @@ export class VaultService {
     };
     file.items[idx] = this.encryptPayload(restored);
     await writeVaultFile(file);
+    this.fireMutation();
     return restored;
   }
 
@@ -846,6 +864,7 @@ export class VaultService {
    *   - 强制对齐 id / createdAt / updatedAt 到对端值（保证跨端 id 一致）
    *   - 本端不存在则插入；存在但本端较新则跳过；否则覆盖
    *   - tombstone 走 deleteItem 路径，本函数 payload 视作非删除
+   *   - force=true 跳过 LWW 比较强制覆盖（云同步「采用对端」冲突解决用）
    *
    * 返回 'inserted' / 'updated' / 'skipped' 用于调用方进度统计。
    */
@@ -854,6 +873,7 @@ export class VaultService {
     payload: ItemPayload,
     createdAt: number,
     updatedAt: number,
+    force: boolean = false,
   ): Promise<'inserted' | 'updated' | 'skipped'> {
     this.requireUnlocked();
     if (!id) throw new VaultError('not-found', 'ingest: empty id');
@@ -875,13 +895,62 @@ export class VaultService {
       await writeVaultFile(file);
       return 'inserted';
     }
-    if (file.items[idx].updatedAt >= updatedAt) {
+    if (!force && file.items[idx].updatedAt >= updatedAt) {
       return 'skipped';
     }
     const encrypted = this.encryptPayload(normalized);
     file.items[idx] = encrypted;
     await writeVaultFile(file);
     return 'updated';
+  }
+
+  /**
+   * 摄取来自云端的删除墓碑 —— LWW，保留对端 deletedAt 时间戳（不用本机时钟）。
+   *
+   * 与 ingestForeignPayload 对称，但应用的是删除态。deleteItem 会盖上 nowMs，
+   * 导致下次同步把"刚应用的删除"当成更新再 push 回云端造成抖动；本方法用对端
+   * updatedAt 落墓碑，确保两端时间戳一致、立即收敛。
+   *
+   *   - 本端不存在该 id → 'skipped'（无可删）
+   *   - 本端较新（updatedAt >= 对端）→ 'skipped'（本端编辑胜出，留给 push 阶段）
+   *   - 否则 → 落 tombstone，deletedAt/updatedAt 对齐对端
+   */
+  async ingestForeignDeletion(id: string, updatedAt: number, force: boolean = false): Promise<'deleted' | 'skipped'> {
+    this.requireUnlocked();
+    if (!id) throw new VaultError('not-found', 'ingest: empty id');
+    const file = await readVaultFile();
+    const idx = file.items.findIndex((r) => r.id === id);
+    if (idx === -1) return 'skipped';
+    const row = file.items[idx];
+    if (!force && row.updatedAt >= updatedAt) return 'skipped';
+    let existing: ItemPayload;
+    try {
+      existing = this.decryptRow(row);
+    } catch {
+      // 损坏行：payload 不可读，直接落墓碑占位（保留原密文字节）
+      file.items[idx] = {
+        id: row.id,
+        payload: row.payload,
+        createdAt: row.createdAt,
+        updatedAt,
+        deletedAt: updatedAt,
+      };
+      await writeVaultFile(file);
+      return 'deleted';
+    }
+    const tombstone: ItemPayload = {
+      id: existing.id,
+      type: existing.type,
+      name: existing.name,
+      fields: existing.fields,
+      createdAt: existing.createdAt,
+      updatedAt,
+      deletedAt: updatedAt,
+      revision: (existing.revision ?? 0) + 1,
+    };
+    file.items[idx] = this.encryptPayload(tombstone);
+    await writeVaultFile(file);
+    return 'deleted';
   }
 
   async clearAllItems(): Promise<void> {

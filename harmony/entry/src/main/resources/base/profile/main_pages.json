@@ -10,6 +10,8 @@
     "pages/Sync",
     "pages/SyncHost",
     "pages/SyncConflicts",
+    "pages/CloudAccount",
+    "pages/CloudSync",
     "pages/Trash",
     "pages/MeProtection",
     "pages/MeAppearance",

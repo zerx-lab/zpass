@@ -248,6 +248,13 @@ export struct MeTab {
                 icon: $r('app.media.ic_users'),
                 onTap: () => this.openPage('pages/SyncHost'),
               });
+              this.divider();
+              SettingsRowNav({
+                label: '云同步',
+                value: '账户与设备',
+                icon: $r('app.media.ic_globe'),
+                onTap: () => this.openPage('pages/CloudAccount'),
+              });
             }
             .width('100%')
             .backgroundColor(this.zc.bgElev)

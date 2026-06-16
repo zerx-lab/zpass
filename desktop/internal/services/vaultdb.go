@@ -1340,6 +1340,36 @@ func (db *VaultDB) DeleteItem(id string) error {
 	return nil
 }
 
+// PurgeSpaceItems 物理删除某空间的全部本地数据：条目、其历史、其附件。
+//
+// 与 SoftDeleteItem/ClearSpace 的 tombstone 路径不同 —— 本方法用于「空间的云端
+// vault 已被彻底删除」的场景：vault 已不存在，tombstone 无处同步，物理删最干净、
+// 不留孤儿。三表在一个事务内删，避免部分失败留下孤儿历史/附件。
+//
+// secure_delete pragma 已开启，被删页填零，密文不会留在未使用页被取证恢复。
+func (db *VaultDB) PurgeSpaceItems(spaceID string) error {
+	if spaceID == "" {
+		return errors.New("spaceID cannot be empty")
+	}
+	tx, err := db.handle.Begin()
+	if err != nil {
+		return fmt.Errorf("begin purge space: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() // 提交成功后 Rollback 是 no-op
+
+	const sub = `SELECT id FROM vault_items WHERE space_id = ?`
+	for _, stmt := range []string{
+		`DELETE FROM vault_attachments  WHERE item_id IN (` + sub + `)`,
+		`DELETE FROM vault_item_history WHERE item_id IN (` + sub + `)`,
+		`DELETE FROM vault_items        WHERE space_id = ?`,
+	} {
+		if _, err := tx.Exec(stmt, spaceID); err != nil {
+			return fmt.Errorf("purge space items: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
 // ---------------------------------------------------------------------------
 // 错误
 // ---------------------------------------------------------------------------

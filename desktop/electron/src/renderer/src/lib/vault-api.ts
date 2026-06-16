@@ -808,6 +808,28 @@ export async function clearSpace(spaceId: string): Promise<number> {
 }
 
 /**
+ * 物理删除指定空间内的所有条目并解除其云端绑定（硬删，不写 tombstone）。
+ *
+ * 用于「删除墓碑传播」：其他设备收到某 vault 被主动删除后，把对应本地空间连同
+ * 条目彻底删除（云端 vault 已不存在，无需 tombstone 同步）。与 clearSpace（软删，
+ * 供对端同步）互补。
+ *
+ * 用 Call.ByName 调用，避免依赖 `wails3 generate bindings` 是否已包含 PurgeSpace。
+ */
+export async function purgeSpace(spaceId: string): Promise<void> {
+	if (!spaceId) throw new Error("spaceId cannot be empty");
+	if (!isWailsRuntime()) {
+		// mock 不做真隔离：清空整个 mock 集合（仅用于无后端的本地预览）
+		mockState.items.clear();
+		return;
+	}
+	await callWails(
+		"PurgeSpace",
+		() => $WailsCall.ByName("main.VaultService.PurgeSpace", spaceId) as Promise<void>,
+	);
+}
+
+/**
  * 批量创建条目 —— 单次 IPC，Go 侧单事务写入
  *
  * 导入场景：把 N 条 Bitwarden 条目一次性写入，

@@ -80,18 +80,22 @@ export function parseCustomFields(fields: ItemFields | undefined): CustomField[]
   return out;
 }
 
-/** 把 CustomField[] 序列化为可塞回 fields 的 JSON 字符串 */
-export function serializeCustomFields(arr: CustomField[]): string {
-  return JSON.stringify(
-    arr
-      .filter((f) => (f.name ?? '').trim() || f.type === 'boolean')
-      .map((f) => {
-        if (f.type === 'boolean') {
-          return new SerializedBooleanField(f.id, f.name, !!f.boolValue);
-        }
-        return new SerializedTextField(f.id, f.type, f.name, f.value ?? '');
-      }),
-  );
+/**
+ * 把 CustomField[] 序列化为可塞回 fields[_customFields] 的**原生数组**。
+ *
+ * 与 phone/desktop 写端一致：直接存原生数组（元素 {id,type,name,value}），不再
+ * JSON.stringify 成字符串 —— 跨端读取（web_vault / desktop / 云同步）看到的是原生
+ * 数组而非字符串。读端 parseCustomFields 两种形态都兼容，故只动写端。
+ */
+export function serializeCustomFields(arr: CustomField[]): Object[] {
+  return arr
+    .filter((f) => (f.name ?? '').trim() || f.type === 'boolean')
+    .map((f): Object => {
+      if (f.type === 'boolean') {
+        return new SerializedBooleanField(f.id, f.name, !!f.boolValue);
+      }
+      return new SerializedTextField(f.id, f.type, f.name, f.value ?? '');
+    });
 }
 
 class SerializedBooleanField {

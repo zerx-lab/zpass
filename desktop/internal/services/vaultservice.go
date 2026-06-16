@@ -957,6 +957,35 @@ func (s *VaultService) ClearSpace(spaceID string) (int, error) {
 	return cleared, nil
 }
 
+// PurgeSpace 物理删除某本地空间的全部数据并解除其云端绑定。
+//
+// 用途：删除墓碑传播 —— 其他设备收到「某 vault 被主动删除」(GET /v1/vaults/deleted)
+// 后，把对应本地空间连同条目彻底删除（云端 vault 已不存在，无需写 tombstone 同步）。
+//
+// 与 ClearSpace（软删，写 tombstone 供对端同步）互补：PurgeSpace 物理删，不产生
+// tombstone。物理删除不需要 dek（不解密、不写密文），故锁定态下亦可执行。
+func (s *VaultService) PurgeSpace(spaceID string) error {
+	if strings.TrimSpace(spaceID) == "" {
+		return errors.New("spaceID cannot be empty")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.db.PurgeSpaceItems(spaceID); err != nil {
+		return fmt.Errorf("purge space items: %w", err)
+	}
+	// 解除云端绑定（连带清 cloud_item_state）。绑定不存在时 DELETE 影响 0 行，不报错。
+	if err := s.db.DeleteCloudVault(spaceID); err != nil {
+		fmt.Printf("[vault] purge space %s: delete cloud binding failed: %v\n", spaceID, err)
+	}
+	// 通知前端刷新 + SSH agent 重载（该空间的 key 已不存在）。
+	s.notifyVaultChanged("delete", "", "")
+	s.notifySshAgentSafe(func(n SshAgentNotifier) {
+		go func() { _ = n.PushVaultKeys() }()
+	})
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // 信任设备 / 自动解锁
 // ---------------------------------------------------------------------------

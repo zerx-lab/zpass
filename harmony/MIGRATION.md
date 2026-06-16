@@ -113,11 +113,52 @@
 
 > **验证范围（重要）**：本阶段所有产物**编译通过**（`hvigorw assembleHap` 全绿）+ Rust `cargo check/test` + 交叉编译 + .so 符号在位。但**本环境无设备**，以下为**运行时未验证**项，需真机/模拟器联调：所有页面的实际渲染与交互、以及同步服务端的 napi TSFN 反向回调在 ArkVM 上的真实投递与 LAN 端到端往返。
 
+### Phase 9 ✅ 云端远程同步（client；对接 zpass_cloud，借鉴 desktop）
+
+补齐 phone/desktop 的**云端远程同步**客户端角色：鸿蒙连 Rust `zpass_cloud`（axum `/v1`）做零知识 E2EE 同步，逐层对照 desktop `internal/cloud` + `internal/cloudcrypto` + `internal/services/cloudsync.go`。
+
+- **cryptocore napi 扩展**（`src/harmony.rs`，薄包装既有 `kdf2`/`srp`/`keyset` 字节权威实现）：新增 `deriveAuk` / `deriveSrpX`（2SKD，Argon2id 重活走 AsyncTask）、`srpRegister` / `srpClientStart` / `srpClientFinish`（SRP-6a；M2 校验在 ArkTS 侧 SHA-256(PAD(A)‖M1‖K)）、`keysetGenerate` / `sealToPubkey` / `openWithPrivkey`（X25519 sealed-box）。`index.d.ts` + `RustCryptoCore.ets` 补类型与封装。
+- **ArkTS 云栈**（`entry/.../lib`）：
+  - `CloudClient.ets`：`/v1` typed 线缆客户端（register / login·start·finish / keyset / vaults / members·self / snapshot / changes / entitlements），Bearer 鉴权，CAS 冲突走 HTTP 200，base64 std —— 逐字段对齐 desktop `client.go` json tag；不持有密钥。
+  - `CloudCrypto.ets`：Z1 Secret Key 编解码、2SKD 编排、keyset/per-vault key 包裹、`content_hash = hex(HMAC-SHA256(vaultKey, canonicalJSON)[:16])`、web_vault `ItemRecord` 转码（信封键 / `ssh↔sshKey` / 字段重命名 / hyphenless↔连字符 id / manifest 哨兵跳过）。
+  - `CloudSync.ets`：全量对账引擎（= desktop `syncVaultFull`，每次同步跑一次，无 per-item 水位、天然正确）—— 拉全量 snapshot → LWW `cloudDecide`（按 updatedAt；同戳异 hash = `concurrent_edit`；删 vs 改 = `delete_vs_edit`）→ 拉取(ingest)/推送(CAS + 冲突桥接)/捕获冲突。
+  - `CloudService.ets`：`@ObservedV2` 服务 + 反应式状态合一（仿 `SyncServer.ets`）：注册 / SRP 登录 / 会话恢复 / 登出、keyset 收发、云 vault 新建·绑定、`syncNow` + 周期(90s) + 解锁自动 + 编辑去抖触发、冲突解决。会话密钥仅内存、锁定即清。
+  - `CloudStorage.ets`：`zpass-cloud-v1.json`（沙箱）持久化 baseUrl/email/Secret Key/JWT/绑定 + cursor；**不**存主密码 / 账户私钥 / vault key。
+- **页面/接线**：`pages/CloudAccount.ets`（注册 / 登录 / 恢复 / 登出 + Secret Key 一次性备份）+ `pages/CloudSync.ets`（新建·绑定云 vault / 立即同步 / 状态 / 冲突逐条决策）；`main_pages.json` 注册；MeTab「云同步」入口；`VaultStore` 加云钩子（解锁自动恢复会话 + 同步、锁定清密钥；钩子由 `CloudService.hydrate` 注册，`VaultStore` 不反向 import 避免环）；`Index` 启动调 `cloudService.hydrate()`。`module.json5` 的 `INTERNET` 权限已具备，无新增。
+- **零知识不变量**：主密码 + Secret Key + AUK + SRP-x + 账户私钥 + per-vault key 永不出设备；服务端只见 SRP verifier/salt、AUK 包裹的账户私钥、账户公钥包裹的 vault key、XChaCha20-Poly1305 条目密文（aad=连字符 UUID）、HMAC content-hash。本地 DEK 与云端 vault key 两条独立通道，仅在明文 payload 转码边界相遇。
+
+> **验证范围（重要）**：cryptocore `cargo test --lib`（63 单测全过）+ `cargo check --features harmony` 通过。但**本环境无 DevEco SDK / OHOS NDK / 设备**：ArkTS 未经 `hvigorw` 编译、未运行时联调；落地前需 `task crypto`（重出含新 napi 的双 ABI .so）+ `task run` 真机/模拟器验证 登录·绑定·拉推·冲突 端到端。
+
+### Phase 10 ✅ 增量同步 + SSE 实时（云同步对齐 desktop 完整能力）
+
+把 Phase 9 的「每次全量对账」升级为 desktop `cloudsync.go` 的双路径 + 实时，逐项对照 `cloudsync.go` / `events.go` / `cloudrealtime.go` / `cloudvaultdb.go`。本阶段纯 ArkTS，无新增 napi。
+
+- **per-item 水位**：`CloudStorage` 增 `syncState: Record<localId, {seq, syncedHash, syncedAt, deleted}>`（对应 desktop `cloud_item_state`，按本地 id 键）；`CloudService` 内存持 `Map`，随每次同步整体持久化。
+- **双路径**（`CloudSync.ets`，共享 LWW 决策核 `applyDecision`）：
+  - `syncVaultFull`：cursor=0 拉全量、重建全部水位（首次绑定 / 手动 / SSE resync / 6h 周期 / 410 恢复）。
+  - `syncVaultIncremental`：拉 `seq>cursor` 的 delta（含墓碑）+「内容哈希短名单」——只对 `updatedAt` 推进过 `synced_at` 的本地行解密 + 算哈希，未变行零解密。墓碑步骤 + live 工作集（delta-live ∪ 候选）。
+  - base_seq 取 `delta.seq ?? state.seq ?? 0`；cursor 进到 snapshot 高水位（绝不进到自推 seq）；任一步抛错则不持久化 cursor（幂等重试）。
+  - **410 Gone**：清空水位 + cursor 归零 → 全量重建。
+  - CAS 冲突为**终态 LWW**（拉对端 / 同内容收敛 / 记冲突），常规推送不重试；仅「采用本端」`forcePushLocal` 重试 5 次。
+- **SSE 实时**（`CloudClient.openEventStream` + `CloudService` realtime）：`GET /v1/events`（`requestInStream` 流式 + SSE 行解析 + 75s 静默看门狗）；`change`→去抖增量、`resync`→去抖全量、`revoked`→拆会话；断线指数退避（1s..2m）+ 抖动，连接存活 ≥30s 重置退避，服务端 15min 轮转即重连，401 终止。会话建立 / 绑定时启，锁定 / 登出 / 401 停。
+- **触发合流**：手动 = 全量；登录 / 绑定 / 解锁恢复 = 全量；周期 90s（每 6h 升级全量）；本地编辑（`VaultService` 用户改动钩子，**排除** sync 摄取以免回环）+ SSE change = 2s 去抖增量。全部经 `syncing` 守护串行，进行中触发记 pending、结束补跑一次。
+- **冲突累积**：增量同步按 localId upsert 合并冲突（不丢未解决项），全量同步以全量结果整体替换。
+
+> **验证范围**：本阶段**纯 ArkTS**（无新增 napi / .so / 权限），复用 Phase 9 原生 + 系统 http，`cargo` 不涉及。仍**无 DevEco SDK / 设备**：未经 `hvigorw` 编译、未运行时联调；需真机验证 增量 delta / SSE 推送 / 断线重连 / 冲突合并 端到端。
+
+### Phase 11 ✅ 自定义字段写端对齐 + 云同步加固（会话吊销 / HUKS / MFA）
+
+- **自定义字段写端**：`CustomFields.serializeCustomFields` 改为返回**原生数组**（元素 {id,type,name,value}）而非 `JSON.stringify` 字符串，与 phone/desktop 写端一致。读端 `parseCustomFields` 早已双向兼容，唯一写点 `ItemEdit.collectFields`（存入 `Record<string,Object>`）无需改。副作用收益：云同步的 web_vault `_customFields` 现以原生数组上行，跨端（desktop / web_vault）读取与 content_hash 对齐。
+- **登出服务端吊销**：`CloudService.signOut` 先解析自身 JWT 的 `sid`（HS256 三段式，base64url 解 payload 段、不验签）→ `CloudClient.revokeSession` 调 `DELETE /v1/sessions/{sid}`（best-effort，离线则忽略）。服务端 TenantConn 每请求校验 `user_sessions.revoked_at`，吊销后 token 立即失效。
+- **HUKS 包裹敏感数据**：新增 `CloudSecretsHuks.ets`（AES-256-CBC + PKCS7、**无** USER_AUTH 的设备绑定 key，供自由读写），把 Secret Key + token 加密成 blob 存进 `CloudStorage.account.secrets`（base64），明文 secretKey/token 字段留空；HUKS 不可用（模拟器）时自动退化为明文。`CloudService` 缓存 `secretsBlobB64`，仅登录/恢复（secretKey/token 变更）时 `refreshSecretsBlob` 重算，每次同步的 cursor/syncState 持久化复用缓存、不重复加密；登出删 HUKS key。
+- **MFA（TOTP）登录**：`/v1/auth/login/finish` 返回 `mfa_required + mfa_token`（SRP 的 M2 已在此前验过）时，`signInInternal` 先派生 AUK、暂存 `{mfaToken, sk, auk, …}` 待验上下文（持 auk 跨越验证码输入，锁定/登出/建会话即抹除）并置 `@Trace mfaRequired`；UI（`CloudAccount.mfaCard`）收 6 位 TOTP → `completeMfa` 调 `POST /v1/auth/login/mfa {mfa_token, code}` 拿 `session_token` → 用暂存 auk 恢复 keyset → 建会话。410=超时清上下文重登、401=验证码错误保留上下文可重试、429=限流提示。解锁自动恢复遇 MFA 账户静默放弃（每次都需 TOTP，转手动登录）。
+
+> **验证范围**：自定义字段写端为纯 ArkTS 逻辑改动；云加固复用既有 HUKS（信任设备已验证的 init/finish 会话流）+ 系统 http，`cargo` 不涉及。仍**无 DevEco SDK / 设备**：HUKS 云密钥读写、JWT sid 自吊销、MFA 端到端需真机联调。
+
 ## 待完成（后续迭代）
 
 - **主题持久化**：phone 不持久化（每次启动跟随系统）；harmony 当前一致，未来可走 `@ohos.data.preferences`
 - **运行时联调**：连真机/模拟器跑 `task run`，验证 Phase 8 全部页面渲染交互 + 同步服务端往返（见上「验证范围」）。
-- **自定义字段写端格式**：本端 `_customFields` 受 `ItemFields = Record<string,string>` 约束写为 JSON 字符串，phone/desktop 写为原生数组；读端已双向兼容，写端完全对齐需后续统一字段模型。
 
 ## 字节级一致性
 
@@ -157,3 +198,4 @@ task run
 - Sync 协议字节：Argon2id + XChaCha20-Poly1305 全部走 cryptocore；HMAC-SHA256 走手写 RFC 2104（基于系统 SHA-256）；CBOR 不用（phone 实际协议是 JSON，cryptocore::sync SPAKE2 模块未用到）
 - Sync 角色：**客户端 + 服务端均支持**（Phase 8 起）。客户端走 `SyncProtocol.ets::connectAndSync`；服务端走 `SyncServer.ets` + cryptocore `lan-server` feature 的 tiny_http 监听 + napi TSFN 反向回调。早期文档「仅客户端」的说法已过时。
 - 信任设备 method 命名：`"huks-harmony"`（与 desktop `dpapi/keychain/libsecret`、phone `keystore-ios/keystore-android` 并列）
+- 云同步（远程 E2EE，Phase 9 起）：走 `CloudService.ets` + `CloudClient.ets`（zpass_cloud `/v1`）；SRP-6a / 2SKD / X25519 sealed-box 全走 cryptocore napi（`deriveAuk` / `deriveSrpX` / `srp*` / `keyset*`），与 LAN 同步（`SyncProtocol` / `SyncServer`）是两条独立通道。

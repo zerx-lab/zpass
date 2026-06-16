@@ -52,3 +52,12 @@ nsis:
   # 不做差分包 / 不配 publish: 当前没有接入 electron-builder 的自动更新通道,
   # 关掉以免它去生成/索要 latest.yml 之类的更新元数据。
   differentialPackage: false
+
+# NSIS 工具链版本。默认 "0.0.0" 的 legacy 拆包 (nsis-3.0.4.1 + nsis-resources-3.4.1)
+# 在 electron-builder 26.15.2/26.15.3 上有 bug: getNsisElevatePath 去 nsis-3.0.4.1
+# 的根目录找 elevate.exe, 但该归档实际把 elevate.exe 放在 Contrib/ 子目录, 导致
+# "ENOENT ... elevate.exe" 打包失败 (makensis 走 Bin/makensis.exe 不受影响)。
+# 改用统一 bundle "1.2.1" (nsis-bundle-3.12.tar.gz): makensis / plugins / elevate.exe
+# 同在一个布局正确的归档里, 三处解析路径全部命中, 从根上绕开 legacy 拆包路径 bug。
+toolsets:
+  nsis: "1.2.1"
