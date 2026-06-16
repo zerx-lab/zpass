@@ -20,7 +20,8 @@
 
 const fs = require("fs");
 const path = require("path");
-const { withDangerousMod } = require("@expo/config-plugins");
+// pnpm 严格 node_modules 下 @expo/config-plugins 未被提升，走 expo 包的官方 re-export
+const { withDangerousMod } = require("expo/config-plugins");
 
 const LIB_NAME = "libcryptocore.so";
 const ABIS = ["arm64-v8a", "armeabi-v7a", "x86_64", "x86"];
