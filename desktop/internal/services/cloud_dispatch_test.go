@@ -97,9 +97,9 @@ func TestCloudServiceWailsDispatch(t *testing.T) {
 		t.Fatalf("ResolveConflict(bogus) should error via dispatch")
 	}
 
-	// CreateCloudVault(string) (string,error) — arg decode + (string,error) flatten.
+	// CreateCloudVault(string,...) (string,error) — arg decode + (string,error) flatten.
 	// vault==nil here, so it returns a clean error (validating the error path).
-	if _, errMsg := dispatch(t, h, "main.CloudService.CreateCloudVault", "space-x"); errMsg == "" {
+	if _, errMsg := dispatch(t, h, "main.CloudService.CreateCloudVault", "space-x", "Space X", "", ""); errMsg == "" {
 		t.Fatalf("CreateCloudVault(no vault) should error via dispatch")
 	}
 

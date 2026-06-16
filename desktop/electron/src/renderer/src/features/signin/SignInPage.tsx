@@ -5,9 +5,11 @@
 //   "register" — 邮箱 + 主密码 + 确认密码 → registerCloud() → 展示 Secret Key 存档步骤
 //   "save-key" — 注册后展示 secretKey，用户确认存档后才能 Continue
 //
-// Server URL 配置：
-//   挂载时调 useCloudStore.getState().init()。若 status?.configured=false，则在表单上方
-//   内联展示 URL 输入框（折叠型：配置完成后自动隐藏）。
+// Server 地址：
+//   不再由用户输入 —— 挂载时调 useCloudStore.getState().init()，地址由
+//   lib/cloud-env.ts 解析（默认正式环境，zpass.env.json 可切测试环境）。
+//   若 status?.configured=false（后端 Configure 失败），表单上方展示不可操作
+//   的连接异常提示。
 //
 // 错误映射：
 //   抛出 Error（callCloud 已规范化）→ 读 e.message
@@ -36,8 +38,36 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/Button";
 import { MiniTitlebar } from "@/components/MiniTitlebar";
 import { registerCloud, signInCloud } from "@/lib/cloud-api";
+import { vaultApi } from "@/lib/vault-api";
 import { useAccountStore } from "@/stores/account";
-import { CLOUD_BASE_URL_LOCKED, useCloudStore } from "@/stores/cloud";
+import { useCloudStore } from "@/stores/cloud";
+import { reconcileCloudSpaces } from "@/stores/cloud-mirror";
+import { useLockStore } from "@/stores/lock";
+import { useVaultStore } from "@/stores/vault";
+
+/**
+ * 首启登录引导:本地 vault 未初始化时,用刚通过云端验证的主密码直接初始化
+ * (D1 决策:云端与本地是同一个主密码),并等一次空间对账把云端空间镜像到
+ * 本地 —— 跳过 /unlock 的"再设一遍主密码"与 /onboarding 的"再建一个空间"。
+ *
+ * 云端没有任何空间(全新注册)时对账不会创建空间,OnboardingGuard 仍会引导
+ * 用户命名第一个空间(随后自动上云),这是期望行为。任一步失败静默回退老
+ * 流程(onboarding + unlock 创建模式),登录本身不受影响。
+ */
+async function bootstrapLocalVault(password: string): Promise<void> {
+	try {
+		const status = await vaultApi.status();
+		if (status.initialized) return; // 非首启(设置页登录等)不动本地 vault
+		await vaultApi.initialize(password); // initialize 后端即进入解锁态
+		useLockStore.getState().unlock();
+		await useVaultStore.getState().load();
+		// 刷新云状态(signedIn=true)后等空间镜像完成,避免导航后闪 /onboarding
+		await useCloudStore.getState().refresh();
+		await reconcileCloudSpaces();
+	} catch {
+		// 静默:回退到 onboarding + unlock 创建模式
+	}
+}
 
 /* ── 本地工具函数 ──────────────────────────────────────────────────────── */
 
@@ -110,8 +140,7 @@ export function SignInPage() {
 	// 登录/注册完成后回到来源页,而不是一律跳首页 —— 与 UnlockPage 同一模式。
 	const from = (location.state as { from?: string } | null)?.from ?? "/vault";
 	const accountStoreSignIn = useAccountStore((s) => s.signIn);
-	const cloudStore = useCloudStore();
-	const { status } = cloudStore;
+	const status = useCloudStore((s) => s.status);
 
 	/* ── 模式 ── */
 	const [mode, setMode] = useState<PageMode>("signin");
@@ -147,9 +176,7 @@ export function SignInPage() {
 	const [pwdFocused, setPwdFocused] = useState(false);
 	const [confirmFocused, setConfirmFocused] = useState(false);
 
-	/* ── Server URL 配置（内联，折叠型）── */
-	const [urlDraft, setUrlDraft] = useState(cloudStore.baseUrl);
-	const [urlBusy, setUrlBusy] = useState(false);
+	/* ── Server 连接状态（地址由 cloud-env 解析，用户不可改）── */
 	const configured = status?.configured ?? false;
 
 	const emailRef = useRef<HTMLInputElement>(null);
@@ -163,17 +190,6 @@ export function SignInPage() {
 	useEffect(() => {
 		emailRef.current?.focus();
 	}, []);
-
-	/* ── Server URL 保存 ── */
-	const handleSaveUrl = async () => {
-		if (!urlDraft.trim()) return;
-		setUrlBusy(true);
-		try {
-			await cloudStore.setBaseUrl(urlDraft.trim());
-		} finally {
-			setUrlBusy(false);
-		}
-	};
 
 	/* ── 登录提交 ── */
 	const handleSignIn = async (e: React.FormEvent) => {
@@ -195,6 +211,8 @@ export function SignInPage() {
 				email: result.email,
 				displayName: deriveDisplayName(result.email),
 			});
+			// 首启:同一密码顺手初始化本地 vault + 镜像云端空间,跳过重复引导
+			await bootstrapLocalVault(password);
 			navigate(from, { replace: true });
 		} catch (e) {
 			setErrorKey(mapError(e));
@@ -231,13 +249,21 @@ export function SignInPage() {
 	};
 
 	/* ── 注册后 Continue（已确认存档 Secret Key）── */
-	const handleContinue = () => {
-		if (!registerResult) return;
+	const handleContinue = async () => {
+		if (!registerResult || loading) return;
 		accountStoreSignIn({
 			id: registerResult.accountId,
 			email: registerResult.email,
 			displayName: deriveDisplayName(registerResult.email),
 		});
+		// 注册用的主密码同样直接初始化本地 vault(新账户云端无空间,
+		// 之后仍走 onboarding 命名第一个空间 → 自动上云)
+		setLoading(true);
+		try {
+			await bootstrapLocalVault(password);
+		} finally {
+			setLoading(false);
+		}
 		navigate("/vault", { replace: true });
 	};
 
@@ -287,29 +313,15 @@ export function SignInPage() {
 						</div>
 					</div>
 
-					{/* ── Server URL 内联配置（未配置时展示）── */}
-					{!configured && !CLOUD_BASE_URL_LOCKED && mode !== "save-key" && (
-						<div className="flex flex-col gap-2 rounded-lg border border-(--line-soft) bg-(--bg) px-3 py-3">
-							<span className="text-[11px] font-medium text-(--text-3)">
-								{t("cloud_server_url_label")}
-							</span>
-							<div className="flex gap-2">
-								<input
-									type="url"
-									value={urlDraft}
-									onChange={(e) => setUrlDraft(e.target.value)}
-									placeholder="https://sync.example.com"
-									className="flex-1 rounded-(--radius) border border-(--line) bg-(--bg-elev) px-2.5 py-1.5 font-mono text-[12px] text-(--text) placeholder:text-(--text-4) focus:border-(--text) focus:outline-none"
-								/>
-								<Button
-									size="sm"
-									onClick={handleSaveUrl}
-									disabled={urlBusy || !urlDraft.trim()}
-									loading={urlBusy}
-								>
-									{t("cloud_server_save")}
-								</Button>
-							</div>
+					{/* ── 云服务连接异常提示（地址由环境配置决定，用户不可改）── */}
+					{!configured && mode !== "save-key" && (
+						<div className="flex items-start gap-2 rounded-lg border border-(--line-soft) bg-(--bg) px-3 py-3 text-[12px] leading-relaxed text-(--text-2)">
+							<ShieldAlert
+								size={14}
+								strokeWidth={1.5}
+								className="mt-0.5 shrink-0 text-(--text-3)"
+							/>
+							<span>{t("cloud_not_configured_notice")}</span>
 						</div>
 					)}
 

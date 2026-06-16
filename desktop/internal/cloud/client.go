@@ -92,6 +92,16 @@ func IsStatus(err error, status int) bool {
 // IsUnauthorized reports a 401 (expired/invalid token → re-login required).
 func IsUnauthorized(err error) bool { return IsStatus(err, http.StatusUnauthorized) }
 
+// IsVaultFrozen reports a 403 vault_frozen — the vault fell outside the
+// plan's active quota after a downgrade (writes rejected, reads still served).
+func IsVaultFrozen(err error) bool {
+	var apiErr *APIError
+	if as(err, &apiErr) {
+		return apiErr.Status == http.StatusForbidden && apiErr.Message == "vault_frozen"
+	}
+	return false
+}
+
 // ---------------------------------------------------------------------------
 // kdf_params (shared by register / login)
 // ---------------------------------------------------------------------------
@@ -227,6 +237,9 @@ func (c *Client) GetKeyset(ctx context.Context) (KeysetResponse, error) {
 // CreateVaultRequest is POST /v1/vaults. The vault_id is server-assigned.
 type CreateVaultRequest struct {
 	WrappedVaultKey string `json:"wrapped_vault_key"` // base64 sealed-box
+	// EncryptedMeta is the vault's name/glyph sealed with the vault key
+	// (base64 AEAD blob, opaque to the server). Optional.
+	EncryptedMeta string `json:"encrypted_meta,omitempty"`
 }
 
 // CreateVaultResponse returns the server-assigned vault UUID.
@@ -264,6 +277,12 @@ type VaultSummary struct {
 	CurrentSeq int64  `json:"current_seq"`
 	ItemCount  int64  `json:"item_count"`
 	Role       string `json:"role"`
+	// EncryptedMeta is the base64 AEAD blob holding the vault's name/glyph
+	// (sealed with the vault key). "" for legacy vaults not yet backfilled.
+	EncryptedMeta string `json:"encrypted_meta"`
+	// Frozen marks a vault outside the plan's active quota after a downgrade:
+	// reads still work, writes are rejected with 403 vault_frozen.
+	Frozen bool `json:"frozen"`
 }
 
 type listVaultsResponse struct {
@@ -276,6 +295,58 @@ func (c *Client) ListVaults(ctx context.Context) ([]VaultSummary, error) {
 	var out listVaultsResponse
 	err := c.do(ctx, http.MethodGet, "/v1/vaults", true, nil, &out)
 	return out.Vaults, err
+}
+
+// updateVaultMetaRequest is PUT /v1/vaults/{id}/meta.
+type updateVaultMetaRequest struct {
+	EncryptedMeta string `json:"encrypted_meta"`
+}
+
+// UpdateVaultMeta replaces a vault's encrypted metadata blob (any member).
+// Used to backfill legacy vaults and propagate local space renames.
+func (c *Client) UpdateVaultMeta(ctx context.Context, vaultID, encryptedMeta string) error {
+	path := "/v1/vaults/" + url.PathEscape(vaultID) + "/meta"
+	return c.do(ctx, http.MethodPut, path, true, updateVaultMetaRequest{EncryptedMeta: encryptedMeta}, nil)
+}
+
+// DeleteVault deletes an entire server vault (owner only; the server refuses
+// to delete the account's last vault with 409).
+func (c *Client) DeleteVault(ctx context.Context, vaultID string) error {
+	path := "/v1/vaults/" + url.PathEscape(vaultID)
+	return c.do(ctx, http.MethodDelete, path, true, nil, nil)
+}
+
+// ActivateVault pins a vault as plan-active (POST /v1/vaults/{id}/activate).
+// Under a max_vaults downgrade this swaps which vault stays writable: the
+// pinned vault enters the active set and the displaced one freezes. Data is
+// never touched; the call is a no-op for unlimited plans.
+func (c *Client) ActivateVault(ctx context.Context, vaultID string) error {
+	path := "/v1/vaults/" + url.PathEscape(vaultID) + "/activate"
+	return c.do(ctx, http.MethodPost, path, true, nil, nil)
+}
+
+// EntitlementDimension is one quota dimension of GET /v1/entitlements.
+// Limit nil = unlimited. Units: bytes for storage_quota_mb, counts otherwise.
+type EntitlementDimension struct {
+	Dimension string `json:"dimension"`
+	Limit     *int64 `json:"limit"`
+	Current   int64  `json:"current"`
+}
+
+// Entitlements is the response of GET /v1/entitlements: effective plan quota,
+// per-dimension usage, and vaults frozen by a plan downgrade (read-only).
+type Entitlements struct {
+	Plan           string                 `json:"plan"`
+	Dimensions     []EntitlementDimension `json:"dimensions"`
+	FrozenVaultIDs []string               `json:"frozen_vault_ids"`
+}
+
+// GetEntitlements fetches the account's plan quota and usage so clients can
+// warn about limits up front instead of only reacting to 403s.
+func (c *Client) GetEntitlements(ctx context.Context) (Entitlements, error) {
+	var out Entitlements
+	err := c.do(ctx, http.MethodGet, "/v1/entitlements", true, nil, &out)
+	return out, err
 }
 
 // ---------------------------------------------------------------------------

@@ -496,14 +496,13 @@ export const en = {
     "This Secret Key cannot be recovered if lost. ZPass stores it nowhere — you are the only holder. Without it, your data cannot be decrypted.",
   cloud_secretkey_saved_checkbox: "I have saved my Secret Key somewhere safe",
   cloud_continue: "Continue",
-  // Server URL 配置
-  cloud_server_url_label: "Server URL",
-  cloud_server_url_desc: "Enter the URL of your ZPass sync server.",
-  cloud_server_save: "Save",
+  // 云服务连接状态（地址由 lib/cloud-env.ts 解析，用户不可改）
+  cloud_not_configured_notice:
+    "Can't reach the cloud service. Check your connection and try again.",
   // 错误 key
   cloud_err_credentials: "Incorrect email, password, or Secret Key.",
   cloud_err_not_configured:
-    "No sync server configured. Please enter a server URL above.",
+    "The cloud service is currently unavailable. Please try again later.",
   cloud_err_mfa: "Multi-factor authentication is required.",
   cloud_err_generic: "Something went wrong. Please try again.",
   cloud_err_pwd_mismatch: "Passwords do not match.",
@@ -580,6 +579,27 @@ export const en = {
   cloud_enable_for_space: "Enable cloud sync for this space",
   cloud_synced: "Cloud sync enabled",
   cloud_unlink: "Unlink",
+  cloud_mirror_title: "Spaces sync automatically",
+  cloud_mirror_desc:
+    "While signed in, cloud spaces and local spaces stay in sync — no manual binding needed",
+  cloud_mirror_running: "Reconciling with the cloud…",
+  cloud_mirror_synced: "Synced",
+  cloud_mirror_local_only: "Local only",
+  cloud_mirror_detached:
+    "Detached (the cloud space was deleted on another device; local data is kept)",
+  cloud_mirror_reupload: "Re-upload",
+  cloud_mirror_limit:
+    "Your plan's space limit is reached; extra spaces stay local only. They upload automatically after an upgrade.",
+  cloud_mirror_frozen: "Frozen (read-only in the cloud)",
+  cloud_mirror_frozen_hint:
+    "Your plan changed and some synced spaces exceed the new limit. Their data is kept and stays readable, but changes no longer upload. Pick which space stays active, or upgrade to unfreeze them all.",
+  cloud_mirror_activate: "Keep active",
+  cloud_mirror_usage: "{{used}} / {{limit}} in the cloud",
+  cloud_mirror_limit_create:
+    "Plan space limit reached ({{used}}/{{limit}}) — this space will stay local only and uploads automatically after an upgrade.",
+  cloud_legacy_vaults_title: "Unnamed cloud spaces",
+  cloud_legacy_vaults_desc:
+    "Cloud spaces created by older versions have no name and can't be matched automatically — bind them to a local space manually",
   cloud_remote_vaults_title: "Cloud spaces",
   cloud_remote_vaults_desc:
     "Bind a cloud space to a local space to start syncing",

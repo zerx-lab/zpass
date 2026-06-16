@@ -25,6 +25,7 @@ import {
   pokeCloudRealtime,
 } from "@/lib/cloud-api";
 import { useCloudStore } from "@/stores/cloud";
+import { initCloudMirror, reconcileCloudSpaces } from "@/stores/cloud-mirror";
 
 interface ProgressPayload {
   stage?: string;
@@ -60,6 +61,9 @@ export function CloudEventSync() {
 
     // 启动时初始化：配置 baseUrl + 拉取后端状态
     void store.init();
+
+    // 空间自动镜像:订阅 spaces store,登录态下新建/重命名/删除空间时同步云端
+    initCloudMirror();
 
     // cloud:sync:progress —— 同步进度
     const offProgress = Events.On(
@@ -159,6 +163,19 @@ export function CloudEventSync() {
     // window online —— 浏览器网络状态恢复
     window.addEventListener("online", pokeRealtime);
 
+    // 窗口聚焦 —— 顺手对账一次空间镜像(限 60s 一次)。web 端新建的 vault
+    // 不在实时通道覆盖范围内(SSE 只订阅已绑定 vault),靠"用户切回窗口"
+    // 这个天然时机发现并自动镜像,而不是等用户进设置页。
+    let lastReconcileAt = 0;
+    const reconcileOnFocus = () => {
+      if (!useCloudStore.getState().status?.signedIn) return;
+      const now = Date.now();
+      if (now - lastReconcileAt < 60_000) return;
+      lastReconcileAt = now;
+      void reconcileCloudSpaces();
+    };
+    window.addEventListener("focus", reconcileOnFocus);
+
     // preload 桥 —— powerMonitor resume / unlock-screen；preload 未就绪
     // 时（dev 热重启窗口期）window.desktop 可能短暂为空，可选链降级跳过
     const offSystemResumed =
@@ -175,6 +192,7 @@ export function CloudEventSync() {
       if (typeof offError === "function") offError();
       if (typeof offRealtime === "function") offRealtime();
       window.removeEventListener("online", pokeRealtime);
+      window.removeEventListener("focus", reconcileOnFocus);
       offSystemResumed?.();
     };
   }, []);

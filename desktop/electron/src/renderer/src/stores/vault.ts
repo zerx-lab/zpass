@@ -308,13 +308,35 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
 					// 首次加载且尚未选中：选第一条，让详情面板有内容可显示
 					nextSelected = items[0].id;
 				}
+				// 详情缓存失效:itemDetails 是按需缓存,云/局域网同步落库后这里
+				// 是唯一的失效点。缓存里已不在列表中的条目(被远端删除)直接清;
+				// 列表摘要 updatedAt 比缓存新的条目随后后台重拉(原位覆盖,
+				// 打开中的详情面板无闪烁地实时更新)。
+				const nextDetails = { ...state.itemDetails };
+				let detailsChanged = false;
+				for (const id of Object.keys(nextDetails)) {
+					if (!items.some((i) => i.id === id)) {
+						delete nextDetails[id];
+						detailsChanged = true;
+					}
+				}
 				return {
 					items,
 					selectedId: nextSelected,
 					status: "ready",
 					error: null,
+					...(detailsChanged ? { itemDetails: nextDetails } : {}),
 				};
 			});
+			// 后台重拉过期详情(对比列表摘要与缓存 payload 的 updatedAt)。
+			// fetchItem 原位覆盖缓存,正在查看该条目的组件随 store 更新即时刷新。
+			const cached = get().itemDetails;
+			for (const it of items) {
+				const det = cached[it.id];
+				if (det && it.updatedAt > (det.updatedAt ?? 0)) {
+					void get().fetchItem(it.id);
+				}
+			}
 			// 加载完成后，异步读取持久化的泄露检测快照
 			// 放在单独的 void 块里，失败不影响 vault 加载结果
 			void (async () => {

@@ -1,6 +1,8 @@
-// 云同步状态 store —— 非敏感运行时状态 + 持久化的 server 配置
+// 云同步状态 store —— 非敏感运行时状态 + 持久化的设备标识
 //
-// 持久化范围（zpass.cloud.json）：仅 baseUrl + deviceId（非敏感）。
+// 持久化范围（zpass.cloud.json）：仅 deviceId（非敏感）。
+// server 地址不再持久化也不再由用户输入 —— 启动时由 lib/cloud-env.ts 解析
+// （默认正式环境，zpass.env.json 可手动切测试环境）。
 // session token 走 OS 钥匙串（后端 secretstore），账户身份走 zpass.account；
 // 本 store 不持久化任何敏感物。
 //
@@ -15,7 +17,28 @@ import {
   configureCloud,
   getCloudStatus,
 } from "@/lib/cloud-api";
+import { resolveCloudBaseUrl } from "@/lib/cloud-env";
 import { createWailsConfigStorage } from "@/lib/config-storage";
+
+/** 空间自动镜像(1Password 模型)的运行时状态。 */
+export interface CloudMirrorState {
+  /** reconcile 正在运行。 */
+  running: boolean;
+  /** 自动上云被套餐限额(max_vaults)挡住 —— 多余空间保持本地,UI 提示。 */
+  limitBlocked: boolean;
+  /**
+   * 降级冻结的本地空间 id:套餐被调低后超出活跃配额的已同步空间。
+   * 服务端保留数据、放行读取,本地照常可编辑,只是推送被挡(改动积压,
+   * 解冻后自动补推)。用户可在设置页换选活跃空间。
+   */
+  frozenSpaceIds: string[];
+  /** 套餐空间数上限(null/undefined = 不限或未知,来自 /v1/entitlements)。 */
+  spaceLimit?: number | null;
+  /** 当前云端空间用量(来自 /v1/entitlements)。 */
+  spaceUsed?: number;
+  /** 最近一次 reconcile 的错误原文(英文,展示点再翻译)。 */
+  error?: string;
+}
 
 export interface CloudSyncProgress {
   stage: "idle" | "pushing" | "pulling" | "conflict" | "done" | "error";
@@ -26,7 +49,7 @@ export interface CloudSyncProgress {
 }
 
 interface CloudState {
-  /** 云端 server origin（持久化）。空串 = 未配置。 */
+  /** 云端 server origin（运行时，init 时由 cloud-env 解析填入；仅供展示）。 */
   baseUrl: string;
   /** 设备稳定标识（持久化，生成后固定）。 */
   deviceId: string;
@@ -47,9 +70,21 @@ interface CloudState {
    */
   revoked: boolean;
 
-  /** 设置并应用 server origin（持久化 + 通知后端 Configure + 刷新状态）。 */
-  setBaseUrl: (baseUrl: string) => Promise<void>;
-  /** 用配置的 baseUrl 初始化后端并拉取状态（应用启动时调用）。 */
+  /** 空间自动镜像运行时状态(不持久化)。 */
+  mirror: CloudMirrorState;
+  /**
+   * 云端 vault 删除失败(非 owner / 服务端拒绝删最后一个)后被本地忽略的
+   * vaultId(持久化)。reconcile 不会把它们再镜像回本地,避免"删了又复活"。
+   */
+  ignoredVaultIds: string[];
+  /**
+   * 与云端"分离"的本地空间 id(持久化)。云端 vault 被其他设备删除时,
+   * 本地空间与数据保留但标记 detached —— reconcile 不会自动把它重新上传,
+   * 重新启用同步必须用户显式操作(防止删除在设备间来回复活)。
+   */
+  detachedSpaceIds: string[];
+
+  /** 用解析出的环境地址初始化后端并拉取状态（应用启动时调用）。 */
   init: () => Promise<void>;
   /** 重新拉取后端状态。 */
   refresh: () => Promise<void>;
@@ -63,6 +98,14 @@ interface CloudState {
   setRealtime: (s: CloudRealtimeState) => void;
   /** 设置“会话被远端吊销”标记（cloud:auth:revoked 事件）。 */
   setRevoked: (v: boolean) => void;
+  /** 合并更新自动镜像状态。 */
+  setMirror: (p: Partial<CloudMirrorState>) => void;
+  /** 记录一个删除失败而被忽略的云端 vault。 */
+  addIgnoredVault: (vaultId: string) => void;
+  /** 移除忽略标记(用户手动重新绑定时)。 */
+  removeIgnoredVault: (vaultId: string) => void;
+  /** 标记/取消本地空间与云端分离。 */
+  setSpaceDetached: (spaceId: string, detached: boolean) => void;
 }
 
 function genDeviceId(): string {
@@ -72,25 +115,6 @@ function genDeviceId(): string {
   let hex = "";
   for (const b of bytes) hex += b.toString(16).padStart(2, "0");
   return `d_${hex}`;
-}
-
-/**
- * 云端同步服务默认地址。
- *
- * 现在为空（用户在设置/登录页填写一次后持久化到 zpass.cloud.json）。后续上线
- * 时把这里改成固定的生产地址（例如 "https://sync.zpass.app"），并把
- * CLOUD_BASE_URL_LOCKED 置为 true —— UI 会隐藏地址输入框、强制使用此地址，
- * 用户不可改。改这一处即可，无需动其它代码。
- */
-export const DEFAULT_CLOUD_BASE_URL = "";
-
-/** true 时强制使用 DEFAULT_CLOUD_BASE_URL，隐藏并禁用地址输入。 */
-export const CLOUD_BASE_URL_LOCKED = false;
-
-/** 解析“当前应使用的地址”：锁定时恒为默认地址，否则用持久化值（空则回落默认）。 */
-export function resolveCloudBaseUrl(persisted: string): string {
-  if (CLOUD_BASE_URL_LOCKED) return DEFAULT_CLOUD_BASE_URL;
-  return (persisted || DEFAULT_CLOUD_BASE_URL).trim().replace(/\/+$/, "");
 }
 
 const idleProgress: CloudSyncProgress = {
@@ -110,38 +134,36 @@ export const useCloudStore = create<CloudState>()(
       conflictCount: 0,
       realtime: "offline",
       revoked: false,
-
-      setBaseUrl: async (baseUrl) => {
-        const trimmed = baseUrl.trim().replace(/\/+$/, "");
-        set({ baseUrl: trimmed });
-        if (trimmed) {
-          await configureCloud(trimmed);
-        }
-        await get().refresh();
-      },
+      mirror: { running: false, limitBlocked: false, frozenSpaceIds: [] },
+      ignoredVaultIds: [],
+      detachedSpaceIds: [],
 
       init: async () => {
         // 首次运行补一个设备 id。
         if (!get().deviceId) set({ deviceId: genDeviceId() });
-        const url = resolveCloudBaseUrl(get().baseUrl);
-        if (url) {
-          if (url !== get().baseUrl) set({ baseUrl: url });
-          try {
-            await configureCloud(url);
-          } catch {
-            // 配置失败不阻塞启动；状态刷新会反映 configured=false。
-          }
+        const url = await resolveCloudBaseUrl();
+        set({ baseUrl: url });
+        try {
+          await configureCloud(url);
+        } catch {
+          // 配置失败不阻塞启动；状态刷新会反映 configured=false。
         }
         await get().refresh();
       },
 
       refresh: async () => {
+        const wasSignedIn = get().status?.signedIn ?? false;
         try {
           const status = await getCloudStatus();
           set({
             status,
             realtime: (status.realtime as CloudRealtimeState) ?? "offline",
           });
+          // 登录态从无到有(启动恢复会话 / 登录页登录)→ 触发一次空间自动
+          // 镜像。动态 import 打断 cloud-mirror ↔ cloud 的模块环。
+          if (!wasSignedIn && status.signedIn) {
+            void import("@/stores/cloud-mirror").then((m) => m.reconcileCloudSpaces());
+          }
         } catch {
           set({ status: null, realtime: "offline" });
         }
@@ -170,28 +192,52 @@ export const useCloudStore = create<CloudState>()(
       setRealtime: (r) => set({ realtime: r }),
 
       setRevoked: (v) => set({ revoked: v }),
+
+      setMirror: (p) => set((s) => ({ mirror: { ...s.mirror, ...p } })),
+
+      addIgnoredVault: (vaultId) =>
+        set((s) =>
+          s.ignoredVaultIds.includes(vaultId)
+            ? s
+            : { ignoredVaultIds: [...s.ignoredVaultIds, vaultId] },
+        ),
+
+      removeIgnoredVault: (vaultId) =>
+        set((s) => ({
+          ignoredVaultIds: s.ignoredVaultIds.filter((v) => v !== vaultId),
+        })),
+
+      setSpaceDetached: (spaceId, detached) =>
+        set((s) => ({
+          detachedSpaceIds: detached
+            ? s.detachedSpaceIds.includes(spaceId)
+              ? s.detachedSpaceIds
+              : [...s.detachedSpaceIds, spaceId]
+            : s.detachedSpaceIds.filter((v) => v !== spaceId),
+        })),
     }),
     {
       name: "zpass.cloud",
       version: 1,
       storage: createWailsConfigStorage<Partial<CloudState>>(),
-      // 只持久化非敏感配置；运行时状态（status/progress/conflictCount）不落盘。
+      // 只持久化设备标识；server 地址由 cloud-env 解析，运行时状态不落盘。
+      // 旧版文件里残留的 baseUrl 字段会被忽略（init 时以解析值覆盖）。
       partialize: (state) => ({
-        baseUrl: state.baseUrl,
         deviceId: state.deviceId,
+        ignoredVaultIds: state.ignoredVaultIds,
+        detachedSpaceIds: state.detachedSpaceIds,
       }),
-      // 持久化是异步的（配置文件读写）；rehydrate 完成后再把持久化的地址下发给
-      // Go 后端并拉取状态 —— 避免 init() 在 rehydrate 之前读到空地址，导致刚启动
-      // 误显示“未配置”。
-      onRehydrateStorage: () => (state) => {
-        const url = resolveCloudBaseUrl(state?.baseUrl ?? "");
-        if (!url) return;
-        useCloudStore.setState({ baseUrl: url });
-        void configureCloud(url)
-          .then(() => useCloudStore.getState().refresh())
-          .catch(() => {
-            /* 配置失败不阻塞；状态刷新会反映 configured=false */
-          });
+      // 持久化是异步的（配置文件读写）；rehydrate 完成后把解析出的环境地址
+      // 下发给 Go 后端并拉取状态 —— 避免刚启动时误显示“未配置”。
+      onRehydrateStorage: () => () => {
+        void resolveCloudBaseUrl().then((url) => {
+          useCloudStore.setState({ baseUrl: url });
+          return configureCloud(url)
+            .then(() => useCloudStore.getState().refresh())
+            .catch(() => {
+              /* 配置失败不阻塞；状态刷新会反映 configured=false */
+            });
+        });
       },
     },
   ),

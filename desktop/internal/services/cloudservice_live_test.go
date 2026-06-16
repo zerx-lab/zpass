@@ -379,7 +379,7 @@ func TestCloudBindRemoteVaultLive(t *testing.T) {
 	defer func() { _ = dev.SignOut() }()
 
 	// Provision a cloud vault bound to spaceA.
-	vid, err := dev.CreateCloudVault("spaceA")
+	vid, err := dev.CreateCloudVault("spaceA", "Space A", "", "")
 	if err != nil {
 		t.Fatalf("create cloud vault: %v", err)
 	}

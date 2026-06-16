@@ -1,9 +1,11 @@
 // 云同步 设置区块
 //
 // 在 Settings → 安全 分组下，提供：
-//   - server URL 配置（未配置时内联 URL 输入框）
+//   - 云服务连接状态（地址由 lib/cloud-env.ts 解析，用户不可改）
 //   - 账户状态展示（未登录 / 已登录 + 邮箱 / accountId / 钥匙串后端）
-//   - 当前空间云同步绑定（启用/解绑）
+//   - 空间自动同步状态（1Password 模型:登录后云端 vault ↔ 本地空间自动镜像,
+//     无手动绑定;detached 空间提供"重新上云",套餐限额时提示）
+//   - 无名旧 vault 的手动绑定兜底（仅在存在此类 vault 时展示）
 //   - 立即同步 + 进度展示
 //   - 冲突解决对话框（复用 LanSyncSection 的 ConflictResolverDialog UX）
 
@@ -23,6 +25,7 @@ import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/Button";
 import {
+  activateRemoteVault,
   applyCloudMerge,
   bindCloudVault,
   createCloudVault,
@@ -34,11 +37,14 @@ import {
   type SyncConflict,
   signOutCloud,
   syncNow,
-  unlinkSpace,
 } from "@/lib/cloud-api";
 import { translateCloudError } from "@/lib/cloud-errors";
-import { CLOUD_BASE_URL_LOCKED, useCloudStore } from "@/stores/cloud";
-import { useActiveSpace, useSpacesStore } from "@/stores/spaces";
+import { useCloudStore } from "@/stores/cloud";
+import {
+  createSpaceWithoutAutoLink,
+  reconcileCloudSpaces,
+} from "@/stores/cloud-mirror";
+import { useSpacesStore } from "@/stores/spaces";
 import { dialogPortalContainer } from "./shared";
 
 /* ----------------------------------------------------------------------------
@@ -61,18 +67,11 @@ export function CloudSyncSection() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
-  const activeSpace = useActiveSpace();
   const cloudStore = useCloudStore();
-  const { status, progress, conflictCount, setBaseUrl, realtime, revoked } =
+  const { status, progress, conflictCount, baseUrl, realtime, revoked } =
     cloudStore;
 
-  const [urlDraft, setUrlDraft] = useState(cloudStore.baseUrl);
-  const [urlBusy, setUrlBusy] = useState(false);
-  const [urlError, setUrlError] = useState<string | null>(null);
-
   const [linkedSpaces, setLinkedSpaces] = useState<string[]>([]);
-  const [linkBusy, setLinkBusy] = useState(false);
-  const [linkError, setLinkError] = useState<string | null>(null);
 
   const [syncBusy, setSyncBusy] = useState(false);
   const [syncSummary, setSyncSummary] = useState<string | null>(null);
@@ -94,25 +93,15 @@ export function CloudSyncSection() {
     }
   }, [status?.signedIn]);
 
+  // 进设置页时顺手对账一次(幂等、有重入保护),完成后刷新绑定列表
+  useEffect(() => {
+    if (!status?.signedIn) return;
+    void reconcileCloudSpaces().then(refreshLinked);
+  }, [status?.signedIn, refreshLinked]);
+
   useEffect(() => {
     void refreshLinked();
   }, [refreshLinked]);
-
-  const isLinked = activeSpace ? linkedSpaces.includes(activeSpace.id) : false;
-
-  /* ── Server URL 配置 ── */
-  const handleSaveUrl = async () => {
-    if (!urlDraft.trim()) return;
-    setUrlBusy(true);
-    setUrlError(null);
-    try {
-      await setBaseUrl(urlDraft.trim());
-    } catch (e) {
-      setUrlError(messageOf(e));
-    } finally {
-      setUrlBusy(false);
-    }
-  };
 
   /* ── 登出 ── */
   const handleSignOut = async () => {
@@ -124,36 +113,6 @@ export function CloudSyncSection() {
       // 登出失败不需要提示（状态刷新后 UI 自动更新）
     } finally {
       setSignOutBusy(false);
-    }
-  };
-
-  /* ── 启用本空间云同步 ── */
-  const handleLink = async () => {
-    if (!activeSpace) return;
-    setLinkBusy(true);
-    setLinkError(null);
-    try {
-      await createCloudVault(activeSpace.id);
-      await refreshLinked();
-    } catch (e) {
-      setLinkError(messageOf(e));
-    } finally {
-      setLinkBusy(false);
-    }
-  };
-
-  /* ── 解绑本空间 ── */
-  const handleUnlink = async () => {
-    if (!activeSpace) return;
-    setLinkBusy(true);
-    setLinkError(null);
-    try {
-      await unlinkSpace(activeSpace.id);
-      await refreshLinked();
-    } catch (e) {
-      setLinkError(messageOf(e));
-    } finally {
-      setLinkBusy(false);
     }
   };
 
@@ -247,43 +206,22 @@ export function CloudSyncSection() {
       </header>
 
       <div className="flex flex-col divide-y divide-(--line-soft)">
-        {/* ── Server URL —— 未配置时展示，已配置后折叠；锁定地址时隐藏 ── */}
-        {!configured && !CLOUD_BASE_URL_LOCKED && (
-          <div className="flex flex-col gap-3 px-5 py-4">
+        {/* ── 未配置（后端 Configure 失败）：展示解析出的地址 + 连接异常说明 ── */}
+        {!configured && (
+          <div className="flex items-start gap-2 px-5 py-4 text-[12px] text-(--text-2)">
+            <ShieldAlert
+              size={14}
+              strokeWidth={1.5}
+              className="mt-0.5 shrink-0 text-(--text-3)"
+            />
             <div className="flex min-w-0 flex-col leading-tight">
-              <span className="text-[13px] font-medium text-(--text)">
-                {t("cloud_server_url_label")}
-              </span>
-              <span className="mt-0.5 text-[11.5px] text-(--text-3)">
-                {t("cloud_server_url_desc")}
-              </span>
+              <span>{t("cloud_not_configured_notice")}</span>
+              {baseUrl && (
+                <span className="mt-0.5 font-mono text-[11px] text-(--text-3)">
+                  {baseUrl}
+                </span>
+              )}
             </div>
-            <div className="flex gap-2">
-              <input
-                type="url"
-                value={urlDraft}
-                onChange={(e) => setUrlDraft(e.target.value)}
-                placeholder="https://sync.example.com"
-                className="flex-1 rounded-(--radius) border border-(--line) bg-(--bg) px-2.5 py-1.5 font-mono text-[13px] text-(--text) placeholder:text-(--text-4) focus:border-(--text) focus:outline-none"
-              />
-              <Button
-                onClick={handleSaveUrl}
-                disabled={urlBusy || !urlDraft.trim()}
-                loading={urlBusy}
-              >
-                {t("cloud_server_save")}
-              </Button>
-            </div>
-            {urlError && (
-              <div className="flex items-start gap-2 text-[12px] text-(--text-2)">
-                <ShieldAlert
-                  size={13}
-                  strokeWidth={1.5}
-                  className="mt-0.5 shrink-0 text-(--text-3)"
-                />
-                <span>{translateCloudError(urlError, t)}</span>
-              </div>
-            )}
           </div>
         )}
 
@@ -358,52 +296,16 @@ export function CloudSyncSection() {
           </div>
         )}
 
-        {/* ── 当前空间云同步绑定（仅已登录时展示）── */}
-        {signedIn && activeSpace && (
-          <div className="flex items-center justify-between gap-6 px-5 py-4">
-            <div className="flex min-w-0 flex-col leading-tight">
-              <span className="text-[13px] font-medium text-(--text)">
-                {isLinked ? t("cloud_synced") : t("cloud_enable_for_space")}
-              </span>
-              <span className="mt-0.5 text-[11.5px] text-(--text-3)">
-                {activeSpace.name}
-              </span>
-              {linkError && (
-                <div className="mt-1 flex items-start gap-1.5 text-[11.5px] text-(--text-2)">
-                  <ShieldAlert
-                    size={12}
-                    strokeWidth={1.5}
-                    className="mt-0.5 shrink-0 text-(--text-3)"
-                  />
-                  <span>{translateCloudError(linkError, t)}</span>
-                </div>
-              )}
-            </div>
-            <div className="shrink-0">
-              {isLinked ? (
-                <Button
-                  onClick={handleUnlink}
-                  disabled={linkBusy}
-                  loading={linkBusy}
-                  variant="ghost"
-                >
-                  {t("cloud_unlink")}
-                </Button>
-              ) : (
-                <Button
-                  onClick={handleLink}
-                  disabled={linkBusy}
-                  loading={linkBusy}
-                >
-                  {t("cloud_enable_for_space")}
-                </Button>
-              )}
-            </div>
-          </div>
+        {/* ── 空间自动同步状态（仅已登录时展示）── */}
+        {signedIn && (
+          <SpaceMirrorPanel
+            linkedSpaceIds={linkedSpaces}
+            onChanged={refreshLinked}
+          />
         )}
 
-        {/* ── 云端空间：选择云端 vault 绑定到本地空间（仅已登录时展示）── */}
-        {signedIn && <RemoteVaultsPanel onChanged={refreshLinked} />}
+        {/* ── 无名旧云端空间的手动绑定兜底（仅已登录且存在此类 vault 时展示）── */}
+        {signedIn && <LegacyVaultsPanel onChanged={refreshLinked} />}
 
         {/* ── 立即同步（仅已登录时展示）── */}
         {signedIn && (
@@ -506,36 +408,207 @@ export function CloudSyncSection() {
 }
 
 /* ----------------------------------------------------------------------------
- * 云端空间面板 —— 列出账户下所有云端 vault，把未绑定的绑定到本地空间
- *   - 服务端零知识，列表只有「条目数 / 创建时间 / 短 id / 角色」，无空间名
- *   - 已绑定：显示绑定到的本地空间名 + 解绑
- *   - 未绑定：选一个本地空间（或新建一个）后绑定 → 触发同步拉取
- * 绑定模型 1:1：一个本地空间 ↔ 一个云端 vault（后端强制，冲突报错）
+ * 空间自动同步面板 —— 1Password 模型
+ *   登录后云端 vault ↔ 本地空间自动镜像,这里只展示每个本地空间的同步状态:
+ *   - 已同步:绑定到云端 vault
+ *   - 已分离(detached):云端 vault 被其他设备删除;数据保留,提供「重新上云」
+ *   - 仅本地:自动上云被套餐限额挡住(或暂未对账成功)
  * -------------------------------------------------------------------------- */
 
-function RemoteVaultsPanel({
+function SpaceMirrorPanel({
+  linkedSpaceIds,
+  onChanged,
+}: {
+  linkedSpaceIds: string[];
+  onChanged: () => void | Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const spaces = useSpacesStore((s) => s.spaces);
+  const mirror = useCloudStore((s) => s.mirror);
+  const detachedSpaceIds = useCloudStore((s) => s.detachedSpaceIds);
+  const setSpaceDetached = useCloudStore((s) => s.setSpaceDetached);
+
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const linked = new Set(linkedSpaceIds);
+  const detached = new Set(detachedSpaceIds);
+  const frozen = new Set(mirror.frozenSpaceIds);
+
+  /* 「重新上云」:解除 detached 标记后为该空间新建云端 vault */
+  const reupload = async (spaceId: string) => {
+    const space = spaces.find((s) => s.id === spaceId);
+    if (!space) return;
+    setBusyId(spaceId);
+    setError(null);
+    try {
+      await createCloudVault(space.id, space.name, space.glyph, space.tag ?? "");
+      setSpaceDetached(space.id, false);
+      void syncNow().catch(() => {});
+      await onChanged();
+    } catch (e) {
+      setError(messageOf(e));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  /* 「设为活跃空间」:降级冻结后把该空间换进活跃配额(被挤出的转为冻结) */
+  const activate = async (spaceId: string) => {
+    setBusyId(spaceId);
+    setError(null);
+    try {
+      const pairs = await listLinkedSpaces();
+      const pair = pairs.find((p) => p.spaceId === spaceId);
+      if (pair) {
+        await activateRemoteVault(pair.vaultId);
+        void syncNow().catch(() => {});
+        // 重新对账刷新 frozen 标记(服务端是唯一权威)
+        await reconcileCloudSpaces();
+        await onChanged();
+      }
+    } catch (e) {
+      setError(messageOf(e));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const stateLabel = (id: string): string => {
+    if (frozen.has(id)) return t("cloud_mirror_frozen");
+    if (linked.has(id)) return t("cloud_mirror_synced");
+    if (detached.has(id)) return t("cloud_mirror_detached");
+    return t("cloud_mirror_local_only");
+  };
+
+  return (
+    <div className="flex flex-col gap-3 px-5 py-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-col leading-tight">
+          <span className="text-[13px] font-medium text-(--text)">
+            {t("cloud_mirror_title")}
+          </span>
+          <span className="mt-0.5 text-[11.5px] text-(--text-3)">
+            {mirror.running ? t("cloud_mirror_running") : t("cloud_mirror_desc")}
+          </span>
+        </div>
+        {typeof mirror.spaceLimit === "number" && (
+          <span className="shrink-0 text-[11.5px] text-(--text-3)">
+            {t("cloud_mirror_usage", {
+              used: mirror.spaceUsed ?? linkedSpaceIds.length,
+              limit: mirror.spaceLimit,
+            })}
+          </span>
+        )}
+      </div>
+
+      {frozen.size > 0 && (
+        <div className="flex items-start gap-2 text-[12px] text-(--text-2)">
+          <ShieldAlert
+            size={13}
+            strokeWidth={1.5}
+            className="mt-0.5 shrink-0 text-(--text-3)"
+          />
+          <span>{t("cloud_mirror_frozen_hint")}</span>
+        </div>
+      )}
+
+      {mirror.limitBlocked && (
+        <div className="flex items-start gap-2 text-[12px] text-(--text-2)">
+          <ShieldAlert
+            size={13}
+            strokeWidth={1.5}
+            className="mt-0.5 shrink-0 text-(--text-3)"
+          />
+          <span>{t("cloud_mirror_limit")}</span>
+        </div>
+      )}
+
+      {(error ?? mirror.error) && (
+        <div className="flex items-start gap-2 text-[12px] text-(--text-2)">
+          <ShieldAlert
+            size={13}
+            strokeWidth={1.5}
+            className="mt-0.5 shrink-0 text-(--text-3)"
+          />
+          <span>{translateCloudError(error ?? mirror.error ?? "", t)}</span>
+        </div>
+      )}
+
+      <div className="flex flex-col gap-2">
+        {spaces.map((s) => (
+          <div
+            key={s.id}
+            className="flex items-center justify-between gap-3 rounded-lg border border-(--line-soft) bg-(--bg) px-3 py-2.5"
+          >
+            <div className="flex min-w-0 flex-col leading-tight">
+              <span className="truncate text-[12.5px] font-medium text-(--text)">
+                {s.name}
+              </span>
+              <span className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-(--text-3)">
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    linked.has(s.id) && !frozen.has(s.id) ? "bg-(--ok)" : "bg-(--text-3)"
+                  }`}
+                />
+                {stateLabel(s.id)}
+              </span>
+            </div>
+            {frozen.has(s.id) && (
+              <Button
+                size="sm"
+                onClick={() => void activate(s.id)}
+                disabled={busyId === s.id}
+                loading={busyId === s.id}
+                className="shrink-0"
+              >
+                {t("cloud_mirror_activate")}
+              </Button>
+            )}
+            {!linked.has(s.id) && detached.has(s.id) && (
+              <Button
+                size="sm"
+                onClick={() => void reupload(s.id)}
+                disabled={busyId === s.id}
+                loading={busyId === s.id}
+                className="shrink-0"
+              >
+                {t("cloud_mirror_reupload")}
+              </Button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ----------------------------------------------------------------------------
+ * 无名旧云端空间兜底 —— meta 未回填(旧版本创建)且未绑定的 vault 无法自动
+ * 镜像(没有名字),保留手动绑定;一旦绑定,本设备会自动回填 meta,其他设备
+ * 即可自动镜像。没有此类 vault 时整个面板不渲染。
+ * -------------------------------------------------------------------------- */
+
+function LegacyVaultsPanel({
   onChanged,
 }: {
   onChanged: () => void | Promise<void>;
 }) {
   const { t } = useTranslation();
   const spaces = useSpacesStore((s) => s.spaces);
-  const createSpace = useSpacesStore((s) => s.createSpace);
+  const removeIgnoredVault = useCloudStore((s) => s.removeIgnoredVault);
 
   const [vaults, setVaults] = useState<RemoteVault[]>([]);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
     try {
-      setVaults(await listRemoteVaults());
-    } catch (e) {
-      setError(messageOf(e));
-    } finally {
-      setLoading(false);
+      const all = await listRemoteVaults();
+      setVaults(all.filter((v) => !v.boundSpaceId && !v.name));
+    } catch {
+      // 拉取失败时不展示面板即可
+      setVaults([]);
     }
   }, []);
 
@@ -543,12 +616,8 @@ function RemoteVaultsPanel({
     void refresh();
   }, [refresh]);
 
-  const spaceName = (id: string) => spaces.find((s) => s.id === id)?.name ?? id;
-
-  // 本地空间中尚未被任何云端 vault 绑定的，可作为绑定目标
-  const boundSpaceIds = new Set(
-    vaults.map((v) => v.boundSpaceId).filter(Boolean),
-  );
+  // 已绑定到 vault 的本地空间不可再选(1:1 模型)
+  const boundSpaceIds = new Set(vaults.map((v) => v.boundSpaceId).filter(Boolean));
   const availableSpaces = spaces.filter((s) => !boundSpaceIds.has(s.id));
 
   const doBind = async (vaultId: string, spaceId: string) => {
@@ -556,6 +625,7 @@ function RemoteVaultsPanel({
     setError(null);
     try {
       await bindCloudVault(spaceId, vaultId);
+      removeIgnoredVault(vaultId); // 手动绑定 = 用户明确要它,解除忽略
       await refresh();
       await onChanged();
     } catch (e) {
@@ -566,22 +636,9 @@ function RemoteVaultsPanel({
   };
 
   const bindToNew = async (vaultId: string, name: string) => {
-    const id = createSpace({ name: name.trim() });
+    // 压制自动联动:这个新空间马上要绑到现有 vault,不能再 mint 一个
+    const id = createSpaceWithoutAutoLink({ name: name.trim() });
     await doBind(vaultId, id);
-  };
-
-  const unbind = async (spaceId: string, vaultId: string) => {
-    setBusyId(vaultId);
-    setError(null);
-    try {
-      await unlinkSpace(spaceId);
-      await refresh();
-      await onChanged();
-    } catch (e) {
-      setError(messageOf(e));
-    } finally {
-      setBusyId(null);
-    }
   };
 
   const fmtDate = (iso: string) => {
@@ -589,26 +646,17 @@ function RemoteVaultsPanel({
     return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString();
   };
 
+  if (vaults.length === 0) return null;
+
   return (
     <div className="flex flex-col gap-3 px-5 py-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 flex-col leading-tight">
-          <span className="text-[13px] font-medium text-(--text)">
-            {t("cloud_remote_vaults_title")}
-          </span>
-          <span className="mt-0.5 text-[11.5px] text-(--text-3)">
-            {t("cloud_remote_vaults_desc")}
-          </span>
-        </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => void refresh()}
-          disabled={loading}
-          loading={loading}
-        >
-          {t("cloud_remote_refresh")}
-        </Button>
+      <div className="flex min-w-0 flex-col leading-tight">
+        <span className="text-[13px] font-medium text-(--text)">
+          {t("cloud_legacy_vaults_title")}
+        </span>
+        <span className="mt-0.5 text-[11.5px] text-(--text-3)">
+          {t("cloud_legacy_vaults_desc")}
+        </span>
       </div>
 
       {error && (
@@ -622,59 +670,30 @@ function RemoteVaultsPanel({
         </div>
       )}
 
-      {!loading && vaults.length === 0 && (
-        <div className="text-[12px] text-(--text-4)">
-          {t("cloud_remote_none")}
-        </div>
-      )}
-
       <div className="flex flex-col gap-2">
         {vaults.map((v) => (
           <div
             key={v.vaultId}
             className="flex flex-col gap-2 rounded-lg border border-(--line-soft) bg-(--bg) px-3 py-2.5"
           >
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex min-w-0 flex-col leading-tight">
-                <span className="font-mono text-[11px] text-(--text-2)">
-                  {v.vaultId.slice(0, 8)}
-                  <span className="ml-1.5 rounded-sm bg-(--bg-elev) px-1 py-px text-[9.5px] uppercase text-(--text-4)">
-                    {v.role}
-                  </span>
+            <div className="flex min-w-0 flex-col leading-tight">
+              <span className="font-mono text-[11px] text-(--text-2)">
+                {v.vaultId.slice(0, 8)}
+                <span className="ml-1.5 rounded-sm bg-(--bg-elev) px-1 py-px text-[9.5px] uppercase text-(--text-4)">
+                  {v.role}
                 </span>
-                <span className="mt-0.5 text-[11.5px] text-(--text-3)">
-                  {t("cloud_remote_items", { count: v.itemCount })} ·{" "}
-                  {t("cloud_remote_created", { date: fmtDate(v.createdAt) })}
-                </span>
-              </div>
-              {v.boundSpaceId ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => void unbind(v.boundSpaceId, v.vaultId)}
-                  disabled={busyId === v.vaultId}
-                  loading={busyId === v.vaultId}
-                  className="shrink-0"
-                >
-                  {t("cloud_unlink")}
-                </Button>
-              ) : null}
+              </span>
+              <span className="mt-0.5 text-[11.5px] text-(--text-3)">
+                {t("cloud_remote_items", { count: v.itemCount })} ·{" "}
+                {t("cloud_remote_created", { date: fmtDate(v.createdAt) })}
+              </span>
             </div>
-
-            {v.boundSpaceId ? (
-              <div className="text-[11.5px] text-(--text-2)">
-                {t("cloud_remote_bound_to", {
-                  space: spaceName(v.boundSpaceId),
-                })}
-              </div>
-            ) : (
-              <RemoteVaultBindControl
-                spaces={availableSpaces}
-                busy={busyId === v.vaultId}
-                onBindExisting={(spaceId) => void doBind(v.vaultId, spaceId)}
-                onBindNew={(name) => void bindToNew(v.vaultId, name)}
-              />
-            )}
+            <RemoteVaultBindControl
+              spaces={availableSpaces}
+              busy={busyId === v.vaultId}
+              onBindExisting={(spaceId) => void doBind(v.vaultId, spaceId)}
+              onBindNew={(name) => void bindToNew(v.vaultId, name)}
+            />
           </div>
         ))}
       </div>

@@ -184,12 +184,67 @@ func (s *CloudService) kickSync() {
 // Cloud vault creation / linking
 // ---------------------------------------------------------------------------
 
+// vaultMetaAAD binds the encrypted vault meta blob to its purpose. The blob is
+// sealed at vault-creation time (before the server assigns a vault id), so the
+// AAD is a constant domain tag rather than the vault id.
+const vaultMetaAAD = "zpass:vault-meta:v1"
+
+// vaultMeta is the client-side vault metadata mirrored from the local space.
+// It travels encrypted with the vault key (zero-knowledge): the server stores
+// the blob opaquely; any member device can decrypt it to auto-recreate the
+// space (name/glyph/tag) locally.
+type vaultMeta struct {
+	Name  string `json:"name"`
+	Glyph string `json:"glyph,omitempty"`
+	Tag   string `json:"tag,omitempty"`
+}
+
+// sealVaultMeta encrypts meta with the vault key and returns the base64 blob
+// the server stores. Returns "" when the meta has no name (nothing useful to
+// mirror).
+func sealVaultMeta(vaultKey []byte, m vaultMeta) (string, error) {
+	if strings.TrimSpace(m.Name) == "" {
+		return "", nil
+	}
+	plain, err := json.Marshal(m)
+	if err != nil {
+		return "", err
+	}
+	ct, err := cloudcrypto.SealAEAD(vaultKey, plain, []byte(vaultMetaAAD))
+	if err != nil {
+		return "", err
+	}
+	return cloudB64.EncodeToString(ct), nil
+}
+
+// openVaultMeta decrypts a base64 meta blob. Any failure (bad base64, AEAD
+// mismatch, bad JSON) yields an empty meta — callers treat the vault as
+// unnamed rather than failing the listing.
+func openVaultMeta(vaultKey []byte, blob string) vaultMeta {
+	ct, err := cloudB64.DecodeString(blob)
+	if err != nil {
+		return vaultMeta{}
+	}
+	plain, err := cloudcrypto.OpenAEAD(vaultKey, ct, []byte(vaultMetaAAD))
+	if err != nil {
+		return vaultMeta{}
+	}
+	var m vaultMeta
+	if json.Unmarshal(plain, &m) != nil {
+		return vaultMeta{}
+	}
+	return m
+}
+
 // CreateCloudVault provisions a new server vault for a local space: it mints a
 // fresh vault key, wraps it to the account public key (sealed-box), creates the
 // vault server-side, and records the space->vault binding. Returns the
 // server-assigned vault id. The whole check-then-act runs under syncMu so two
 // concurrent calls cannot mint duplicate server vaults for one space.
-func (s *CloudService) CreateCloudVault(spaceID string) (string, error) {
+//
+// name/glyph/tag mirror the local space and travel encrypted with the vault
+// key (see vaultMeta); pass name="" to create an unnamed vault (legacy flow).
+func (s *CloudService) CreateCloudVault(spaceID, name, glyph, tag string) (string, error) {
 	spaceID = strings.TrimSpace(spaceID)
 	if spaceID == "" {
 		return "", errors.New("cloud: space id is required")
@@ -223,11 +278,16 @@ func (s *CloudService) CreateCloudVault(spaceID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	metaBlob, err := sealVaultMeta(vaultKey, vaultMeta{Name: strings.TrimSpace(name), Glyph: strings.TrimSpace(glyph), Tag: strings.TrimSpace(tag)})
+	if err != nil {
+		return "", err
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), cloud.DefaultTimeout)
 	defer cancel()
 	resp, err := client.CreateVault(ctx, cloud.CreateVaultRequest{
 		WrappedVaultKey: cloudB64.EncodeToString(wrapped),
+		EncryptedMeta:   metaBlob,
 	})
 	if err != nil {
 		return "", err
@@ -241,6 +301,14 @@ func (s *CloudService) CreateCloudVault(spaceID string) (string, error) {
 		s.session.vaultKeys[resp.VaultID] = vaultKey
 	}
 	s.mu.Unlock()
+
+	// The SSE realtime channel filters events against the vault membership
+	// snapshotted at connect time — an already-open stream never delivers
+	// events for this new vault. Restart it so remote edits push live instead
+	// of waiting for a manual sync.
+	s.stopRealtime()
+	s.startRealtime()
+	s.kickSync()
 	return resp.VaultID, nil
 }
 
@@ -276,9 +344,10 @@ func (s *CloudService) UnlinkSpace(spaceID string) error {
 }
 
 // RemoteVault is one cloud vault the signed-in account belongs to, annotated with
-// the local space currently bound to it. It carries only the zero-knowledge-safe
-// metadata the server exposes — the vault NAME is never included because the
-// server never sees it (it lives encrypted inside the vault).
+// the local space currently bound to it. The server stores the vault name only
+// as an encrypted blob (zero-knowledge); Name/Glyph/Tag below are decrypted
+// client-side with the vault key. Name=="" means a legacy vault whose meta has
+// not been backfilled yet — auto-mirroring skips it (manual bind fallback).
 type RemoteVault struct {
 	VaultID      string `json:"vaultId"`
 	CreatedAt    string `json:"createdAt"`
@@ -286,6 +355,13 @@ type RemoteVault struct {
 	CurrentSeq   int64  `json:"currentSeq"`
 	Role         string `json:"role"`
 	BoundSpaceID string `json:"boundSpaceId"` // local space bound to this vault; "" = unbound
+	Name         string `json:"name"`         // decrypted vault name; "" = unnamed/legacy
+	Glyph        string `json:"glyph"`
+	Tag          string `json:"tag"`
+	// Frozen: the vault fell outside the plan's active quota after a
+	// downgrade — server keeps the data and serves reads, but rejects writes
+	// with 403 vault_frozen until the user re-activates it or upgrades.
+	Frozen bool `json:"frozen"`
 }
 
 // ListRemoteVaults returns every cloud vault the signed-in account is a member
@@ -327,14 +403,163 @@ func (s *CloudService) ListRemoteVaults() ([]RemoteVault, error) {
 
 	out := make([]RemoteVault, 0, len(summaries))
 	for _, v := range summaries {
-		out = append(out, RemoteVault{
+		rv := RemoteVault{
 			VaultID:      v.VaultID,
 			CreatedAt:    v.CreatedAt,
 			ItemCount:    v.ItemCount,
 			CurrentSeq:   v.CurrentSeq,
 			Role:         v.Role,
 			BoundSpaceID: bound[v.VaultID],
-		})
+			Frozen:       v.Frozen,
+		}
+		// Decrypt the name blob with the vault key (fetched + cached via
+		// member/self when not already in the session). Any failure just
+		// leaves the vault unnamed — listing must not fail on one bad vault.
+		if v.EncryptedMeta != "" {
+			if vk, kerr := s.vaultKey(ctx, client, v.VaultID); kerr == nil {
+				m := openVaultMeta(vk, v.EncryptedMeta)
+				rv.Name, rv.Glyph, rv.Tag = m.Name, m.Glyph, m.Tag
+			}
+		}
+		out = append(out, rv)
+	}
+	return out, nil
+}
+
+// SetVaultMeta re-encrypts and uploads a vault's name/glyph/tag. Used to
+// propagate local space renames and to backfill meta on legacy vaults so
+// other devices can auto-mirror them. No-op (nil) when name is empty.
+func (s *CloudService) SetVaultMeta(vaultID, name, glyph, tag string) error {
+	vaultID = strings.TrimSpace(vaultID)
+	if vaultID == "" {
+		return errors.New("cloud: vault id is required")
+	}
+	s.mu.RLock()
+	client := s.client
+	signedIn := s.session != nil
+	s.mu.RUnlock()
+	if !signedIn {
+		return ErrCloudNotSignedIn
+	}
+	if client == nil {
+		return ErrCloudNotConfigured
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), cloud.DefaultTimeout)
+	defer cancel()
+	vk, err := s.vaultKey(ctx, client, vaultID)
+	if err != nil {
+		return err
+	}
+	blob, err := sealVaultMeta(vk, vaultMeta{Name: strings.TrimSpace(name), Glyph: strings.TrimSpace(glyph), Tag: strings.TrimSpace(tag)})
+	if err != nil {
+		return err
+	}
+	if blob == "" {
+		return nil
+	}
+	return client.UpdateVaultMeta(ctx, vaultID, blob)
+}
+
+// DeleteRemoteVault deletes a vault on the server (owner only; the server
+// refuses to delete the account's last vault with 409). It does NOT touch the
+// local binding — callers unlink the space first and treat a failed server
+// delete as "leave the vault orphaned remotely" rather than re-binding.
+func (s *CloudService) DeleteRemoteVault(vaultID string) error {
+	vaultID = strings.TrimSpace(vaultID)
+	if vaultID == "" {
+		return errors.New("cloud: vault id is required")
+	}
+	s.mu.RLock()
+	client := s.client
+	signedIn := s.session != nil
+	s.mu.RUnlock()
+	if !signedIn {
+		return ErrCloudNotSignedIn
+	}
+	if client == nil {
+		return ErrCloudNotConfigured
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), cloud.DefaultTimeout)
+	defer cancel()
+	return client.DeleteVault(ctx, vaultID)
+}
+
+// ActivateRemoteVault pins a vault as plan-active on the server. Under a
+// max_vaults downgrade this is the user's "keep this one writable" choice:
+// the pinned vault unfreezes and the displaced one freezes instead. No data
+// moves; a no-op for unlimited plans. The caller should re-list vaults (or
+// sync) afterwards to refresh the frozen flags.
+func (s *CloudService) ActivateRemoteVault(vaultID string) error {
+	vaultID = strings.TrimSpace(vaultID)
+	if vaultID == "" {
+		return errors.New("cloud: vault id is required")
+	}
+	s.mu.RLock()
+	client := s.client
+	signedIn := s.session != nil
+	s.mu.RUnlock()
+	if !signedIn {
+		return ErrCloudNotSignedIn
+	}
+	if client == nil {
+		return ErrCloudNotConfigured
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), cloud.DefaultTimeout)
+	defer cancel()
+	return client.ActivateVault(ctx, vaultID)
+}
+
+// CloudEntitlements mirrors GET /v1/entitlements for the renderer: effective
+// plan limits/usage per dimension (Limit nil = unlimited) plus the vaults
+// currently frozen by a plan downgrade.
+type CloudEntitlements struct {
+	Plan           string                  `json:"plan"`
+	Dimensions     []CloudEntitlementUsage `json:"dimensions"`
+	FrozenVaultIDs []string                `json:"frozenVaultIds"`
+}
+
+// CloudEntitlementUsage is one quota dimension (units: bytes for
+// storage_quota_mb, counts otherwise).
+type CloudEntitlementUsage struct {
+	Dimension string `json:"dimension"`
+	Limit     *int64 `json:"limit"`
+	Current   int64  `json:"current"`
+}
+
+// Entitlements fetches the account's plan quota and usage so the UI can warn
+// about limits before the user hits a 403 (e.g. "space limit reached, new
+// spaces stay local-only" shown right in the create-space dialog).
+func (s *CloudService) Entitlements() (CloudEntitlements, error) {
+	s.mu.RLock()
+	client := s.client
+	signedIn := s.session != nil
+	s.mu.RUnlock()
+	if !signedIn {
+		return CloudEntitlements{}, ErrCloudNotSignedIn
+	}
+	if client == nil {
+		return CloudEntitlements{}, ErrCloudNotConfigured
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), cloud.DefaultTimeout)
+	defer cancel()
+	ent, err := client.GetEntitlements(ctx)
+	if err != nil {
+		return CloudEntitlements{}, err
+	}
+	out := CloudEntitlements{
+		Plan:           ent.Plan,
+		Dimensions:     make([]CloudEntitlementUsage, 0, len(ent.Dimensions)),
+		FrozenVaultIDs: ent.FrozenVaultIDs,
+	}
+	if out.FrozenVaultIDs == nil {
+		out.FrozenVaultIDs = []string{}
+	}
+	for _, d := range ent.Dimensions {
+		out.Dimensions = append(out.Dimensions, CloudEntitlementUsage{Dimension: d.Dimension, Limit: d.Limit, Current: d.Current})
 	}
 	return out, nil
 }
@@ -402,6 +627,12 @@ func (s *CloudService) BindCloudVault(spaceID, vaultID string) error {
 	if err := s.vault.db.PutCloudVault(spaceID, vaultID, accountID, nowMillis()); err != nil {
 		return err
 	}
+	// Restart the SSE stream: its server-side vault filter was snapshotted at
+	// connect time and does not include this vault, so without a reconnect the
+	// vault only updates on manual sync (the "only the first space syncs live"
+	// bug).
+	s.stopRealtime()
+	s.startRealtime()
 	s.kickSync()
 	return nil
 }
@@ -506,6 +737,16 @@ func (s *CloudService) runSync(parent context.Context, full bool, scope map[stri
 		case errors.Is(err, ErrVaultLocked):
 			// Vault locked mid-sync: not an error — the next cycle re-checks.
 			return summary, nil
+		case cloud.IsVaultFrozen(err):
+			// Plan downgrade froze this vault: pull already succeeded, only the
+			// push was rejected. Not a sync failure — local edits stay pending
+			// and flush automatically once the vault is re-activated or the
+			// plan upgraded. Surface it to the UI as a warning, keep going.
+			s.emitEvent("cloud:sync:warning", map[string]any{
+				"spaceId": b.SpaceID, "vaultId": b.VaultID, "code": "vault_frozen",
+				"message": "vault frozen by plan downgrade; local changes stay pending",
+			})
+			s.notifySync("pushing", i+1, len(bindings), "")
 		case cloud.IsUnauthorized(err):
 			// The session JWT expired OR was revoked (admin "sign out all
 			// devices"). Tear the session down so the UI stops showing a signed-in

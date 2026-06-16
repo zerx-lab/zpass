@@ -82,6 +82,33 @@ export interface RemoteVault {
   role: string;
   /** 已绑定到的本地空间 id;空串 = 未绑定。 */
   boundSpaceId: string;
+  /**
+   * 解密后的空间名称(后端用 vault key 解出;服务端只存密文)。
+   * 空串 = 旧 vault 尚未回填 meta,自动镜像会跳过,留手动绑定兜底。
+   */
+  name: string;
+  glyph: string;
+  tag: string;
+  /**
+   * 降级冻结:套餐 max_vaults 调低后,该 vault 落在活跃配额外 —— 服务端
+   * 保留数据、放行读取,但拒绝写入(403 vault_frozen),直到用户改选活跃
+   * 空间或升级套餐。
+   */
+  frozen: boolean;
+}
+
+/** 一个配额维度(limit 为 null = 不限;storage 维度单位为字节,其余为计数)。 */
+export interface CloudEntitlementUsage {
+  dimension: string;
+  limit: number | null;
+  current: number;
+}
+
+/** GET /v1/entitlements:套餐生效限额/用量 + 降级冻结的 vault 列表。 */
+export interface CloudEntitlements {
+  plan: string;
+  dimensions: CloudEntitlementUsage[];
+  frozenVaultIds: string[];
 }
 
 /* ----------------------------------------------------------------------------
@@ -163,11 +190,76 @@ export async function restoreCloudSession(masterPassword: string): Promise<Accou
  * 同步：空间绑定 / 立即同步 / 冲突解决
  * -------------------------------------------------------------------------- */
 
-/** 为一个本地空间创建云 vault 并绑定，返回 server 分配的 vaultId。 */
-export async function createCloudVault(spaceId: string): Promise<string> {
+/**
+ * 为一个本地空间创建云 vault 并绑定，返回 server 分配的 vaultId。
+ * name/glyph/tag 镜像本地空间,用 vault key 加密后存服务端(零知识),
+ * 其他设备据此自动重建同名本地空间。
+ */
+export async function createCloudVault(
+  spaceId: string,
+  name: string,
+  glyph = "",
+  tag = "",
+): Promise<string> {
   return callCloud(
     "CreateCloudVault",
-    () => $WailsCall.ByName(`${SVC}.CreateCloudVault`, spaceId) as Promise<string>,
+    () =>
+      $WailsCall.ByName(`${SVC}.CreateCloudVault`, spaceId, name, glyph, tag) as Promise<string>,
+  );
+}
+
+/** 更新云 vault 的加密元数据(本地空间重命名后调用;旧 vault 回填也走这里)。 */
+export async function setVaultMeta(
+  vaultId: string,
+  name: string,
+  glyph = "",
+  tag = "",
+): Promise<void> {
+  await callCloud(
+    "SetVaultMeta",
+    () => $WailsCall.ByName(`${SVC}.SetVaultMeta`, vaultId, name, glyph, tag) as Promise<void>,
+  );
+}
+
+/**
+ * 删除云端 vault(仅 owner;服务端拒绝删最后一个 vault)。
+ * 调用方应先 unlinkSpace 解除本地绑定。
+ */
+export async function deleteRemoteVault(vaultId: string): Promise<void> {
+  await callCloud(
+    "DeleteRemoteVault",
+    () => $WailsCall.ByName(`${SVC}.DeleteRemoteVault`, vaultId) as Promise<void>,
+  );
+}
+
+/** 判断错误是否为套餐限额(403 plan_limit_exceeded)。 */
+export function isPlanLimitError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e ?? "");
+  return msg.includes("plan_limit_exceeded");
+}
+
+/** 判断错误是否为降级冻结(403 vault_frozen:vault 只读,写入被拒)。 */
+export function isVaultFrozenError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e ?? "");
+  return msg.includes("vault_frozen");
+}
+
+/**
+ * 把某云 vault 置顶为活跃空间(降级冻结模型的换选)。被挤出活跃集合的
+ * vault 转为冻结只读,数据不动;不限额账户调用无副作用。
+ */
+export async function activateRemoteVault(vaultId: string): Promise<void> {
+  await callCloud(
+    "ActivateRemoteVault",
+    () => $WailsCall.ByName(`${SVC}.ActivateRemoteVault`, vaultId) as Promise<void>,
+  );
+}
+
+/** 拉取套餐配额与用量(客户端事前提示限额,不再只靠撞 403)。 */
+export async function getCloudEntitlements(): Promise<CloudEntitlements> {
+  return callCloud(
+    "Entitlements",
+    () => $WailsCall.ByName(`${SVC}.Entitlements`) as Promise<CloudEntitlements>,
   );
 }
 

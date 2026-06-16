@@ -47,7 +47,7 @@ func TestCloudSyncLiveTwoDevices(t *testing.T) {
 	id1 := mustCreateItem(t, svc1, "login", "github")
 	id2 := mustCreateItem(t, svc1, "note", "recovery codes")
 
-	vaultID, err := cloud1.CreateCloudVault("space-1")
+	vaultID, err := cloud1.CreateCloudVault("space-1", "Space 1", "", "")
 	if err != nil {
 		t.Fatalf("create cloud vault: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestCloudSyncLiveConflictResurrect(t *testing.T) {
 	t.Cleanup(func() { _ = cloud1.SignOut() })
 
 	id := mustCreateItem(t, svc1, "login", "shared-item")
-	vaultID, err := cloud1.CreateCloudVault("space-1")
+	vaultID, err := cloud1.CreateCloudVault("space-1", "Space 1", "", "")
 	if err != nil {
 		t.Fatalf("create vault: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestCloudSyncLiveWebVaultInterop(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 	t.Cleanup(func() { _ = cowner.SignOut() })
-	vaultID, err := cowner.CreateCloudVault("space-1")
+	vaultID, err := cowner.CreateCloudVault("space-1", "Space 1", "", "")
 	if err != nil {
 		t.Fatalf("create vault: %v", err)
 	}
