@@ -74,6 +74,50 @@ func desktopTypeToRecord(t ItemType) string {
 	return string(t)
 }
 
+// fieldKeyToWeb translates desktop native field keys to web_vault ItemRecord
+// keys, per record type. The wire format is web_vault's — without this map a
+// desktop card pushes "number" while web_vault reads "cardNumber", so the
+// field silently never renders cross-client. Keys not listed pass through
+// unchanged (login/note keys already match; unknown keys ride in web_vault's
+// extra bag).
+var fieldKeyToWeb = map[string]map[string]string{
+	"card": {
+		"number": "cardNumber",
+		"expiry": "cardExpiry",
+		"cvv":    "cardCvv",
+	},
+	"identity": {
+		"fullname": "fullName",
+		"email":    "identityEmail",
+	},
+	"sshKey": {
+		"private_key": "sshPrivateKey",
+		"passphrase":  "sshPassphrase",
+	},
+}
+
+// fieldKeyFromWeb is the inverse of fieldKeyToWeb, built once at init.
+var fieldKeyFromWeb = func() map[string]map[string]string {
+	out := make(map[string]map[string]string, len(fieldKeyToWeb))
+	for typ, m := range fieldKeyToWeb {
+		inv := make(map[string]string, len(m))
+		for dk, wk := range m {
+			inv[wk] = dk
+		}
+		out[typ] = inv
+	}
+	return out
+}()
+
+func translateFieldKey(table map[string]map[string]string, recType, key string) string {
+	if m, ok := table[recType]; ok {
+		if mapped, ok := m[key]; ok {
+			return mapped
+		}
+	}
+	return key
+}
+
 // webVaultRecordToPayload parses a web_vault ItemRecord JSON into a desktop
 // ItemPayload (title -> Name, flat fields -> Fields, type mapped).
 func webVaultRecordToPayload(raw []byte) (*ItemPayload, error) {
@@ -82,7 +126,9 @@ func webVaultRecordToPayload(raw []byte) (*ItemPayload, error) {
 		return nil, err
 	}
 	p := &ItemPayload{Fields: map[string]any{}}
+	recType := ""
 	if t, ok := m["type"].(string); ok {
+		recType = t
 		p.Type = recordTypeToDesktop(t)
 	}
 	if title, ok := m["title"].(string); ok {
@@ -98,7 +144,7 @@ func webVaultRecordToPayload(raw []byte) (*ItemPayload, error) {
 		if webVaultEnvelopeKeys[k] {
 			continue
 		}
-		p.Fields[k] = v
+		p.Fields[translateFieldKey(fieldKeyFromWeb, recType, k)] = v
 	}
 	return p, nil
 }
@@ -118,6 +164,7 @@ func payloadToWebVaultRecord(p *ItemPayload) ([]byte, error) {
 	if p.UpdatedAt > 0 {
 		rec["updatedAt"] = p.UpdatedAt
 	}
+	recType := desktopTypeToRecord(p.Type)
 	for k, v := range p.Fields {
 		if webVaultEnvelopeKeys[k] {
 			continue
@@ -125,7 +172,7 @@ func payloadToWebVaultRecord(p *ItemPayload) ([]byte, error) {
 		if isEmptyFieldValue(v) {
 			continue
 		}
-		rec[k] = v
+		rec[translateFieldKey(fieldKeyToWeb, recType, k)] = v
 	}
 	return json.Marshal(rec)
 }
