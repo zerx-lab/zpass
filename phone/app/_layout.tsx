@@ -12,6 +12,7 @@ import "react-native-reanimated";
 
 import { Colors } from "@/constants/theme";
 import { ThemeProvider, useTheme } from "@/contexts/theme-context";
+import { UiSettingsProvider } from "@/contexts/ui-settings-context";
 import { VaultProvider, useVault } from "@/contexts/vault-context";
 import { LockOverlay } from "@/components/lock-overlay";
 import { OnboardingOverlay } from "@/components/onboarding-overlay";
@@ -97,6 +98,9 @@ function RootLayoutNav() {
         }}
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="me-protection" options={{ headerShown: false }} />
+        <Stack.Screen name="me-appearance" options={{ headerShown: false }} />
+        <Stack.Screen name="me-data" options={{ headerShown: false }} />
         <Stack.Screen name="sync" options={{ headerShown: false }} />
         <Stack.Screen name="sync-host" options={{ headerShown: false }} />
         <Stack.Screen name="sync-conflicts" options={{ headerShown: false }} />
@@ -131,9 +135,11 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemeProvider initialMode="system">
-        <VaultProvider>
-          <RootLayoutNav />
-        </VaultProvider>
+        <UiSettingsProvider>
+          <VaultProvider>
+            <RootLayoutNav />
+          </VaultProvider>
+        </UiSettingsProvider>
       </ThemeProvider>
     </GestureHandlerRootView>
   );

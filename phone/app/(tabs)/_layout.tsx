@@ -5,11 +5,14 @@ import { Platform } from "react-native";
 import { HapticTab } from "@/components/haptic-tab";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { Colors } from "@/constants/theme";
+import { useUiSettings } from "@/contexts/ui-settings-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 
 export default function TabLayout() {
   const colorScheme = useColorScheme() ?? "dark";
   const c = Colors[colorScheme];
+  // 「安全」页默认隐藏，可在 我的 → 外观与交互 中打开
+  const { securityTabEnabled } = useUiSettings();
 
   return (
     <Tabs
@@ -58,6 +61,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="security"
         options={{
+          href: securityTabEnabled ? undefined : null,
           title: "安全",
           tabBarIcon: ({ color, size }) => (
             <IconSymbol name="shield.fill" size={size ?? 22} color={color} />

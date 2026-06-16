@@ -10,6 +10,7 @@ import {
 import { Appearance, type ColorSchemeName } from "react-native";
 
 import { Colors, type ColorPalette, type ColorScheme } from "@/constants/theme";
+import { loadAppSettings, patchAppSettings } from "@/lib/app-settings";
 
 /**
  * 主题模式：
@@ -53,6 +54,19 @@ export function ThemeProvider({ children, initialMode = "system" }: ThemeProvide
     resolveSystemScheme(Appearance.getColorScheme()),
   );
 
+  // 启动时恢复上次选择的主题模式（持久化在设备本地偏好）
+  useEffect(() => {
+    let alive = true;
+    loadAppSettings().then((s) => {
+      if (alive && (s.themeMode === "dark" || s.themeMode === "light")) {
+        setModeState(s.themeMode);
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   // 监听系统颜色方案变化（仅在 mode === "system" 时影响渲染）
   useEffect(() => {
     const sub = Appearance.addChangeListener(({ colorScheme }) => {
@@ -65,12 +79,15 @@ export function ThemeProvider({ children, initialMode = "system" }: ThemeProvide
 
   const setMode = useCallback((next: ThemeMode) => {
     setModeState(next);
+    void patchAppSettings({ themeMode: next });
   }, []);
 
   const toggle = useCallback(() => {
     setModeState((prev) => {
       const current = prev === "system" ? resolveSystemScheme(Appearance.getColorScheme()) : prev;
-      return current === "dark" ? "light" : "dark";
+      const next = current === "dark" ? "light" : "dark";
+      void patchAppSettings({ themeMode: next });
+      return next;
     });
   }, []);
 
