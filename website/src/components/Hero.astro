@@ -15,6 +15,7 @@
 // ============================================================================
 
 import type { SiteStrings, Locale } from "../i18n/strings";
+import { APP_REGISTER_URL } from "../i18n/strings";
 
 export interface Props {
 	t: SiteStrings;
@@ -52,6 +53,7 @@ const stats = [
 			<a href={`${homeBase}#download`} class="btn primary"
 				>{t.hero_cta_primary} <span class="arrow">→</span></a
 			>
+			<a href={APP_REGISTER_URL} class="btn">{t.nav_register}</a>
 			<a href={`${homeBase}#features`} class="btn">{t.nav_features}</a>
 		</div>
 

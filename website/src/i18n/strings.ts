@@ -5,6 +5,18 @@
 /** ZPass 官方 GitHub 仓库（Nav / Footer / README 等多处引用，集中在此避免不一致） */
 export const GITHUB_URL = "https://github.com/zerx-lab/zpass";
 
+/** ZPass Web Vault 应用部署地址（登录 / 注册入口指向该独立 SPA）。
+ *  默认指向线上发布地址，可用环境变量 APP_URL 覆盖
+ *  （本地联调 web_vault dev server 时设为 http://localhost:5173）。 */
+export const APP_URL = (
+	import.meta.env.APP_URL ?? "https://zpass-app.zerx.dev"
+).replace(/\/+$/, "");
+
+/** Web Vault 登录页（已有账户） */
+export const APP_LOGIN_URL = `${APP_URL}/login`;
+/** Web Vault 注册页（新建账户） */
+export const APP_REGISTER_URL = `${APP_URL}/register`;
+
 export type Locale = "en" | "zh";
 
 export interface PriceTier {
@@ -23,6 +35,7 @@ export interface SiteStrings {
 	nav_pricing: string;
 	nav_docs: string;
 	nav_signin: string;
+	nav_register: string;
 	nav_demo: string;
 	nav_how: string;
 	nav_faq: string;
@@ -273,6 +286,7 @@ const en: SiteStrings = {
 	nav_pricing: "Pricing",
 	nav_docs: "Docs",
 	nav_signin: "Sign in",
+	nav_register: "Create account",
 	nav_demo: "Preview",
 	nav_how: "How it works",
 	nav_faq: "FAQ",
@@ -582,6 +596,7 @@ const zh: SiteStrings = {
 	nav_pricing: "价格",
 	nav_docs: "文档",
 	nav_signin: "登录",
+	nav_register: "创建账户",
 	nav_demo: "预览",
 	nav_how: "工作原理",
 	nav_faq: "常见问题",

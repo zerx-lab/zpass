@@ -15,7 +15,7 @@
 // ============================================================================
 
 import type { SiteStrings, Locale } from "../i18n/strings";
-import { GITHUB_URL, localizePath } from "../i18n/strings";
+import { GITHUB_URL, localizePath, APP_LOGIN_URL, APP_REGISTER_URL } from "../i18n/strings";
 import ThemeToggle from "./ThemeToggle.astro";
 import Brandmark from "./Brandmark.astro";
 
@@ -134,6 +134,9 @@ const zhPath = localizePath(pathname, "zh");
 				>
 			</div>
 
+			<a href={APP_LOGIN_URL} class="btn nav-cta nav-signin"
+				>{t.nav_signin}</a
+			>
 			<a href={link("download")} class="btn primary nav-cta"
 				>{t.nav_download}</a
 			>
@@ -166,6 +169,8 @@ const zhPath = localizePath(pathname, "zh");
 			<a href={link("security")} class="nav-mobile-link" data-nav-mobile-link>{t.nav_security}</a>
 			<a href={link("download")} class="nav-mobile-link" data-nav-mobile-link>{t.nav_download}</a>
 			<a href={link("faq")} class="nav-mobile-link" data-nav-mobile-link>{t.nav_faq}</a>
+			<a href={APP_LOGIN_URL} class="nav-mobile-link" data-nav-mobile-link>{t.nav_signin}</a>
+			<a href={APP_REGISTER_URL} class="nav-mobile-link nav-mobile-register" data-nav-mobile-link>{t.nav_register}</a>
 
 			<div class="nav-mobile-divider"></div>
 
@@ -337,6 +342,12 @@ const zhPath = localizePath(pathname, "zh");
 	}
 	.nav-mobile-link:hover {
 		color: var(--text);
+	}
+	.nav-mobile-register {
+		color: var(--accent);
+	}
+	.nav-mobile-register:hover {
+		color: var(--accent-strong);
 	}
 	.nav-mobile-divider {
 		height: 1px;
