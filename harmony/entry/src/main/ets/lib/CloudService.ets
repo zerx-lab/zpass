@@ -220,6 +220,12 @@ export class CloudService {
   /** HUKS 加密的 secrets blob（base64）；'' 表示明文回退；secretKey/token 变更时刷新。 */
   private secretsBlobB64: string = '';
   /**
+   * DEK 包裹的云主密码密文（base64）；'' 表示未封装（旧记录 / 封装时 vault 锁定）。登录成功后由
+   * refreshWrappedPassword 刷新、随 persist 落盘；解锁（含信任设备无主密码）时 unwrapCloudPassword
+   * 解出真实云密码静默重建会话——故兼容「本地解锁密码 ≠ 云密码」与生物解锁两种情形。
+   */
+  private wrappedPasswordB64: string = '';
+  /**
    * 本地保险库刚为「首次使用即选云同步」新建（CloudAccount.ensureLocalVault 调 markFreshLocalVault
    * 置位）。其默认空间（id='default'）只是初始化必需的占位符——对标 desktop bootstrapLocalVault：
    * desktop 的 initialize 根本不建默认空间，登录后只镜像云端空间。首次对账下拉到云端空间后，
@@ -247,6 +253,7 @@ export class CloudService {
         this.hasAccount = true;
         this.client = new CloudClient(this.baseUrl);
         await this.loadSecrets(st.account);
+        this.wrappedPasswordB64 = st.account.wrappedPassword;
         if (this.token) this.client.setToken(this.token);
       }
       // 默认云服务地址：用户无需手动配置；无持久化地址时回退线上默认（dev 可在云账户页覆盖）。
@@ -347,7 +354,7 @@ export class CloudService {
         public_key: toB64(ks.publicKey), encrypted_private_key: toB64(wrapped), algo: 'x25519',
       });
 
-      this.establishSession(em, sk.accountId, secretKey, ks.privateKey, ks.publicKey);
+      this.establishSession(em, sk.accountId, secretKey, masterPassword, ks.privateKey, ks.publicKey);
       await this.refreshSecretsBlob();
       await this.persist();
       this.secretKeyBackup = secretKey;
@@ -367,12 +374,42 @@ export class CloudService {
     await this.signInInternal((email ?? '').trim().toLowerCase(), masterPassword, secretKey.trim());
   }
 
-  /** 用已保存的邮箱 + Secret Key 重新登录（仅需主密码）。 */
+  /**
+   * 用已保存的邮箱 + Secret Key 重新登录。优先用 DEK 封装的真实云密码（解锁后才可解，兼容
+   * 「本地解锁密码 ≠ 云密码」与「生物解锁无主密码」）；其次用调用方传入的主密码。封装密码登录
+   * 失败（如别处改了云密码）且用户另键入了不同主密码时，回退用键入的主密码重试。
+   */
   async restoreSession(masterPassword: string): Promise<void> {
     if (!this.hasAccount || !this.email || !this.secretKey) {
       throw new Error('无已保存的云账户');
     }
-    await this.signInInternal(this.email, masterPassword, this.secretKey);
+    const wrapped = this.unwrapCloudPassword();
+    const typed = masterPassword ?? '';
+    if (!wrapped && !typed) throw new Error('请输入主密码');
+    if (wrapped) {
+      try {
+        await this.signInInternal(this.email, wrapped, this.secretKey);
+        return;
+      } catch (e) {
+        // 封装密码失效且用户另键入主密码 → 回退重试；否则抛原错。
+        if (!typed || typed === wrapped) throw e instanceof Error ? e : new Error(String(e));
+      }
+    }
+    await this.signInInternal(this.email, typed, this.secretKey);
+  }
+
+  /**
+   * 补封装云自动登录凭据。登录链路（`CloudAccount.onLogin`）里本地保险库可能在 `signIn` **之后**
+   * 才由 `ensureLocalVault` 解锁（「首次使用即选云同步」的云优先首登场景）——此时 `establishSession`
+   * 当时 vault 还锁着、DEK 不在内存，`refreshWrappedPassword` 被静默跳过，导致用户**首登就输入过**云密码
+   * 却没落盘、后续解锁仍要手输。页面在 `ensureLocalVault` 解锁后调用本方法补封装，确保 `wrappedPassword`
+   * 落盘，使之后解锁（含信任设备/生物识别）静默恢复。幂等：未登录 / 已封装 / vault 仍锁定时空操作。
+   */
+  async persistAutoUnlockCredential(cloudPassword: string): Promise<void> {
+    if (!this.signedIn || !cloudPassword || !vaultService.isUnlocked()) return;
+    if (this.wrappedPasswordB64) return;   // establishSession 已封装（signIn 时 vault 已解锁）→ 无需重复
+    this.refreshWrappedPassword(cloudPassword);
+    if (this.wrappedPasswordB64) await this.persist();
   }
 
   private async signInInternal(email: string, masterPassword: string, secretKeyStr: string): Promise<void> {
@@ -412,7 +449,7 @@ export class CloudService {
       }
       this.applyToken(lf.session_token);
       const sess = await this.recoverKeyset(auk);
-      this.establishSession(email, sk.accountId, secretKeyStr, sess.priv, sess.pub);
+      this.establishSession(email, sk.accountId, secretKeyStr, masterPassword, sess.priv, sess.pub);
       await this.refreshSecretsBlob();
       await this.persist();
       this.kickReconcile();
@@ -443,6 +480,7 @@ export class CloudService {
     this.accountId = '';
     this.secretKey = '';
     this.secretsBlobB64 = '';
+    this.wrappedPasswordB64 = '';
     this.plan = '';
     this.bindings.clear();
     this.syncStates.clear();
@@ -1206,11 +1244,28 @@ export class CloudService {
   /* vault 锁定/解锁钩子（由 VaultStore 调用）                                  */
   /* ------------------------------------------------------------------------ */
 
-  /** 解锁 vault 后自动恢复云会话、自动镜像并同步（用同一主密码，无需单独云登录）。 */
+  /**
+   * 页面进入时确保云会话已恢复（兜底：解锁钩子可能在冷启动竞态中错过，或先于 hydrate 完成）。
+   * 幂等：已登录 / 无账户 / vault 未解锁 / 已禁用本会话自动恢复时空操作；否则走与解锁同一路径
+   * （优先 DEK 封装的云密码，无需用户再键入主密码）。
+   */
+  async ensureRestored(): Promise<void> {
+    if (this.signedIn || !this.hasAccount) return;
+    if (!vaultService.isUnlocked()) return;
+    await this.onVaultUnlocked('');
+  }
+
+  /**
+   * 解锁 vault 后自动恢复云会话、自动镜像并同步，无需单独云登录。优先用 DEK 封装的真实云密码
+   * （restoreSession 内解封），故主密码解锁与信任设备/生物解锁（masterPassword='' ）都能恢复，
+   * 也兼容本地解锁密码 ≠ 云密码。
+   */
   async onVaultUnlocked(masterPassword: string): Promise<void> {
-    if (!this.configured || !this.hasAccount || this.signedIn || this.autoRestoreDisabled || !masterPassword) {
+    if (!this.configured || !this.hasAccount || this.signedIn || this.autoRestoreDisabled) {
       return;
     }
+    // 无主密码（信任设备/生物解锁）时，须有 DEK 封装的云密码方可恢复（否则无从派生 AUK）。
+    if (!masterPassword && !this.wrappedPasswordB64) return;
     try {
       await this.restoreSession(masterPassword);
       if (this.mfaRequired) {
@@ -1352,6 +1407,7 @@ export class CloudService {
     email: string,
     accountId: string,
     secretKey: string,
+    cloudPassword: string,
     priv: Uint8Array,
     pub: Uint8Array,
   ): void {
@@ -1365,8 +1421,35 @@ export class CloudService {
     this.signedIn = true;
     this.hasAccount = true;
     this.autoRestoreDisabled = false;
+    this.refreshWrappedPassword(cloudPassword);
     this.startPeriodic();
     this.startRealtime();
+  }
+
+  /**
+   * 用本地保险库 DEK 封装云主密码并缓存（持久化在 persist 落盘）。仅 vault 解锁（DEK 在内存）时
+   * 可封装——解锁后（含信任设备无主密码、本地解锁密码 ≠ 云密码）即可据此重建会话；密文仅 vault
+   * 解锁后可解，符合零知识。失败（vault 锁定/封装异常）保留旧值，恢复时回退到键入的主密码。
+   */
+  private refreshWrappedPassword(cloudPassword: string): void {
+    if (!cloudPassword) return;
+    try {
+      const ct = vaultService.sealCloudCredential(utf8(cloudPassword));
+      this.wrappedPasswordB64 = toB64(ct);
+    } catch (_e) {
+      // vault 锁定 / 封装失败 → 保留旧值
+    }
+  }
+
+  /** 解封 DEK 包裹的云主密码（需 vault 已解锁）；无封装 / 锁定 / 密文损坏返回 ''。 */
+  private unwrapCloudPassword(): string {
+    if (!this.wrappedPasswordB64) return '';
+    try {
+      const pt = vaultService.openCloudCredential(fromB64(this.wrappedPasswordB64));
+      return utf8Decode(pt);
+    } catch (_e) {
+      return '';
+    }
   }
 
   private wipeSessionKeys(): void {
@@ -1412,6 +1495,7 @@ export class CloudService {
       userId: this.userId,
       tenantId: this.tenantId,
       secrets: this.secretsBlobB64,
+      wrappedPassword: this.wrappedPasswordB64,
     };
     const vaults: CloudVaultBinding[] = [];
     this.bindings.forEach((b) => vaults.push({ spaceId: b.spaceId, vaultId: b.vaultId, cursor: b.cursor }));
@@ -1449,7 +1533,8 @@ export class CloudService {
       const resp = await this.client!.loginMfa({ mfa_token: p.mfaToken, code: code.trim() });
       this.applyToken(resp.session_token);
       const sess = await this.recoverKeyset(p.auk);
-      this.establishSession(p.email, p.sk.accountId, p.secretKeyStr, sess.priv, sess.pub);
+      // MFA 账户每次登录都需 TOTP，无法静默自动恢复 → 不封装云密码（''），refreshWrappedPassword 空操作。
+      this.establishSession(p.email, p.sk.accountId, p.secretKeyStr, '', sess.priv, sess.pub);
       await this.refreshSecretsBlob();
       await this.persist();
       this.kickReconcile();

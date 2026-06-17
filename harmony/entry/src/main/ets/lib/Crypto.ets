@@ -38,6 +38,8 @@ export const AAD_DEK: string = 'zpass:dek';
 export const AAD_VERIFIER: string = 'zpass:verifier';
 /** 信任设备包装 DEK 的 AAD —— 与 desktop trusteddevice entropy 同义 */
 export const AAD_TRUSTED_DEVICE: string = 'zpass:trusted-device:v1';
+/** DEK 包裹「云自动登录凭据」(云主密码) 的 AAD —— 与 desktop cloudCredAAD 同义；带版本号便于轮换 */
+export const AAD_CLOUD_CRED: string = 'zpass:cloud-cred:v1';
 
 /* ----------------------------------------------------------------------------
  * Argon2id 参数

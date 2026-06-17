@@ -9,8 +9,9 @@
 //
 // 存什么 / 不存什么（零知识取舍）：
 //   - 存：baseUrl / email / accountId / secretKey(Z1) / JWT token / userId / tenantId /
-//         每空间绑定 {spaceId, vaultId, cursor} / 每空间每条目同步水位 / 解绑空间清单
-//   - 不存：主密码、AUK、账户私钥、per-vault key —— 这些只在内存会话里，随锁定清除。
+//         每空间绑定 {spaceId, vaultId, cursor} / 每空间每条目同步水位 / 解绑空间清单 /
+//         DEK 包裹的云主密码密文（wrappedPassword，仅 vault 解锁后可解，供静默重建会话）
+//   - 不存：明文主密码、AUK、账户私钥、per-vault key —— 这些只在内存会话里，随锁定清除。
 //   secretKey 单独无法解锁账户（2SKD 需要主密码），token 仅 24h；落沙箱（应用隔离 +
 //   设备加密）可接受。更强的 HUKS 包裹留作后续硬化（见 MIGRATION）。
 //
@@ -41,6 +42,12 @@ export interface CloudAccountRecord {
   tenantId: string;
   /** HUKS 加密的 {secretKey, token} base64 blob；非空时上方 secretKey/token 留空（明文回退才用）。 */
   secrets: string;
+  /**
+   * DEK 包裹的云账户主密码密文 base64（VaultService.sealCloudCredential 产物）。仅在本地 vault
+   * 解锁后可解 —— 供解锁（含信任设备/生物识别，无主密码）时静默重建云会话，且兼容本地解锁密码
+   * ≠ 云密码。这不是明文主密码：密文离开 DEK（受主密码或信任设备 HUKS 保护）即无用，符合零知识。
+   */
+  wrappedPassword: string;
 }
 
 /** 一条空间 ↔ 云 vault 绑定（多空间下每空间一条；对应 desktop cloud_vaults 行）。 */
@@ -143,6 +150,7 @@ function normalizeAccount(a: CloudAccountRecord | null | undefined): CloudAccoun
     userId: typeof a.userId === 'string' ? a.userId : '',
     tenantId: typeof a.tenantId === 'string' ? a.tenantId : '',
     secrets: typeof a.secrets === 'string' ? a.secrets : '',
+    wrappedPassword: typeof a.wrappedPassword === 'string' ? a.wrappedPassword : '',
   };
 }
 

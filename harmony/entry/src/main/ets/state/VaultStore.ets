@@ -82,7 +82,7 @@ export class VaultStore {
 
   /* ----- 云同步钩子（由 CloudService.hydrate 注册；VaultStore 不反向 import CloudService，避免环） ----- */
 
-  /** 解锁成功后回调（传主密码，用于自动恢复云会话并同步）。 */
+  /** 解锁成功后回调（传主密码恢复云会话；信任设备/生物解锁无主密码时传 '' ，靠 DEK 封装的云密码恢复）。 */
   private cloudOnUnlocked: ((masterPassword: string) => void) | null = null;
   /** 锁定时回调（清除云会话内存密钥、停周期同步）。 */
   private cloudOnLocked: (() => void) | null = null;
@@ -262,7 +262,11 @@ export class VaultStore {
     this.busy = true;
     try {
       const ok = await vaultService.tryUnlockWithTrustedDevice();
-      if (ok) await this.refresh();
+      if (ok) {
+        await this.refresh();
+        // 信任设备/生物解锁无主密码：传 '' 触发云会话恢复，CloudService 用 DEK 封装的云密码静默重建。
+        if (this.cloudOnUnlocked) this.cloudOnUnlocked('');
+      }
       return ok;
     } finally {
       this.busy = false;

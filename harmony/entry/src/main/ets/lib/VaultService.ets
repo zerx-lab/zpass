@@ -10,6 +10,7 @@
 // 与 phone 的 expo-secure-store 角色一致（绑定设备的密钥仓 + 生物识别保护）。
 
 import {
+  AAD_CLOUD_CRED,
   AAD_DEK,
   AAD_TRUSTED_DEVICE,
   AAD_VERIFIER,
@@ -564,6 +565,29 @@ export class VaultService {
     } catch (_e) {
       // 写盘失败不阻塞主密码兜底
     }
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* 云自动登录凭据（DEK 包裹云主密码）                                         */
+  /* ------------------------------------------------------------------------ */
+
+  /**
+   * 用本地保险库 DEK 加密一段云自动登录凭据（云主密码）。与 desktop SealCloudCredential 对齐。
+   *
+   * 供 CloudService 在登录成功后把云账户主密码以「仅本地解锁后可解」的形式落盘——这样即便
+   * 本地解锁密码与云密码不同、或本次解锁走的是信任设备（生物识别，无主密码），解锁后也能
+   * 重建云会话。CloudService 只传明文、拿密文，永不接触 DEK，保持「只有 vault 持有 DEK」不变量。
+   * vault 锁定（DEK 不在内存）时抛 locked。
+   */
+  sealCloudCredential(plaintext: Uint8Array): Uint8Array {
+    if (!this.dek) throw new VaultError('locked', 'vault 已锁定');
+    return sealAEAD(this.dek, plaintext, utf8(AAD_CLOUD_CRED));
+  }
+
+  /** 用 DEK 解密 sealCloudCredential 落盘的云凭据密文。vault 锁定时抛 locked；密文损坏/被篡改 → AEAD 校验失败抛错。 */
+  openCloudCredential(ciphertext: Uint8Array): Uint8Array {
+    if (!this.dek) throw new VaultError('locked', 'vault 已锁定');
+    return openAEAD(this.dek, ciphertext, utf8(AAD_CLOUD_CRED));
   }
 
   /* ------------------------------------------------------------------------ */

@@ -45,6 +45,9 @@ struct CloudAccountPage {
     this.serverUrl = this.cs.baseUrl;
     this.email = this.cs.email;
     this.devMode = appIsDebug();
+    // 兜底：进入页面时若 vault 已解锁但云会话未恢复（如解锁钩子在冷启动竞态中错过），静默重建会话，
+    // 免去用户手动键入主密码。幂等，已登录 / 无账户 / 已禁用本会话自动恢复时空操作。
+    this.cs.ensureRestored().catch(() => {});
   }
 
   /** 云登录/注册成功后，确保本地保险库已用同一主密码创建（云会话自动恢复依赖同一主密码）。 */
@@ -96,6 +99,8 @@ struct CloudAccountPage {
       const pw = this.password;
       await this.cs.signIn(this.email, pw, this.secretKeyInput);  // SRP 先校验主密码
       await this.ensureLocalVault(pw);                            // 校验通过后用同一主密码建本地库
+      // 云优先首登：vault 在 signIn 之后才解锁，此刻补封装云密码，确保后续解锁（含生物识别）自动恢复。
+      await this.cs.persistAutoUnlockCredential(pw);
       this.password = '';
       this.secretKeyInput = '';
       if (this.cs.signedIn) await this.cs.syncNow();              // 本地库就绪后拉取云端数据
@@ -449,11 +454,11 @@ struct CloudAccountPage {
           .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis });
       }
       .width('100%');
-      Text('输入主密码恢复云会话（解锁本地保险库时也会自动恢复）。')
+      Text('输入云账户主密码恢复云会话（可能与本机解锁密码不同）。首次输入后会安全保存，之后解锁本地保险库（含生物识别）将自动恢复，无需再输入。')
         .fontSize(ZType.captionSize).fontColor(this.zc.text3).lineHeight(16);
       Column() {
-        this.fieldLabel('主密码');
-        TextInput({ placeholder: '主密码', text: this.password })
+        this.fieldLabel('云账户主密码');
+        TextInput({ placeholder: '云账户主密码', text: this.password })
           .type(InputType.Password)
           .placeholderColor(this.zc.text4).placeholderFont({ size: ZType.bodySize })
           .fontColor(this.zc.text).fontSize(ZType.bodySize)

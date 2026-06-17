@@ -225,6 +225,18 @@
 
 > **验证范围**：纯 ArkTS，不涉 cargo / Rust（`cryptocore`/`zpass_cloud` 未动）。环境无 `DEVECO_SDK_HOME`/`HARMONY_NDK_HOME`、`hvigorw`/`ohpm` 不可用，无法 hvigor 构建/真机跑。决策核（首登下拉清默认 / 注册保默认 / 同名领养保默认 / 既有用户非 fresh 全保留 / 超额全标记手动 / 恰好够上传 / 额度未知 try-all / 剩余为 0 预判 / 无名 vault 下拉清默认）已用等价 JS 模型跑 9 场景全通过。真机端到端（首登清占位默认、超额时同步页手动指定上云）需 DevEco 联调。
 
+### Phase 18 ✅ 锁屏/生物解锁后云会话自动恢复（用户实测「每次进云账户都要重输主密码」跟进）
+
+针对「锁屏后再次进入云账户页面需手动输入主密码、不自动同步」的反馈。根因：云会话恢复只挂在**主密码解锁**路径（`VaultStore.unlock` → `cloudOnUnlocked(pw)`），且 `restoreSession` 直接拿**本地解锁密码**重跑 SRP——信任设备/生物解锁（`tryAutoUnlock`）压根不触发恢复，且本地解锁密码 ≠ 云密码时恢复必 401 自禁用。对齐 desktop `cloudservice.go`「DEK 包裹云主密码」方案：
+
+- **DEK 包裹云主密码**：`VaultService.sealCloudCredential/openCloudCredential`（AAD `"zpass:cloud-cred:v1"`，与 desktop `cloudCredAAD` 同义）。登录成功后 `CloudService.establishSession` 把云主密码用本地 DEK 封装，随 `persist` 落 `CloudStorage` 的 `account.wrappedPassword`。密文仅在 vault 解锁后可解（DEK 受主密码或信任设备 HUKS 保护），非明文主密码，零知识不变量不破。
+- **解锁优先用封装密码**：`restoreSession` 先 `unwrapCloudPassword` 取真实云密码登录，失败且用户另键入主密码时回退重试；兼容「本地解锁密码 ≠ 云密码」。`onVaultUnlocked` 放开 `!masterPassword` 守卫——无主密码（生物解锁）只要有封装密码即可恢复。
+- **生物解锁接线**：`VaultStore.tryAutoUnlock` 信任设备解锁成功后 `cloudOnUnlocked('')`，触发同一恢复路径（EntryAbility 切前台、LockOverlay 自动/手动生物解锁均经此）。
+- **进页面兜底**：`CloudService.ensureRestored` + `CloudAccount.initState` 调用——已解锁但会话未恢复（冷启动钩子竞态）时进页面静默重建，幂等。
+- **平滑迁移**：fix 前登录的存量用户（`wrappedPassword` 为空）首次仍需一次主密码解锁/手动恢复，此时补存封装密码；之后生物解锁即自动恢复。
+
+> **验证范围**：纯 ArkTS（`cryptocore`/`zpass_cloud` 未动）。环境无 `DEVECO_SDK_HOME`/`HARMONY_NDK_HOME`，无法 hvigor 构建/真机跑。恢复决策核（封装优先→失败回退键入、无主密码靠封装、生物解锁触发、幂等兜底）已审阅；真机端到端（背景锁→生物解锁→进云账户页已登录免输密码）需 DevEco 联调。
+
 ## 待完成（后续迭代）
 
 - **主题持久化**：phone 不持久化（每次启动跟随系统）；harmony 当前一致，未来可走 `@ohos.data.preferences`
@@ -244,6 +256,7 @@ vault file schema 与 phone/desktop 三端完全一致：
 | Verifier AAD | `"zpass:verifier"` |
 | Verifier plaintext | `"zpass-vault-verifier-v1"` |
 | 信任设备 wrap AAD | `"zpass:trusted-device:v1"` |
+| 云凭据 wrap AAD | `"zpass:cloud-cred:v1"` |
 | 文件 schema | `"zpass-vault-file-v1"` |
 
 测试向量在 `cryptocore/src/lib.rs` 的 `derive_kek_known_vector_is_stable` 锁定。
