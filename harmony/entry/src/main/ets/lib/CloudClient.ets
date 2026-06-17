@@ -36,6 +36,11 @@ export class APIError extends Error {
     return this.status === 403 && this.message === 'vault_frozen';
   }
 
+  /** 403 plan_limit_exceeded —— 触达套餐额度上限（如云保险库数量 max_vaults）。 */
+  isPlanLimit(): boolean {
+    return this.status === 403 && this.message === 'plan_limit_exceeded';
+  }
+
   /** 404 —— vault/keyset 不存在或非成员。 */
   isNotFound(): boolean {
     return this.status === 404;
@@ -152,6 +157,20 @@ export interface VaultSummary {
 
 export interface ListVaultsResponse {
   vaults: VaultSummary[];
+}
+
+/** 一条 vault 删除墓碑（GET /v1/vaults/deleted 返回元素；零知识：只含 id + seq + 时间）。 */
+export interface DeletedVault {
+  vault_id: string;
+  seq: number;
+  deleted_at: string;
+}
+
+/** vault 删除墓碑增量页。next_cursor 为本页末尾 seq（空页保持 since 不回退）。 */
+export interface DeletedVaultsResponse {
+  deleted: DeletedVault[];
+  next_cursor: number;
+  has_more: boolean;
 }
 
 export interface UpdateVaultMetaRequest {
@@ -411,6 +430,18 @@ export class CloudClient {
     await this.sendVoid(
       http.RequestMethod.DELETE,
       `/v1/vaults/${encodeURIComponent(vaultId)}`,
+      null,
+      true,
+    );
+  }
+
+  /** 拉取本租户的 vault 删除墓碑（增量，按 seq 单调游标）。limit<=0 用服务端默认。 */
+  async listDeletedVaults(since: number, limit: number): Promise<DeletedVaultsResponse> {
+    let query = `?since=${since}`;
+    if (limit > 0) query += `&limit=${limit}`;
+    return this.send<DeletedVaultsResponse>(
+      http.RequestMethod.GET,
+      `/v1/vaults/deleted${query}`,
       null,
       true,
     );

@@ -55,10 +55,19 @@ export const CLOUD_SALT_LEN: number = 32;
 
 /** keyset 私钥包裹（AUK 下 AEAD）的 aad。 */
 const AAD_KEYSET_PRIV: string = 'zpass-keyset-priv-v1';
+/** vault meta（空间名/字形）封装的 aad —— 与 desktop "zpass:vault-meta:v1" 一致。 */
+const AAD_VAULT_META: string = 'zpass:vault-meta:v1';
 /** web_vault VAULT_MANIFEST_ID（hyphenless）—— 非真实条目，pull 时跳过。 */
 const VAULT_MANIFEST_LOCAL_ID: string = '000000000000000000000000000000ff';
-/** web_vault 信封键（不并入 fields）。 */
-const WEB_ENVELOPE_KEYS: string[] = ['v', 'type', 'title', 'createdAt', 'updatedAt'];
+/**
+ * web_vault 信封键（不并入 fields，亦不并入 content_hash）。
+ *
+ * spaceId 在此一并排除：与 desktop space_id 列对齐——空间归属是「本地 / 绑定决定」的属性，
+ * 由「条目所在的云 vault」隐含（多空间模型下 vault ↔ space 1:1），绝不随密文上云、也不进
+ * content_hash。故 payloadToWebVaultRecord 不推 spaceId、webVaultRecordToPayload 不从云端
+ * 读取 spaceId（拉取时由同步引擎按绑定改写为目标空间），cloudContentHash 不因换空间而变。
+ */
+const WEB_ENVELOPE_KEYS: string[] = ['v', 'type', 'title', 'createdAt', 'updatedAt', 'spaceId'];
 
 const HEX32 = new RegExp('^[0-9a-f]{32}$');
 
@@ -284,6 +293,32 @@ export function openItemRecord(
   cloudId: string,
 ): Uint8Array {
   return openAEAD(vaultKey, ciphertext, utf8(cloudId));
+}
+
+/* ----------------------------------------------------------------------------
+ * vault meta（空间名/字形）—— 零知识：用 vault key AEAD 封装，服务端不可见明文。
+ * 多空间自动镜像用：其它设备 listVaults 后解密 meta，按空间名匹配/绑定，避免重复建库。
+ * -------------------------------------------------------------------------- */
+
+/** 解密后的 vault meta。 */
+export interface CloudVaultMeta {
+  name: string;
+  glyph: string;
+}
+
+/** 用 vault key 封装 vault meta（aad=zpass:vault-meta:v1）→ encrypted_meta 明文字节。 */
+export function sealVaultMeta(vaultKey: Uint8Array, meta: CloudVaultMeta): Uint8Array {
+  const json = '{"name":' + JSON.stringify(meta.name) + ',"glyph":' + JSON.stringify(meta.glyph) + '}';
+  return sealAEAD(vaultKey, utf8(json), utf8(AAD_VAULT_META));
+}
+
+/** 用 vault key 解封 vault meta。失败抛错（调用方按「无名」回退）。 */
+export function openVaultMeta(vaultKey: Uint8Array, sealed: Uint8Array): CloudVaultMeta {
+  const plain = openAEAD(vaultKey, sealed, utf8(AAD_VAULT_META));
+  const obj = JSON.parse(utf8Decode(plain)) as Record<string, Object>;
+  const name = typeof obj.name === 'string' ? (obj.name as string) : '';
+  const glyph = typeof obj.glyph === 'string' ? (obj.glyph as string) : '';
+  return { name, glyph };
 }
 
 /* ----------------------------------------------------------------------------

@@ -116,6 +116,16 @@ export interface ItemPayload {
   revision?: number;
 }
 
+/** 批量导入草稿 —— 由 Transfer.normalizeToDraft 产出，喂给 VaultService.importItems。 */
+export interface ImportItemDraft {
+  type: VaultItemType;
+  name: string;
+  fields: Record<string, Object>;
+}
+
+/** importItems 循环让出 UI 线程的步长（每 N 条 await 一次事件循环，保证进度条可重绘）。 */
+const IMPORT_YIELD_EVERY: number = 16;
+
 const VALID_TYPES: ReadonlySet<VaultItemType> = new Set<VaultItemType>([
   'login',
   'card',
@@ -164,13 +174,25 @@ export class VaultService {
   /** 本地用户改动钩子（云同步注册 → 去抖增量推送）。sync 摄取不触发，避免回环。 */
   private mutationHook: (() => void) | null = null;
 
+  /** 空间增删钩子（云同步注册 → 自动镜像新空间 / 解绑已删空间）。 */
+  private spaceHook: ((e: SpaceMutationEvent) => void) | null = null;
+
   /** 注册本地改动钩子（CloudService.hydrate 调用一次）。 */
   registerMutationHook(cb: () => void): void {
     this.mutationHook = cb;
   }
 
+  /** 注册空间增删钩子（CloudService.hydrate 调用一次；驱动自动镜像）。 */
+  registerSpaceHook(cb: (e: SpaceMutationEvent) => void): void {
+    this.spaceHook = cb;
+  }
+
   private fireMutation(): void {
     if (this.mutationHook) this.mutationHook();
+  }
+
+  private fireSpaceMutation(kind: string, spaceId: string): void {
+    if (this.spaceHook) this.spaceHook({ kind, spaceId });
   }
 
   async status(): Promise<VaultStatus> {
@@ -351,6 +373,44 @@ export class VaultService {
     await deleteVaultFile();
   }
 
+  /**
+   * 二次验证主密码（不改锁定态）：用候选密码派生 KEK 解出 DEK，与当前内存 DEK 常量时间比对。
+   * 供「信任设备」「清空云端数据」等二次确认复用。锁定 / 未初始化抛错；密码错返回 false。
+   */
+  async verifyPassword(password: string): Promise<boolean> {
+    if (!this.dek) throw new VaultError('locked', 'vault 已锁定');
+    if (!password) return false;
+    const file = await readVaultFile();
+    if (!file.meta) throw new VaultError('not-initialized', 'vault 未初始化');
+    const kek = await deriveKEKAsync(password, file.meta.salt, file.meta.params);
+    let candidate: Uint8Array | null = null;
+    try {
+      try {
+        candidate = openAEAD(kek, file.meta.wrappedDEK, utf8(AAD_DEK));
+      } catch {
+        return false;
+      }
+      return constantTimeEqual(candidate, this.dek);
+    } finally {
+      wipeBytes(kek);
+      if (candidate) wipeBytes(candidate);
+    }
+  }
+
+  /**
+   * 清空所有数据：删除全部条目与全部空间，回到单个空的默认空间；保留主密码与加密元数据
+   * （区别于 reset 的整库物理删）。**不触发**空间/条目钩子——云端数据由 CloudService 单独清理，
+   * 避免回环触发云镜像 / 删除。调用方负责刷新 store。
+   */
+  async purgeAllData(): Promise<void> {
+    this.requireUnlocked();
+    const file = await readVaultFile();
+    file.items = [];
+    file.spaces = [buildDefaultSpace()];
+    file.activeSpaceId = DEFAULT_SPACE_ID;
+    await writeVaultFile(file);
+  }
+
   /* ------------------------------------------------------------------------ */
   /* 信任设备 / 自动解锁 —— 与 phone 同 contract，WrapKey 走 HUKS                */
   /* ------------------------------------------------------------------------ */
@@ -378,30 +438,9 @@ export class VaultService {
       throw new VaultError('locked', 'vault 已锁定');
     }
 
-    const file = await readVaultFile();
-    if (!file.meta) {
-      throw new VaultError('not-initialized', 'vault 未初始化');
-    }
-
-    // 二次验证主密码
-    const kek = await deriveKEKAsync(
-      confirmPassword,
-      file.meta.salt,
-      file.meta.params,
-    );
-    let candidateDEK: Uint8Array | null = null;
-    try {
-      try {
-        candidateDEK = openAEAD(kek, file.meta.wrappedDEK, utf8(AAD_DEK));
-      } catch {
-        throw new VaultError('invalid-password', '主密码错误');
-      }
-      if (!constantTimeEqual(candidateDEK, this.dek)) {
-        throw new VaultError('invalid-password', '主密码错误');
-      }
-    } finally {
-      wipeBytes(kek);
-      if (candidateDEK) wipeBytes(candidateDEK);
+    // 二次验证主密码（复用 verifyPassword：派生 KEK 解 DEK 与当前 DEK 常量时间比对）
+    if (!(await this.verifyPassword(confirmPassword))) {
+      throw new VaultError('invalid-password', '主密码错误');
     }
 
     // 生成 WrapKey + 用 WrapKey 包 DEK 得 blob + WrapKey 落 HUKS
@@ -548,7 +587,13 @@ export class VaultService {
     await writeVaultFile(file);
   }
 
-  async createSpace(name: string): Promise<Space> {
+  /**
+   * 新建空间。silent=true 时不触发空间增删钩子（fireSpaceMutation）——
+   * 供云同步「下拉云端 vault 落地为本地空间」使用：该空间随即被绑定到一个**已存在**
+   * 的云 vault，绝不能再触发自动镜像去 mint 一个新 vault（对应 desktop
+   * createSpaceWithoutAutoLink）。
+   */
+  async createSpace(name: string, silent: boolean = false): Promise<Space> {
     this.requireUnlocked();
     const trimmed = (name ?? '').trim();
     if (!trimmed) throw new VaultError('space-invalid', '空间名不能为空');
@@ -564,6 +609,7 @@ export class VaultService {
     file.spaces = [...fixed.spaces, created];
     file.activeSpaceId = fixed.activeSpaceId;
     await writeVaultFile(file);
+    if (!silent) this.fireSpaceMutation('create', created.id);
     return created;
   }
 
@@ -580,6 +626,7 @@ export class VaultService {
     file.spaces = next;
     file.activeSpaceId = fixed.activeSpaceId;
     await writeVaultFile(file);
+    this.fireSpaceMutation('rename', id);
   }
 
   async deleteSpace(id: string): Promise<void> {
@@ -620,6 +667,42 @@ export class VaultService {
     const nextActive = fixed.activeSpaceId === id ? fallback : fixed.activeSpaceId;
     file.items = nextItems;
     file.spaces = remaining;
+    file.activeSpaceId = nextActive;
+    await writeVaultFile(file);
+    // 删除空间内的 item 已重指派到 fallback（updatedAt bump），通知云同步：解绑被删空间、
+    // 让 fallback 空间的 vault 接管这些条目。
+    this.fireSpaceMutation('delete', id);
+    this.fireMutation();
+  }
+
+  /**
+   * 物理删除一个空间及其全部条目（HARD delete：不合并到 fallback、不落墓碑）。
+   * 供云同步消费「vault 删除墓碑」：该空间绑定的云 vault 已被其它设备主动删除，本端据此把
+   * 对应本地空间与其条目一并清除（与 desktop VaultService.PurgeSpace 一致，区别于 deleteSpace
+   * 的「重指派到 fallback」语义）。不触发空间增删钩子（避免回环触发云端删除 / 对已删 vault 重复
+   * 发删）；拆绑定与刷新由调用方（CloudService）负责。删到不剩空间时回落为新建空默认空间。
+   */
+  async purgeSpace(id: string): Promise<void> {
+    this.requireUnlocked();
+    const file = await readVaultFile();
+    const fixed = ensureDefaultsInSnapshot(file);
+    // 丢弃该空间下的全部条目（live + 墓碑）；解密失败的行保留（无法判定归属）。
+    const nextItems: EncryptedItemRow[] = [];
+    for (const row of file.items) {
+      try {
+        const payload = this.decryptRow(row);
+        const curSpace = readSpaceIdFromFields(payload.fields) ?? fixed.activeSpaceId;
+        if (curSpace === id) continue; // 物理删
+      } catch {
+        // 解密失败 → 保留
+      }
+      nextItems.push(row);
+    }
+    const remaining = fixed.spaces.filter((s) => s.id !== id);
+    const nextSpaces = remaining.length > 0 ? remaining : [buildDefaultSpace()];
+    const nextActive = fixed.activeSpaceId === id ? sortSpaces(nextSpaces)[0].id : fixed.activeSpaceId;
+    file.items = nextItems;
+    file.spaces = nextSpaces;
     file.activeSpaceId = nextActive;
     await writeVaultFile(file);
   }
@@ -693,6 +776,72 @@ export class VaultService {
     await writeVaultFile(file);
     this.fireMutation();
     return payload;
+  }
+
+  /**
+   * 批量导入 —— 一次读盘、循环加密、一次写盘（O(N)，而非逐条 createItem 的 O(N²)）。
+   *
+   * 行为与「连续 N 次 createItem」一致：每条独立 genItemId() + 单调 nowMs() + 注入缺省
+   * spaceId，整批以「最新在前」顺序前插到现有条目之上。区别在于中途只持有内存快照，
+   * 结束时一次原子写 —— 若进程被杀则整批不落库，不会留下半截脏数据。
+   *
+   * onProgress(done, total) 在每条加密后回调，驱动进度条。加密为同步 napi 调用，长循环
+   * 会饿死 UI 线程，故每 IMPORT_YIELD_EVERY 条让出一次事件循环，使 ArkUI 有机会重绘。
+   */
+  async importItems(
+    drafts: ImportItemDraft[],
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<number> {
+    this.requireUnlocked();
+    const total = drafts.length;
+    if (onProgress) onProgress(0, total);
+    if (total === 0) return 0;
+
+    const file = await readVaultFile();
+    const fixed = ensureDefaultsInSnapshot(file);
+    const newRows: EncryptedItemRow[] = [];
+    let imported = 0;
+    for (let i = 0; i < total; i++) {
+      const d = drafts[i];
+      if (VALID_TYPES.has(d.type)) {
+        const name = d.name.trim();
+        if (name.length > 0) {
+          const now = this.nowMs();
+          const finalFields: Record<string, Object> = cloneFieldsRecord(d.fields);
+          if (typeof finalFields.spaceId !== 'string' || !finalFields.spaceId) {
+            finalFields.spaceId = fixed.activeSpaceId;
+          }
+          const payload: ItemPayload = {
+            id: genItemId(),
+            type: d.type,
+            name,
+            fields: finalFields,
+            createdAt: now,
+            updatedAt: now,
+            revision: 1,
+            deletedAt: null,
+          };
+          try {
+            newRows.push(this.encryptPayload(payload));
+            imported++;
+          } catch (_e) {
+            // 单条加密失败不中断整体（与旧逐条 createItem 容错一致）
+          }
+        }
+      }
+      if (onProgress) onProgress(i + 1, total);
+      if ((i + 1) % IMPORT_YIELD_EVERY === 0) {
+        await new Promise<void>((resolve: () => void) => { setTimeout(() => resolve(), 0); });
+      }
+    }
+    if (newRows.length === 0) return 0;
+    // 「最新在前」：与连续 createItem 的逐条前插效果一致（最后创建的排在最上）
+    file.items = newRows.reverse().concat(file.items);
+    file.spaces = fixed.spaces;
+    file.activeSpaceId = fixed.activeSpaceId;
+    await writeVaultFile(file);
+    this.fireMutation();
+    return imported;
   }
 
   async updateItem(
@@ -815,6 +964,23 @@ export class VaultService {
   }
 
   /**
+   * 列出某空间下的 live 条目（云同步按空间构建本地 manifest 用）。
+   *
+   * 多空间模型：每个云 vault 1:1 绑定一个本地空间，故拉/推都按 spaceId 切分。无 spaceId 字段
+   * 的历史条目归入默认空间（与 spaceIdOfPayload 一致）。
+   */
+  async listItemsForSpace(spaceId: string): Promise<ItemPayload[]> {
+    const all = await this.listItems();
+    return all.filter((p) => spaceIdOfPayload(p) === spaceId);
+  }
+
+  /** 列出某空间下的回收站（墓碑）条目（云同步推送墓碑用）。 */
+  async listDeletedForSpace(spaceId: string): Promise<ItemPayload[]> {
+    const all = await this.listDeleted();
+    return all.filter((p) => spaceIdOfPayload(p) === spaceId);
+  }
+
+  /**
    * 从回收站恢复 —— 清除 deletedAt 并 LWW bump（updatedAt 单调递增 + revision++）。
    *
    * 不做物理 purge：sync 模型下其它端仍保有 tombstone，本地物理删除会在下次
@@ -865,6 +1031,9 @@ export class VaultService {
    *   - 本端不存在则插入；存在但本端较新则跳过；否则覆盖
    *   - tombstone 走 deleteItem 路径，本函数 payload 视作非删除
    *   - force=true 跳过 LWW 比较强制覆盖（云同步「采用对端」冲突解决用）
+   *   - spaceId 非空时改写 fields.spaceId 为目标空间——多空间模型下「条目归属由其所在云 vault
+   *     的绑定空间决定」，与 desktop space_id 列对齐；这使换绑 vault 到另一空间时条目随之迁移。
+   *     空（''）时保留 payload 自带的 spaceId（P2P/LAN 同步传整份 payload，无需改写）。
    *
    * 返回 'inserted' / 'updated' / 'skipped' 用于调用方进度统计。
    */
@@ -873,15 +1042,18 @@ export class VaultService {
     payload: ItemPayload,
     createdAt: number,
     updatedAt: number,
+    spaceId: string = '',
     force: boolean = false,
   ): Promise<'inserted' | 'updated' | 'skipped'> {
     this.requireUnlocked();
     if (!id) throw new VaultError('not-found', 'ingest: empty id');
+    const fields = cloneFieldsRecord(payload.fields);
+    if (spaceId) fields.spaceId = spaceId;
     const normalized: ItemPayload = {
       id,
       type: payload.type,
       name: payload.name,
-      fields: payload.fields ?? ({} as Record<string, Object>),
+      fields,
       createdAt,
       updatedAt,
       revision: payload.revision ?? 1,
@@ -915,7 +1087,7 @@ export class VaultService {
    *   - 本端较新（updatedAt >= 对端）→ 'skipped'（本端编辑胜出，留给 push 阶段）
    *   - 否则 → 落 tombstone，deletedAt/updatedAt 对齐对端
    */
-  async ingestForeignDeletion(id: string, updatedAt: number, force: boolean = false): Promise<'deleted' | 'skipped'> {
+  async ingestForeignDeletion(id: string, updatedAt: number, spaceId: string = '', force: boolean = false): Promise<'deleted' | 'skipped'> {
     this.requireUnlocked();
     if (!id) throw new VaultError('not-found', 'ingest: empty id');
     const file = await readVaultFile();
@@ -938,11 +1110,13 @@ export class VaultService {
       await writeVaultFile(file);
       return 'deleted';
     }
+    const tfields = cloneFieldsRecord(existing.fields);
+    if (spaceId) tfields.spaceId = spaceId;
     const tombstone: ItemPayload = {
       id: existing.id,
       type: existing.type,
       name: existing.name,
-      fields: existing.fields,
+      fields: tfields,
       createdAt: existing.createdAt,
       updatedAt,
       deletedAt: updatedAt,
@@ -1008,6 +1182,12 @@ export interface SpacesSnapshot {
   activeSpaceId: string;
 }
 
+/** 空间增删事件（registerSpaceHook 回调入参）。kind: 'create' | 'rename' | 'delete'。 */
+export interface SpaceMutationEvent {
+  kind: string;
+  spaceId: string;
+}
+
 /* ----------------------------------------------------------------------------
  * 进程级单例
  * -------------------------------------------------------------------------- */
@@ -1044,6 +1224,11 @@ export function readSpaceIdFromFields(
   if (!fields) return undefined;
   const v = fields.spaceId;
   return typeof v === 'string' && v ? (v as string) : undefined;
+}
+
+/** 取条目所属空间 id（无 spaceId 字段的历史条目归入默认空间）—— 云同步按空间切分的统一口径。 */
+export function spaceIdOfPayload(p: ItemPayload): string {
+  return readSpaceIdFromFields(p.fields) ?? DEFAULT_SPACE_ID;
 }
 
 /**

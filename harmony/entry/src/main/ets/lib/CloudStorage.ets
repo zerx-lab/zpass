@@ -3,20 +3,26 @@
 // 落到应用沙箱 filesDir 下的 zpass-cloud-v1.json（与 VaultStorage / AppSettings 同源，
 // filesDir 由 EntryAbility.onCreate 写入 AppStorage）。
 //
+// 多空间模型（与 desktop cloud_vaults 表对齐）：每个本地空间 ↔ 一个云 vault（1:1），
+// 一份账户记录下挂多条 {spaceId, vaultId, cursor} 绑定。自动镜像：未绑定且未被显式
+// 解绑（detached）的空间在登录/新建空间时自动创建云 vault。
+//
 // 存什么 / 不存什么（零知识取舍）：
 //   - 存：baseUrl / email / accountId / secretKey(Z1) / JWT token / userId / tenantId /
-//         已绑定云 vault 的 {vaultId, cursor} / 每条目同步水位（增量同步用）
+//         每空间绑定 {spaceId, vaultId, cursor} / 每空间每条目同步水位 / 解绑空间清单
 //   - 不存：主密码、AUK、账户私钥、per-vault key —— 这些只在内存会话里，随锁定清除。
 //   secretKey 单独无法解锁账户（2SKD 需要主密码），token 仅 24h；落沙箱（应用隔离 +
 //   设备加密）可接受。更强的 HUKS 包裹留作后续硬化（见 MIGRATION）。
 //
-// 增量同步的 per-item 水位（对应 desktop cloud_item_state 表）按本地 id 键存：
+// 增量同步的 per-item 水位（对应 desktop cloud_item_state 表）按 [spaceId][本地 id] 嵌套存：
 //   { seq, syncedHash, syncedAt, deleted } —— synced_hash 已是 vault-key 派生的不透明
 //   token，不含密钥；用于判定「本地条目自上次收敛后是否变更」与 CAS base_seq。
 //
 // 写策略：读-改-写整份（与 AppSettings 一致）；损坏/缺失时回退空状态（可经重新登录恢复）。
+// 旧版单 vault 格式（{vault, 扁平 syncState}）在 load 时迁移到默认空间。
 
 import { fileIo as fs } from '@kit.CoreFileKit';
+import { DEFAULT_SPACE_ID } from './Spaces';
 
 const CLOUD_FILE: string = 'zpass-cloud-v1.json';
 const FILES_DIR_KEY: string = 'filesDir';
@@ -37,14 +43,17 @@ export interface CloudAccountRecord {
   secrets: string;
 }
 
-/** 已绑定的云 vault（鸿蒙单文件 vault ↔ 单云 vault，1:1）。 */
+/** 一条空间 ↔ 云 vault 绑定（多空间下每空间一条；对应 desktop cloud_vaults 行）。 */
 export interface CloudVaultBinding {
+  /** 本地空间 id（默认空间为 'default'）。 */
+  spaceId: string;
+  /** 服务端分配的云 vault id。 */
   vaultId: string;
   /** 上次拉取 snapshot 的高水位 current_seq（增量同步的 delta 起点；0 = 从未对账）。 */
   cursor: number;
 }
 
-/** 单条目同步水位（对应 desktop cloud_item_state 行），按本地 id 键存。 */
+/** 单条目同步水位（对应 desktop cloud_item_state 行），按 [spaceId][本地 id] 嵌套键存。 */
 export interface CloudItemSyncState {
   /** 该条目最后已知的服务端 seq —— CAS base_seq 来源。 */
   seq: number;
@@ -58,9 +67,38 @@ export interface CloudItemSyncState {
 
 export interface CloudState {
   account: CloudAccountRecord | null;
-  vault: CloudVaultBinding | null;
-  /** 按本地 id 键的 per-item 同步水位（增量同步用）。 */
-  syncState: Record<string, CloudItemSyncState> | null;
+  /** 每空间绑定（无绑定为空数组）。 */
+  vaults: CloudVaultBinding[];
+  /** 嵌套 per-space per-item 同步水位：syncState[spaceId][itemId]。 */
+  syncState: Record<string, Record<string, CloudItemSyncState>> | null;
+  /** 用户显式解绑、不参与自动镜像的 spaceId 列表。 */
+  detached: string[] | null;
+  /** vault 删除墓碑游标（已处理到的最大 seq；单调推进，按当前账户解释）。 */
+  tombstoneCursor: number;
+  /** 待删除的云 vault id 列表（本端发起删除失败，reconcile 幂等重试）。 */
+  pendingRemoteDeletes: string[] | null;
+}
+
+/* ----------------------------------------------------------------------------
+ * 旧版 / 原始读入形状（兼容迁移用，逐字段 typeof 校验）
+ * -------------------------------------------------------------------------- */
+
+interface RawSingleVault {
+  vaultId?: string;
+  cursor?: number;
+}
+
+interface RawCloudState {
+  account?: CloudAccountRecord | null;
+  /** 旧版单 vault 绑定（无 spaceId）。 */
+  vault?: RawSingleVault | null;
+  /** 新版每空间绑定。 */
+  vaults?: CloudVaultBinding[] | null;
+  /** 形状二义：旧版为 Record<itemId, state>，新版为 Record<spaceId, Record<itemId, state>>。 */
+  syncState?: Record<string, Object> | null;
+  detached?: string[] | null;
+  tombstoneCursor?: number;
+  pendingRemoteDeletes?: string[] | null;
 }
 
 function cloudPath(): string | null {
@@ -70,21 +108,24 @@ function cloudPath(): string | null {
 }
 
 function emptyState(): CloudState {
-  return { account: null, vault: null, syncState: null };
+  return { account: null, vaults: [], syncState: null, detached: null, tombstoneCursor: 0, pendingRemoteDeletes: null };
 }
 
-/** 读云状态；不存在/损坏时回退空。 */
+/** 读云状态；不存在/损坏时回退空。旧版单 vault 格式自动迁移到默认空间。 */
 export async function loadCloudState(): Promise<CloudState> {
   const path = cloudPath();
   if (!path) return emptyState();
   try {
     if (!(await fs.access(path))) return emptyState();
     const text = await fs.readText(path);
-    const parsed = JSON.parse(text) as CloudState;
+    const parsed = JSON.parse(text) as RawCloudState;
     return {
       account: normalizeAccount(parsed.account),
-      vault: normalizeVault(parsed.vault),
+      vaults: normalizeVaults(parsed),
       syncState: normalizeSyncState(parsed.syncState),
+      detached: normalizeDetached(parsed.detached),
+      tombstoneCursor: typeof parsed.tombstoneCursor === 'number' ? parsed.tombstoneCursor : 0,
+      pendingRemoteDeletes: normalizeDetached(parsed.pendingRemoteDeletes),
     };
   } catch (_e) {
     return emptyState();
@@ -105,27 +146,97 @@ function normalizeAccount(a: CloudAccountRecord | null | undefined): CloudAccoun
   };
 }
 
-function normalizeVault(v: CloudVaultBinding | null | undefined): CloudVaultBinding | null {
-  if (!v || typeof v.vaultId !== 'string' || !v.vaultId) return null;
-  return { vaultId: v.vaultId, cursor: typeof v.cursor === 'number' ? v.cursor : 0 };
-}
-
-function normalizeSyncState(
-  s: Record<string, CloudItemSyncState> | null | undefined,
-): Record<string, CloudItemSyncState> | null {
-  if (!s || typeof s !== 'object') return null;
-  const out: Record<string, CloudItemSyncState> = JSON.parse('{}') as Record<string, CloudItemSyncState>;
-  for (const id of Object.keys(s)) {
-    const e = s[id];
-    if (!e || typeof e.seq !== 'number') continue;
-    out[id] = {
-      seq: e.seq,
-      syncedHash: typeof e.syncedHash === 'string' ? e.syncedHash : '',
-      syncedAt: typeof e.syncedAt === 'number' ? e.syncedAt : 0,
-      deleted: e.deleted === true,
-    };
+/** 归一化每空间绑定；新版优先，否则把旧版单 vault 迁移到默认空间。 */
+function normalizeVaults(parsed: RawCloudState): CloudVaultBinding[] {
+  const out: CloudVaultBinding[] = [];
+  const seenSpace = new Set<string>();
+  const seenVault = new Set<string>();
+  const arr = parsed.vaults;
+  if (arr && Array.isArray(arr)) {
+    for (const v of arr) {
+      if (!v || typeof v.vaultId !== 'string' || !v.vaultId) continue;
+      const spaceId = typeof v.spaceId === 'string' && v.spaceId ? v.spaceId : DEFAULT_SPACE_ID;
+      if (seenSpace.has(spaceId) || seenVault.has(v.vaultId)) continue; // 1:1 去重
+      seenSpace.add(spaceId);
+      seenVault.add(v.vaultId);
+      out.push({ spaceId, vaultId: v.vaultId, cursor: typeof v.cursor === 'number' ? v.cursor : 0 });
+    }
+    return out;
+  }
+  // 旧版迁移：单 vault → 默认空间
+  const legacy = parsed.vault;
+  if (legacy && typeof legacy.vaultId === 'string' && legacy.vaultId) {
+    out.push({
+      spaceId: DEFAULT_SPACE_ID,
+      vaultId: legacy.vaultId,
+      cursor: typeof legacy.cursor === 'number' ? legacy.cursor : 0,
+    });
   }
   return out;
+}
+
+/** 某个值是否「扁平 item 水位」（旧版形状判定）。 */
+function looksLikeItemState(v: Object | undefined | null): boolean {
+  if (!v || typeof v !== 'object') return false;
+  const r = v as Record<string, Object>;
+  return typeof r.seq === 'number';
+}
+
+function normalizeItemState(e: CloudItemSyncState | undefined | null): CloudItemSyncState | null {
+  if (!e || typeof e.seq !== 'number') return null;
+  return {
+    seq: e.seq,
+    syncedHash: typeof e.syncedHash === 'string' ? e.syncedHash : '',
+    syncedAt: typeof e.syncedAt === 'number' ? e.syncedAt : 0,
+    deleted: e.deleted === true,
+  };
+}
+
+function normalizeFlatStates(
+  s: Record<string, CloudItemSyncState>,
+): Record<string, CloudItemSyncState> {
+  const out: Record<string, CloudItemSyncState> = JSON.parse('{}') as Record<string, CloudItemSyncState>;
+  for (const id of Object.keys(s)) {
+    const st = normalizeItemState(s[id]);
+    if (st) out[id] = st;
+  }
+  return out;
+}
+
+/**
+ * 归一化 syncState；二义形状自动判定：
+ *   - 旧版 Record<itemId, state>（值含数字 seq）→ 整体挪到默认空间。
+ *   - 新版 Record<spaceId, Record<itemId, state>> → 逐空间归一化。
+ */
+function normalizeSyncState(
+  s: Record<string, Object> | null | undefined,
+): Record<string, Record<string, CloudItemSyncState>> | null {
+  if (!s || typeof s !== 'object') return null;
+  const keys = Object.keys(s);
+  if (keys.length === 0) return null;
+  const out: Record<string, Record<string, CloudItemSyncState>> =
+    JSON.parse('{}') as Record<string, Record<string, CloudItemSyncState>>;
+  // 旧版扁平：首个值像 item 水位
+  if (looksLikeItemState(s[keys[0]])) {
+    out[DEFAULT_SPACE_ID] = normalizeFlatStates(s as Record<string, CloudItemSyncState>);
+    return out;
+  }
+  // 新版嵌套：每个 key 是 spaceId
+  for (const spaceId of keys) {
+    const inner = s[spaceId];
+    if (!inner || typeof inner !== 'object') continue;
+    out[spaceId] = normalizeFlatStates(inner as Record<string, CloudItemSyncState>);
+  }
+  return out;
+}
+
+function normalizeDetached(d: string[] | null | undefined): string[] | null {
+  if (!d || !Array.isArray(d)) return null;
+  const out: string[] = [];
+  for (const id of d) {
+    if (typeof id === 'string' && id && out.indexOf(id) < 0) out.push(id);
+  }
+  return out.length > 0 ? out : null;
 }
 
 /** 写整份云状态。失败抛错（调用方决定是否吞掉）。 */

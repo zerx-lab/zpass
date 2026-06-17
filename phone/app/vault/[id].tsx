@@ -674,7 +674,7 @@ function DetailBody({
       );
     case "passkey":
       return (
-        <Section title="通行密钥">
+        <Section title="Passkey">
           <FieldRow label="依赖方 (RP)" value={item.rpId} c={c} />
           <FieldRow label="用户名" value={item.userName ?? ""} c={c} />
           <FieldRow

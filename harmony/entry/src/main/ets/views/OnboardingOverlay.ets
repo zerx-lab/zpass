@@ -14,8 +14,9 @@ import { safeAreaState, SafeAreaState } from '../state/SafeArea';
 import { SpaceAvatar } from '../components/SpaceAvatar';
 import { DEFAULT_SPACE_ID } from '../lib/Spaces';
 import { isNativeKDF } from '../lib/Crypto';
+import { router } from '@kit.ArkUI';
 
-type Step = 'password' | 'space';
+type Step = 'choice' | 'password' | 'space';
 
 @ComponentV2
 export struct OnboardingOverlay {
@@ -23,7 +24,7 @@ export struct OnboardingOverlay {
   @Local zc: ZColorsClass = ZColors;
   @Local store: VaultStore = vaultStore;
 
-  @Local step: Step = 'password';
+  @Local step: Step = 'choice';
   @Local password: string = '';
   @Local confirm: string = '';
   @Local spaceName: string = '';
@@ -32,6 +33,21 @@ export struct OnboardingOverlay {
   // reveal toggles for each password field
   @Local pwRevealed: boolean = false;
   @Local cfRevealed: boolean = false;
+
+  /** 步骤切换的「缓入」动画开关：切步时新卡片先 opacity 0 挂载，下一帧置 1 触发 .animation 淡入，
+   *  与点「登录云端」push 页面的过渡观感一致（避免本地步骤闪现进入）。 */
+  @Local cardIn: boolean = true;
+
+  /**
+   * 带「缓入」动画切换步骤：先切到目标步并把新卡片置 opacity 0 挂载，下一帧再置 1，
+   * 由卡片上的 .animation() 完成淡入——与点「登录云端」push 页面的过渡观感一致。
+   */
+  private goStep(next: Step): void {
+    this.errorText = '';
+    this.step = next;
+    this.cardIn = false;
+    setTimeout(() => { this.cardIn = true; }, 30);
+  }
 
   private onNext(): void {
     if (this.password.length < 8) {
@@ -42,13 +58,39 @@ export struct OnboardingOverlay {
       this.errorText = '两次输入不一致';
       return;
     }
-    this.errorText = '';
-    this.step = 'space';
+    this.goStep('space');
   }
 
   private onBack(): void {
+    this.goStep('password');
+  }
+
+  /** 选择「登录云端」：直接进入云账户登录/注册（本地保险库将在云登录成功后用同一主密码自动创建）。 */
+  private onChooseCloud(): void {
     this.errorText = '';
-    this.step = 'password';
+    router.pushUrl({ url: 'pages/CloudAccount' }).catch(() => {});
+  }
+
+  /** 选择「仅本地使用」：进入设主密码步骤。 */
+  private onChooseLocal(): void {
+    this.goStep('password');
+  }
+
+  /** 从设主密码步骤返回选择页。 */
+  private onBackToChoice(): void {
+    this.goStep('choice');
+  }
+
+  private titleText(): string {
+    if (this.step === 'choice') return '欢迎使用 ZPass';
+    if (this.step === 'password') return '设置主密码';
+    return '为空间取个名字';
+  }
+
+  private subtitleText(): string {
+    if (this.step === 'choice') return '选择使用方式';
+    if (this.step === 'password') return '设置主密码以加密你的保险库';
+    return '头像首字符会跟随名字';
   }
 
   private async onSubmit(): Promise<void> {
@@ -115,19 +157,14 @@ export struct OnboardingOverlay {
     return estimateStrength(this.password);
   }
 
-  @Computed
-  get isPasswordStep(): boolean {
-    return this.step === 'password';
-  }
-
   build() {
     Column() {
       Row().height(this.safeArea.top).width('100%');
 
       Scroll() {
         Column({ space: ZSpacing.lg }) {
-          // 顶部 logo —— 第一步显示 Z，第二步显示 SpaceAvatar
-          if (this.isPasswordStep) {
+          // 顶部 logo —— 选择/密码步显示 Z，空间步显示 SpaceAvatar
+          if (this.step !== 'space') {
             Column() {
               Text('Z')
                 .fontSize(32)
@@ -157,12 +194,12 @@ export struct OnboardingOverlay {
 
           // 标题 / 副标题
           Column({ space: ZSpacing.xs }) {
-            Text(this.isPasswordStep ? '欢迎使用 ZPass' : '为空间取个名字')
+            Text(this.titleText())
               .fontSize(ZType.titleSize)
               .fontWeight(FontWeight.Bold)
               .fontColor(this.zc.text)
               .textAlign(TextAlign.Center);
-            Text(this.isPasswordStep ? '设置主密码以加密你的保险库' : '头像首字符会跟随名字')
+            Text(this.subtitleText())
               .fontSize(ZType.footnoteSize)
               .fontColor(this.zc.text3)
               .textAlign(TextAlign.Center);
@@ -170,57 +207,84 @@ export struct OnboardingOverlay {
           .alignItems(HorizontalAlign.Center)
           .width('100%');
 
-          // 步骤指示器
-          Row({ space: 4 }) {
-            Row()
-              .width(8)
-              .height(8)
-              .borderRadius(4)
-              .backgroundColor(this.zc.accent);
-            Row()
-              .width(32)
-              .height(2)
-              .borderRadius(1)
-              .backgroundColor(this.step === 'space' ? this.zc.accent : this.zc.bgActive);
-            Row()
-              .width(8)
-              .height(8)
-              .borderRadius(4)
-              .backgroundColor(this.step === 'space' ? this.zc.accent : this.zc.bgActive);
+          // 步骤指示器（选择步不显示）
+          if (this.step !== 'choice') {
+            Row({ space: 4 }) {
+              Row()
+                .width(8)
+                .height(8)
+                .borderRadius(4)
+                .backgroundColor(this.zc.accent);
+              Row()
+                .width(32)
+                .height(2)
+                .borderRadius(1)
+                .backgroundColor(this.step === 'space' ? this.zc.accent : this.zc.bgActive);
+              Row()
+                .width(8)
+                .height(8)
+                .borderRadius(4)
+                .backgroundColor(this.step === 'space' ? this.zc.accent : this.zc.bgActive);
+            }
+            .justifyContent(FlexAlign.Center);
           }
-          .justifyContent(FlexAlign.Center);
 
           // 主卡片
-          if (this.isPasswordStep) {
+          if (this.step === 'choice') {
+            this.choiceCard();
+          } else if (this.step === 'password') {
             this.passwordCard();
           } else {
             this.spaceCard();
           }
 
-          // 底部按钮区
-          if (this.isPasswordStep) {
-            // 下一步按钮（带右箭头图标）
-            Row() {
-              Text('下一步')
-                .fontSize(ZType.bodySize)
-                .fontWeight(FontWeight.Medium)
-                .fontColor(this.zc.accentInk)
-                .layoutWeight(1)
-                .textAlign(TextAlign.End);
-              Image($r('app.media.ic_arrow_right'))
-                .width(16)
-                .height(16)
-                .fillColor(this.zc.accentInk)
-                .margin({ left: ZSpacing.xs });
+          // 底部按钮区（选择步无按钮，操作在 choiceCard 内）
+          if (this.step === 'password') {
+            // 返回（到选择）+ 下一步
+            Row({ space: ZSpacing.sm }) {
+              Row() {
+                Image($r('app.media.ic_arrow_left'))
+                  .width(16)
+                  .height(16)
+                  .fillColor(this.zc.text)
+                  .margin({ right: ZSpacing.xs });
+                Text('返回')
+                  .fontSize(ZType.bodySize)
+                  .fontColor(this.zc.text);
+              }
+              .backgroundColor(this.zc.bgElev)
+              .borderRadius(ZRadius.lg)
+              .height(48)
+              .padding({ left: ZSpacing.md, right: ZSpacing.md })
+              .justifyContent(FlexAlign.Center)
+              .alignItems(VerticalAlign.Center)
+              .onClick(() => this.onBackToChoice());
+
+              Row() {
+                Text('下一步')
+                  .fontSize(ZType.bodySize)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(this.zc.accentInk)
+                  .layoutWeight(1)
+                  .textAlign(TextAlign.End);
+                Image($r('app.media.ic_arrow_right'))
+                  .width(16)
+                  .height(16)
+                  .fillColor(this.zc.accentInk)
+                  .margin({ left: ZSpacing.xs });
+              }
+              .backgroundColor(this.zc.accent)
+              .borderRadius(ZRadius.lg)
+              .height(48)
+              .layoutWeight(1)
+              .padding({ left: ZSpacing.md, right: ZSpacing.md })
+              .justifyContent(FlexAlign.Center)
+              .alignItems(VerticalAlign.Center)
+              .onClick(() => this.onNext());
             }
-            .backgroundColor(this.zc.accent)
-            .borderRadius(ZRadius.lg)
-            .height(48)
             .width('100%')
-            .padding({ left: ZSpacing.xl, right: ZSpacing.md })
-            .justifyContent(FlexAlign.Center)
-            .alignItems(VerticalAlign.Center)
-            .onClick(() => this.onNext());
+            .opacity(this.cardIn ? 1 : 0)
+            .animation({ duration: 240, curve: Curve.EaseOut });
 
             // KDF 派生时间提示
             Text(this.kdfHintText())
@@ -229,7 +293,7 @@ export struct OnboardingOverlay {
               .fontFamily('HarmonyOS Sans Condensed')
               .textAlign(TextAlign.Center)
               .width('100%');
-          } else {
+          } else if (this.step === 'space') {
             // 返回 + 创建保险库
             Row({ space: ZSpacing.sm }) {
               // 返回按钮（带左箭头图标）
@@ -278,7 +342,9 @@ export struct OnboardingOverlay {
               .enabled(!this.store.busy)
               .onClick(() => this.onSubmit());
             }
-            .width('100%');
+            .width('100%')
+            .opacity(this.cardIn ? 1 : 0)
+            .animation({ duration: 240, curve: Curve.EaseOut });
 
             // 创建后提示
             Text('创建后随时可在「我的 → 空间」里重命名')
@@ -354,6 +420,50 @@ export struct OnboardingOverlay {
     .backgroundColor(alpha1f(this.zc.danger))
     .borderRadius(ZRadius.md)
     .margin({ top: ZSpacing.sm });
+  }
+
+  /** 选择步：登录云端 / 仅本地两张可点卡片。 */
+  @Builder
+  choiceCard() {
+    Column({ space: ZSpacing.md }) {
+      // 登录云端（主选项：accent 描边）
+      Column({ space: ZSpacing.xs }) {
+        Row({ space: ZSpacing.sm }) {
+          Image($r('app.media.ic_globe')).width(20).height(20).fillColor(this.zc.text);
+          Text('登录云端账户')
+            .fontSize(ZType.bodySize).fontWeight(FontWeight.Medium).fontColor(this.zc.text).layoutWeight(1);
+          Image($r('app.media.ic_arrow_right')).width(16).height(16).fillColor(this.zc.text3);
+        }
+        .width('100%').alignItems(VerticalAlign.Center);
+        Text('注册或登录云账户，多设备端到端加密同步。')
+          .fontSize(ZType.captionSize).fontColor(this.zc.text3).lineHeight(16).width('100%');
+      }
+      .width('100%').padding(ZSpacing.lg)
+      .backgroundColor(this.zc.bg).borderRadius(ZRadius.lg)
+      .border({ width: 1, color: this.zc.accent })
+      .onClick(() => this.onChooseCloud());
+
+      // 仅本地使用
+      Column({ space: ZSpacing.xs }) {
+        Row({ space: ZSpacing.sm }) {
+          Image($r('app.media.ic_lock')).width(20).height(20).fillColor(this.zc.text);
+          Text('仅在本设备使用')
+            .fontSize(ZType.bodySize).fontWeight(FontWeight.Medium).fontColor(this.zc.text).layoutWeight(1);
+          Image($r('app.media.ic_arrow_right')).width(16).height(16).fillColor(this.zc.text3);
+        }
+        .width('100%').alignItems(VerticalAlign.Center);
+        Text('数据只保存在本机，不联网；之后也可随时开通云同步。')
+          .fontSize(ZType.captionSize).fontColor(this.zc.text3).lineHeight(16).width('100%');
+      }
+      .width('100%').padding(ZSpacing.lg)
+      .backgroundColor(this.zc.bg).borderRadius(ZRadius.lg)
+      .border({ width: 1, color: this.zc.line })
+      .onClick(() => this.onChooseLocal());
+    }
+    .width('100%').padding(ZSpacing.lg)
+    .backgroundColor(this.zc.bgElev).borderRadius(ZRadius.xl)
+    .opacity(this.cardIn ? 1 : 0)
+    .animation({ duration: 240, curve: Curve.EaseOut });
   }
 
   @Builder
@@ -502,7 +612,9 @@ export struct OnboardingOverlay {
     .padding(ZSpacing.lg)
     .backgroundColor(this.zc.bgElev)
     .borderRadius(ZRadius.xl)
-    .clip(true);
+    .clip(true)
+    .opacity(this.cardIn ? 1 : 0)
+    .animation({ duration: 240, curve: Curve.EaseOut });
   }
 
   /** 单条安全说明行：圆形勾徽标 + 文本 */
@@ -589,6 +701,8 @@ export struct OnboardingOverlay {
     .padding(ZSpacing.lg)
     .backgroundColor(this.zc.bgElev)
     .borderRadius(ZRadius.xl)
-    .clip(true);
+    .clip(true)
+    .opacity(this.cardIn ? 1 : 0)
+    .animation({ duration: 240, curve: Curve.EaseOut });
   }
 }

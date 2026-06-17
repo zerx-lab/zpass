@@ -59,7 +59,7 @@ const TYPE_LABELS_MAP: Map<VaultItemType, string> = new Map<VaultItemType, strin
   ['note', '安全笔记'],
   ['identity', '身份信息'],
   ['ssh', 'SSH 密钥'],
-  ['passkey', '通行密钥'],
+  ['passkey', 'Passkey'],
   ['totp', '验证码'],
 ]);
 

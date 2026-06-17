@@ -17,3 +17,15 @@ export function appVersionName(): string {
     return '—';
   }
 }
+
+/** 是否 debug/可调试安装包（dev 模式判定，用于放出云服务地址覆盖等开发者入口）。读取失败回退 false。 */
+export function appIsDebug(): boolean {
+  try {
+    const info = bundleManager.getBundleInfoForSelfSync(
+      bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION,
+    );
+    return info.appInfo.debug === true;
+  } catch (_e) {
+    return false;
+  }
+}

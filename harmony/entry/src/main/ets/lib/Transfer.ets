@@ -20,7 +20,7 @@
 //   - 条目支持 ItemPayload 形(fields map)与旧版平铺形(字段散在顶层)。
 
 import { fileIo as fs, picker } from '@kit.CoreFileKit';
-import { vaultService, type ItemPayload, type VaultItemType } from './VaultService';
+import { vaultService, type ImportItemDraft, type ItemPayload, type VaultItemType } from './VaultService';
 import { common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
 
@@ -59,12 +59,6 @@ const FLAT_META_KEYS: ReadonlySet<string> = new Set<string>([
   'fields',
 ]);
 
-interface ImportDraft {
-  type: VaultItemType;
-  name: string;
-  fields: Record<string, Object>;
-}
-
 function asRecord(v: Object | undefined | null): Record<string, Object> | null {
   if (v === undefined || v === null) return null;
   if (typeof v !== 'object') return null;
@@ -85,7 +79,7 @@ function extractItems(parsed: Object): Object[] {
  *   - desktop / 新版 phone / harmony：已是 ItemPayload 形，取 fields。
  *   - 旧版平铺形：把非元数据键收拢进 fields，customFields 落到 _customFields。
  */
-function normalizeToDraft(o: Object): ImportDraft | null {
+function normalizeToDraft(o: Object): ImportItemDraft | null {
   const rec = asRecord(o);
   if (rec === null) return null;
   const rawType = rec.type;
@@ -174,10 +168,13 @@ export async function exportVaultToFile(context: common.Context): Promise<string
  *
  * 规则：
  *  - 严格校验 format 字段（zpass-export-v1）
- *  - 每条 item 通过 vaultService.createItem 重新加密入库（生成新 id）
+ *  - 每条 item 通过 vaultService.importItems 批量重新加密入库（生成新 id），一次写盘
  *  - 返回成功导入的条数
  */
-export async function importVaultFromFile(context: common.Context): Promise<number> {
+export async function importVaultFromFile(
+  context: common.Context,
+  onProgress?: (done: number, total: number) => void,
+): Promise<number> {
   const documentSelectOptions = new picker.DocumentSelectOptions();
   documentSelectOptions.maxSelectNumber = 1;
   // OHOS 没有显式 mime filter for JSON；让用户自己挑
@@ -225,16 +222,10 @@ export async function importVaultFromFile(context: common.Context): Promise<numb
     throw new Error('文件中没有可导入的条目');
   }
 
-  let imported = 0;
+  const drafts: ImportItemDraft[] = [];
   for (const raw of rawItems) {
     const draft = normalizeToDraft(raw);
-    if (draft === null) continue;
-    try {
-      await vaultService.createItem(draft.type, draft.name, draft.fields);
-      imported++;
-    } catch (_e) {
-      // 单条失败不中断整体
-    }
+    if (draft !== null) drafts.push(draft);
   }
-  return imported;
+  return await vaultService.importItems(drafts, onProgress);
 }

@@ -412,6 +412,8 @@ export const zh: Strings = {
   import_skip_reason_map_error: "字段映射出错",
   import_dropped_dupe_title: "将跳过的重名条目",
   import_no_space: "请先选择空间",
+  import_parsing: "解析中…",
+  import_busy_hint: "正在导入，请勿关闭窗口。",
 
   // ── 导出对话框 ──
   export_title: "导出保险库",
@@ -943,7 +945,11 @@ export const zh: Strings = {
   cloud_err_unknown: "同步出错：{{detail}}",
   // 设置区块
   cloud_settings_title: "云端同步",
-  cloud_settings_desc: "通过 ZPass 账户在多设备间安全同步保险库。",
+  cloud_dev_server_title: "开发者 · 云服务地址",
+  cloud_dev_server_online: "线上",
+  cloud_dev_server_local: "本地",
+  cloud_dev_server_save: "保存",
+  cloud_dev_server_current: "当前：{{url}}",
   cloud_not_signed_in: "未登录",
   cloud_signin_btn: "登录",
   cloud_signout: "退出登录",

@@ -24,7 +24,7 @@ const ITEM_TYPE_ROWS: { label: string; type: VaultItemType; icon: IconName }[] =
     { label: "安全笔记", type: "note", icon: "note.text" },
     { label: "身份信息", type: "identity", icon: "person.crop.circle.fill" },
     { label: "SSH 密钥", type: "ssh", icon: "terminal.fill" },
-    { label: "通行密钥", type: "passkey", icon: "key.horizontal.fill" },
+    { label: "Passkey", type: "passkey", icon: "key.horizontal.fill" },
   ];
 
 function countByType(items: VaultItem[]): Record<string, number> {

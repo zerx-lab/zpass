@@ -155,6 +155,76 @@
 
 > **验证范围**：自定义字段写端为纯 ArkTS 逻辑改动；云加固复用既有 HUKS（信任设备已验证的 init/finish 会话流）+ 系统 http，`cargo` 不涉及。仍**无 DevEco SDK / 设备**：HUKS 云密钥读写、JWT sid 自吊销、MFA 端到端需真机联调。
 
+### Phase 12 ✅ 登录即下拉云端空间（双向自动镜像，对标 1Password）
+
+修复「登录选择云端同步时，云端已有的空间不在本地创建/同步」的缺口：`CloudService.doReconcile` 此前只做**本地 → 云**单向（按名领养 + 为本地空间建库），漏了 desktop `stores/cloud-mirror.ts` 的**云 → 本地**一步，导致新设备登录后看不到账户已有的保险库。实现方式与 desktop 不完全一致（desktop 在渲染层 store + 其本地新库无默认空间；harmony 在 `CloudService` 单例 + `ensureDefaultsInSnapshot` 恒有默认空间），故按 harmony 实际重写。
+
+- **云 → 本地下拉（核心）**：`doReconcile` 遍历账户云 vault，对未绑定者解密空间名——本地有唯一同名空间则领养（`adoptRemoteVault`），无同名则**新建本地空间并绑定**（`vaultService.createSpace(name, silent=true)` + 绑定，cursor=0 → 随后全量同步把条目灌入新空间）。无名旧 vault 跳过，留设置页手动绑定兜底（与 desktop 一致）。
+- **`createSpace` 静默档**：`VaultService.createSpace(name, silent=false)` 新增 `silent`——为 true 时不触发 `fireSpaceMutation('create')`（对应 desktop `createSpaceWithoutAutoLink`）。下拉落地的空间随即绑到**已存在**的云 vault，绝不能再触发自动镜像 mint 新 vault。
+- **默认空间空内容守护（与 desktop 的差异）**：本地 → 云一步中，唯一**自动创建**的默认空间（`id='default'`）在账户已有云 vault 且其自身为空时**不上云**，避免新设备的初始默认空间生成垃圾 vault；用户**显式新建**的空间（`id='sp-…'`）不受限，照常镜像（即便为空）；全新/空账户则连默认一并播种。
+- **解绑空间不复活（harmony 特有）**：harmony 的 `unlinkSpace` 会保留云端 vault 并 detach 本地空间（desktop 的 detached 仅指「云端 vault 已删」）。step 1 遇到与某 detached 同名的云 vault 时整体跳过，不再自动领养/下拉，尊重显式解绑意图（防把刚解绑的同步以「重复空间」复活）。
+- **首次登录焦点切换（1Password 体验）**：`doReconcile` 在首次登录（本地尚无任何绑定）且发生下拉时返回首个下拉空间 id；`reconcileSpaces` 在全量同步**落地后** `maybeFocusPulledSpace` 把激活空间从空的默认切到真实数据空间（仅当前激活空间为空时才切，不抢占用户已有焦点）。
+
+> **验证范围**：纯 ArkTS 逻辑改动，不涉 cargo / Rust（`cryptocore` 未动）。step 1/step 2 决策核（领养 / 下拉新建 / 同名歧义 / 默认守护 / 解绑跳过 / 播种 / 焦点返回）已用等价 JS 模型跑 10 个场景矩阵全通过（fresh 无匹配、默认同名领养、品牌新账户播种、既有账户本地数据、用户空空间、二次解锁稳定、同名双 vault、无名 vault、解绑+活 vault 不复活、解绑不阻塞他者）。仍**无 DevEco SDK / 设备**：登录/解锁触发下拉、条目灌库、焦点切换需真机端到端联调。
+
+### Phase 13 ✅ vault 删除墓碑跨设备传播（主动删除 → 跨端物理删空间）
+
+补齐 Phase 12 遗留的「删除传播」：此前本端删除空间只解绑、保留云端 vault（注「可后续清理」），云端 vault 被其它设备删除时本地也无反应。对接 `zpass_cloud` migration 0004 的 `vault_tombstones`（`seq BIGSERIAL` 单调游标）+ `DELETE /v1/vaults/{id}`（owner 删库写墓碑）+ `GET /v1/vaults/deleted?since=&limit=`（增量拉墓碑）+ SSE `vault_deleted` 事件，实现 desktop `processDeletionTombstones` 的双向能力。
+
+- **emit（本端删空间 → 删云 vault）**：`handleSpaceMutation('delete')` 改为解绑后调 `deleteRemoteVaultBestEffort` 删云 vault（服务端写墓碑）。先 `runSync` 把重指派到 fallback 的条目推上其 vault，再删被删空间的 vault（先保命再删库）。403/404（非 owner / 已删）视终态忽略；网络/500 入 `pendingRemoteDeletes` 队列，reconcile step 0 幂等重试。
+- **consume（云 vault 被删 → 本地物理删空间）**：新增 `CloudService.processDeletionTombstones` 作为 `doReconcile` step 0：按 `tombstoneCursor`（单调）增量拉墓碑，命中本地绑定者 → 拆绑定 + 清水位/key + `vaultService.purgeSpace`（HARD 删条目 + 删空间，区别于 `deleteSpace` 的「重指派 fallback」）。无绑定的墓碑只推进游标。
+- **实时**：SSE `vault_deleted` 事件 → `kickReconcile`，step 0 立即消费墓碑（跨端即时生效，origin_sid 让删除者自身不收回显）。
+- **抗复活加固**：`runSync` 的 404 分支（vault 失踪）除解绑外**追加标记 detached**，杜绝 reconcile step 2 把它当「仅本地空间」重新上云（resurrection）；真「主动删除」由墓碑物理删，「失去访问」走 detached 保留——对应 0004 注释「主动删除 vs 失去访问」的区分。
+- **持久化**：`CloudState` 增 `tombstoneCursor: number` + `pendingRemoteDeletes: string[]`（`CloudStorage` 读写归一化，旧状态缺失回退 0/空）；登出清零。
+- **客户端线缆**：`CloudClient` 增 `listDeletedVaults(since, limit)`（`deleteVault` 早已存在）+ `DeletedVault`/`DeletedVaultsResponse` 类型，字段名 `vault_id`/`seq`/`deleted_at`/`next_cursor`/`has_more` 与服务端 snake_case 对齐。
+
+> **验证范围**：纯 ArkTS + 既有服务端端点，不涉 cargo / Rust（`cryptocore` 未动）。consume/retry/step1-exclude/游标单调 决策核已用等价 JS 模型跑 7 个场景全通过（命中绑定物理删、未绑定只推游标、已消费 no-op、混合页游标取 max、retry 的 ok/403/0 分类、404 终态、step1 排除待删）；叠加 Phase 12 的 10 场景模型仍全绿。仍**无 DevEco SDK / 设备**：删库写墓碑、跨设备拉取消费、SSE vault_deleted 即时删、404→detached 抗复活需真机端到端联调。
+
+### Phase 14 ✅ 无名云 vault 也能下拉 + 404 删除墓碑感知（用户实测「多空间不下拉」修复）
+
+实测发现：账户里**无名云 vault**（无 meta 名——CLI/e2e 播种、老客户端、desktop `name=""` 旧流程所建）登录后不会下拉到本地（设置页「绑定已有」里只显示为 UUID）。根因：Phase 12 的 `doReconcile` step 1 对无名 vault 直接 `continue` 跳过（沿用 desktop「无名留手动绑定」）。经核对 `sealVaultMeta`/`openVaultMeta` 跨端**字节兼容**（AAD `zpass:vault-meta:v1` + `{name,glyph}` JSON），故非解密 bug，确系这些 vault 本就无 meta。
+
+- **无名 vault 下拉**（`CloudService.doReconcile` step 1）：无名 vault 若**有数据**（`item_count>0`）且 **vault key 可解**，用 vault id 派生的确定性兜底名 `云保险库 <前8位>` 新建本地空间并绑定下拉（跨设备同名 → 不重复建空间）；空的无名 vault（疑似垃圾）仍跳过。先验 `ensureVaultKeyFor` 成功再建空间，避免建出无法同步条目的空壳。
+- **404 删除墓碑感知**（`handlePerBindingError` 改 async）：sync 命中 404 时先 `processDeletionTombstones` 区分——有墓碑（owner 主动删）→ 已物理删该空间，收尾返回；无墓碑（被移出 / 瞬时不可见）→ 解绑 + detached 保留。修掉 Phase 13 遗留的「被删 vault 经周期 sync 的 404 把本地默认空间永久 detached、无法再同步」的粗糙边（主动删除现在干净物理删，而非卡在 detached）。
+
+> **验证范围**：纯 ArkTS，不涉 cargo / Rust。无名下拉 / 空跳过 / 密钥不可解跳过 / detached 兜底 / 确定性兜底名不碰撞 / 404 有墓碑→purge、无墓碑→detached 决策核已用等价 JS 模型跑 10 场景全通过。服务端现状经 `docker exec psql` 核对（`vaults`/`vault_tombstones`），确认无名 vault 系无 meta 而非密钥不匹配。真机端到端（无名 vault 落地为「云保险库 xxxxxxxx」空间并同步其条目、404 墓碑物理删）需联调。
+
+### Phase 15 ✅ 重置 / 清空所有数据：覆盖云账户与全部空间（数据管理页）
+
+按用户要求重做 `pages/MeData` 两个危险操作的语义。
+
+- **重置 ZPass = 整机出厂**：`onReset` 在 `vaultStore.reset()`（删主密码 / 空间 / 条目 / 信任设备 key）之外，先 `cloudService.signOut()`——清除本地云账户记录、token、Secret Key、所有空间绑定与同步水位（并 best-effort 吊销当前会话）。修复了此前「重置只删本地 vault 文件，云账户与绑定残留在 `zpass-cloud-v1.json`」的缺口。云端服务器数据不动（可重新登录恢复）。
+- **清空所有条目 → 清空所有数据**：`onClearAllData` 删除**所有空间及其全部条目**（`vaultService.purgeAllData`：回到单个空默认空间，保留主密码），不再只逐条删 item。
+  - **未登录云账户**：警告 + 确认即清本地。
+  - **已登录云账户**：弹浮层**二次验证主密码 + Secret Key**（`vaultService.verifyPassword` 复用信任设备的 KEK→DEK 常量时间比对；`cloudService.verifySecretKey` 去分隔符大写比对），通过后**先删云端所有 owner vault**（`cloudService.clearAllCloudData`，写墓碑 → 跨设备物理删）**再清本地**——云端删除失败即中止、不动本地，避免清空后被下次同步拉回。
+  - **有账户但会话未恢复（MFA / 离线）**：提示先登录再清，避免本地清空被同步拉回。
+- 复用既有原语：`verifyPassword` 由 `enableTrustedDevice` 抽取共用；浮层 MP/SK 输入沿用 `CloudAccount` 的 TextInput 范式。
+
+> **验证范围**：纯 ArkTS，不涉 cargo / Rust。路由（无账户→本地 / 已登录→云浮层 / 有账户无会话→拦截）、验证门（MP 错 / SK 错均中止）、清空顺序（云删失败→**不**清本地，防 resurrection；全 OK→先云后本地）决策核已用等价 JS 模型跑 8 场景全通过。真机端到端（验证浮层、purgeAllData、clearAllCloudData 删库写墓碑、signOut 吊销）需联调。
+
+### Phase 16 ✅ 登录下拉鲁棒性 + 可见性（用户实测「登录不下拉多空间」跟进）
+
+针对「本地空、登录后云端有多空间却没下拉」的反馈，核查 `doReconcile` step 1 下拉逻辑正确、登录链路（`signIn`/`completeMfa` → `kickReconcile` + `onLogin` → `syncNow`）会触发对账。加固两处易被吞掉的边角并补上可见性：
+
+- **对账重跑（防竞态）** `reconcileSpaces`：新增 `reconcilePending`——对账进行中又收到触发时，结束后 `do/while` 重跑一次。修复「首轮在 vault 锁定期空跑、解锁后到来的 `syncNow` 撞上 `reconciling` 仅补 runSync 而漏掉 doReconcile」的窗口，保证登录后最新一次请求必有一次完整下拉。
+- **错误不再静默** `reconcileSpaces`：`doReconcile` 抛错从 `catch {}` 改为写入 `lastError`（同步设置页状态卡已展示），下拉失败可见原因，不再「看起来什么都没发生」。
+- **云端概览可见** `pages/CloudSync`：进入页/立即同步后拉 `listRemoteVaults`，状态卡显示「云端 N 个保险库 · M 个未在本地 / 均已同步」，用户可直接判断云端是否有数据、是否已落本地。
+- **用户向澄清**：设置页「新建并同步」是**上行**（为本地空间在云端新建一个 vault），不是下拉；下拉是登录 / 进入同步页 / 立即同步时**自动**进行。
+
+> **验证范围**：纯 ArkTS，不涉 cargo / Rust。重跑/错误冒泡/概览为控制流与只读展示，决策核（重跑保证完整对账、错误写 lastError）已审阅。服务端经 `docker exec psql` 核对：当前账户仅 1 个**带名但空**的 vault（非多空间带数据），故实测若「无下拉」高度疑似 **设备运行的是未含 Phase 12/14 下拉代码的旧构建**，或连接了与本地 docker 不同的服务端——需 DevEco 重新构建部署并在同步页查看「云端 N 个保险库」核实。
+
+### Phase 17 ✅ 首次使用即选云同步：不留占位默认空间 + 超额手动指定（对标 desktop bootstrapLocalVault）
+
+对齐两条产品规则。**req 1**：首次使用 app 直接选云同步，不应在本地留一个空的「默认」空间——只用云端已有空间下拉到本地。**req 2**：本地空间数超出账户套餐的云保险库上限时，不自动任选要上云的空间，留用户在同步页手动指定。参照 desktop：`SignInPage.bootstrapLocalVault` 首启 `initialize` 后只镜像云端空间，且 desktop 的 `initialize` **根本不建默认空间**（渲染层 spaces store 起始为空）；harmony 的 `VaultService.initialize` 恒建 `id='default'` 空间，故需在下拉后清除该占位符。
+
+- **占位默认空间标记**：`CloudAccount.ensureLocalVault` 仅在 `!st.initialized`（确系为云登录新建本地库）分支 `initialize` 后调 `CloudService.markFreshLocalVault()` 置 `freshLocalVault`。已初始化的本地用户后补登录云端**不**置位，其既有空间（含默认）不受影响。
+- **下拉后清除占位默认（req 1）**：`doReconcile` 一次性消费 `freshLocalVault`；当「首登（`bindings.size===0`）+ 确有云端下拉新建空间（`firstPulledSpaceId` 非空）」时置 `removeDefaultAfterFocus`。`reconcileSpaces` 在 `maybeFocusPulledSpace` 切焦点**后**调 `cleanupPlaceholderDefault`：防御式校验（默认空间仍存在、**未绑定**、**为空**、**非当前激活**、**非唯一空间**）全过才 `purgeSpace('default')`。
+  - 同名领养例外：云端有同名 `默认` vault → step 1 领养本地默认空间（绑定），`firstPulledSpaceId` 不置、默认已绑定 → 清除被跳过，默认空间作为真实云空间保留。
+  - 全新注册（云端空）：`firstPulledSpaceId` 不置 → 不清除；默认空间照常上云成为首个云保险库（对标 desktop 新账户走 onboarding 命名首空间 → 自动上云）。
+- **超额手动指定（req 2）**：`doReconcile` step 2 改为先收集本轮应上云的候选空间，再 `fetchVaultQuota`（`max_vaults` 维度：`limit`/`current`）预判剩余额度。**候选数 > 剩余额度** → 全部标记 `overQuotaSpaces`、不自动建任何 vault，留用户在 `pages/CloudSync` 用每空间「新建并同步 / 绑定已有」**手动指定**（UI 既有，无需改）；额度不可知（离线 / 老服务端）→ 回退「逐个尝试、撞 403 才停」旧行为。每轮对账重算 `overQuotaSpaces`（额度释放后旧超额空间可重新上云）。
+
+> **验证范围**：纯 ArkTS，不涉 cargo / Rust（`cryptocore`/`zpass_cloud` 未动）。环境无 `DEVECO_SDK_HOME`/`HARMONY_NDK_HOME`、`hvigorw`/`ohpm` 不可用，无法 hvigor 构建/真机跑。决策核（首登下拉清默认 / 注册保默认 / 同名领养保默认 / 既有用户非 fresh 全保留 / 超额全标记手动 / 恰好够上传 / 额度未知 try-all / 剩余为 0 预判 / 无名 vault 下拉清默认）已用等价 JS 模型跑 9 场景全通过。真机端到端（首登清占位默认、超额时同步页手动指定上云）需 DevEco 联调。
+
 ## 待完成（后续迭代）
 
 - **主题持久化**：phone 不持久化（每次启动跟随系统）；harmony 当前一致，未来可走 `@ohos.data.preferences`

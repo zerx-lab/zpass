@@ -16,6 +16,7 @@ import {
   Circle,
   CircleDot,
   Cloud,
+  Globe,
   Key,
   ShieldAlert,
   X,
@@ -38,6 +39,7 @@ import {
   signOutCloud,
   syncNow,
 } from "@/lib/cloud-api";
+import { LOCAL_CLOUD_BASE_URL, PROD_CLOUD_BASE_URL } from "@/lib/cloud-env";
 import { translateCloudError } from "@/lib/cloud-errors";
 import { useCloudStore } from "@/stores/cloud";
 import {
@@ -82,6 +84,10 @@ export function CloudSyncSection() {
   const [conflictOpen, setConflictOpen] = useState(false);
   const [conflicts, setConflicts] = useState<SyncConflict[]>([]);
 
+  // dev 模式「开发者 · 云服务地址」快速切换（import.meta.env.DEV 门控展示）
+  const [serverInput, setServerInput] = useState("");
+  const [serverBusy, setServerBusy] = useState(false);
+
   // 已配置且已登录时，拉取当前已绑定的空间列表
   const refreshLinked = useCallback(async () => {
     if (!status?.signedIn) return;
@@ -103,6 +109,11 @@ export function CloudSyncSection() {
     void refreshLinked();
   }, [refreshLinked]);
 
+  // 解析出的 server 地址回填输入框（保存后即时反映新值）
+  useEffect(() => {
+    setServerInput(baseUrl);
+  }, [baseUrl]);
+
   /* ── 登出 ── */
   const handleSignOut = async () => {
     setSignOutBusy(true);
@@ -113,6 +124,18 @@ export function CloudSyncSection() {
       // 登出失败不需要提示（状态刷新后 UI 自动更新）
     } finally {
       setSignOutBusy(false);
+    }
+  };
+
+  /* ── dev：切换云服务地址（持久化 + 重新配置后端 + 刷新）── */
+  const handleSetServer = async (url: string) => {
+    const target = url.trim();
+    if (!target || serverBusy) return;
+    setServerBusy(true);
+    try {
+      await cloudStore.setCloudBaseUrl(target);
+    } finally {
+      setServerBusy(false);
     }
   };
 
@@ -199,13 +222,65 @@ export function CloudSyncSection() {
           <h2 className="text-[14px] font-semibold text-(--text)">
             {t("cloud_settings_title")}
           </h2>
-          <p className="text-[12px] text-(--text-3)">
-            {t("cloud_settings_desc")}
-          </p>
         </div>
       </header>
 
       <div className="flex flex-col divide-y divide-(--line-soft)">
+        {/* ── dev：开发者云服务地址快速切换（仅 import.meta.env.DEV 展示）── */}
+        {import.meta.env.DEV && (
+          <div className="flex flex-col gap-2.5 px-5 py-4">
+            <div className="flex items-center gap-2">
+              <Globe size={13} strokeWidth={1.5} className="text-(--text-3)" />
+              <span className="text-[12px] font-semibold text-(--text-2)">
+                {t("cloud_dev_server_title")}
+              </span>
+            </div>
+            <input
+              type="text"
+              value={serverInput}
+              onChange={(e) => setServerInput(e.target.value)}
+              placeholder="https://..."
+              spellCheck={false}
+              autoComplete="off"
+              disabled={serverBusy}
+              aria-label={t("cloud_dev_server_title")}
+              className="h-9 w-full rounded-[7px] border border-(--line) bg-(--bg) px-3 font-mono text-[12px] text-(--text) outline-none focus:border-(--text-3)"
+            />
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={serverBusy}
+                onClick={() => handleSetServer(PROD_CLOUD_BASE_URL)}
+                className="flex-1"
+              >
+                {t("cloud_dev_server_online")}
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={serverBusy}
+                onClick={() => handleSetServer(LOCAL_CLOUD_BASE_URL)}
+                className="flex-1"
+              >
+                {t("cloud_dev_server_local")}
+              </Button>
+              <Button
+                size="sm"
+                loading={serverBusy}
+                disabled={serverBusy}
+                onClick={() => handleSetServer(serverInput)}
+                className="flex-1"
+              >
+                {t("cloud_dev_server_save")}
+              </Button>
+            </div>
+            <span className="truncate font-mono text-[11px] text-(--text-3)">
+              {t("cloud_dev_server_current", { url: baseUrl })}
+            </span>
+          </div>
+        )}
+
         {/* ── 未配置（后端 Configure 失败）：展示解析出的地址 + 连接异常说明 ── */}
         {!configured && (
           <div className="flex items-start gap-2 px-5 py-4 text-[12px] text-(--text-2)">

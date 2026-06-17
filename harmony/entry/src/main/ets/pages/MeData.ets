@@ -11,7 +11,8 @@ import { safeAreaState, SafeAreaState } from '../state/SafeArea';
 import { vaultStore, type VaultStore } from '../state/VaultStore';
 import { exportVaultToFile, importVaultFromFile } from '../lib/Transfer';
 import { common } from '@kit.AbilityKit';
-import type { ItemPayload } from '../lib/VaultService';
+import { vaultService } from '../lib/VaultService';
+import { cloudService } from '../lib/CloudService';
 import { promptAction, router } from '@kit.ArkUI';
 import {
   SettingsRowDanger,
@@ -25,6 +26,16 @@ struct MeData {
   @Local safeArea: SafeAreaState = safeAreaState;
   @Local zc: ZColorsClass = ZColors;
   @Local store: VaultStore = vaultStore;
+  /** 「清空所有数据」云端二次验证浮层状态。 */
+  @Local showClearVerify: boolean = false;
+  @Local clearMp: string = '';
+  @Local clearSk: string = '';
+  @Local clearBusy: boolean = false;
+  @Local clearError: string = '';
+  /** 导入进度浮层状态 —— importBusy 期间禁止返回 / 切页，避免半截导入。 */
+  @Local importBusy: boolean = false;
+  @Local importDone: number = 0;
+  @Local importTotal: number = 0;
 
   private async onImport(): Promise<void> {
     const confirm = await promptAction.showDialog({
@@ -36,25 +47,33 @@ struct MeData {
       ],
     });
     if (confirm.index !== 1) return;
+    // 文件选择器关闭后进度浮层即覆盖屏幕；期间 onBackPress 消费返回、顶栏返回禁用。
+    this.importDone = 0;
+    this.importTotal = 0;
+    this.importBusy = true;
+    let n = -1;
     try {
       const ctx = getContext(this) as common.Context;
-      const n = await importVaultFromFile(ctx);
-      await this.store.refreshItems();
-      const r = await promptAction.showDialog({
-        title: '导入完成',
-        message: `已成功导入 ${n} 个条目到当前保险库。`,
-        buttons: [
-          { text: '确定', color: this.zc.text },
-        ],
+      n = await importVaultFromFile(ctx, (done: number, total: number) => {
+        this.importDone = done;
+        this.importTotal = total;
       });
-      if (r.index === 0) {
-        // 确定关闭
-      }
+      await this.store.refreshItems();
     } catch (e) {
+      this.importBusy = false;
       const msg = (e as Error).message;
       if (msg === '未选择文件') return;
       promptAction.showToast({ message: msg, duration: 1800 });
+      return;
     }
+    this.importBusy = false;
+    await promptAction.showDialog({
+      title: '导入完成',
+      message: `已成功导入 ${n} 个条目到当前保险库。`,
+      buttons: [
+        { text: '确定', color: this.zc.text },
+      ],
+    });
   }
 
   private async onExport(): Promise<void> {
@@ -80,14 +99,28 @@ struct MeData {
     }
   }
 
-  private async onClearAll(): Promise<void> {
-    if (this.store.items.length === 0) {
-      promptAction.showToast({ message: '保险库已为空', duration: 1500 });
+  private async onClearAllData(): Promise<void> {
+    if (cloudService.hasAccount && !cloudService.signedIn) {
+      // 有云账户但会话未恢复（MFA / 离线）：本地清空会被下次同步拉回 → 先要求登录再清。
+      await promptAction.showDialog({
+        title: '清空所有数据',
+        message: '检测到云账户但当前未登录。请先在「云账户」页登录，再回到这里清空（以便同时删除云端数据）。',
+        buttons: [{ text: '知道了', color: this.zc.text }],
+      });
       return;
     }
+    if (cloudService.signedIn) {
+      // 云端：清空会连云端数据一并删除 → 需二次验证主密码 + Secret Key（弹浮层）。
+      this.clearMp = '';
+      this.clearSk = '';
+      this.clearError = '';
+      this.showClearVerify = true;
+      return;
+    }
+    // 本地：删除所有空间与条目，回到单个空的默认空间（保留主密码）。
     const r = await promptAction.showDialog({
-      title: '清空保险库',
-      message: `将永久删除全部 ${this.store.items.length} 个条目，主密码与加密元数据保留，此操作不可撤销。建议先导出备份。`,
+      title: '清空所有数据',
+      message: '将永久删除所有空间及其全部条目，仅保留一个空的默认空间。主密码保留，此操作不可撤销，建议先导出备份。',
       buttons: [
         { text: '取消', color: this.zc.text2 },
         { text: '清空', color: this.zc.danger },
@@ -95,12 +128,9 @@ struct MeData {
     });
     if (r.index !== 1) return;
     try {
-      // clearAll 是 sharedNeeds — 当前通过逐条 deleteItem 实现
-      const ids = (this.store.items as ItemPayload[]).map((it) => it.id);
-      for (const id of ids) {
-        await this.store.deleteItem(id);
-      }
-      promptAction.showToast({ message: '已清空所有条目', duration: 1500 });
+      await vaultService.purgeAllData();
+      await this.store.refresh();
+      promptAction.showToast({ message: '已清空所有数据', duration: 1500 });
     } catch (e) {
       promptAction.showToast({ message: (e as Error).message, duration: 1800 });
     }
@@ -110,21 +140,61 @@ struct MeData {
     const r = await promptAction.showDialog({
       title: '重置 ZPass',
       message:
-        '将永久删除主密码与所有条目，应用回到初始状态。此操作不可撤销。',
+        '将永久删除主密码、所有空间与条目，并清除云账户登录信息与同步绑定，应用回到初始状态。云端数据不受影响（可重新登录恢复）。此操作不可撤销。',
       buttons: [
         { text: '取消', color: this.zc.text2 },
         { text: '重置', color: this.zc.danger },
       ],
     });
-    if (r.index === 1) {
-      await this.store.reset();
-      promptAction.showToast({ message: 'ZPass 已重置', duration: 1500 });
-      // 重置后回到主页，由 Index 接管初始化引导
-      router.back();
+    if (r.index !== 1) return;
+    // 先清本地云账户/令牌/SK/绑定（best-effort 吊销当前会话），再物理重置本地保险库。
+    try {
+      await cloudService.signOut();
+    } catch (_e) {
+      // 离线 / 吊销失败 → 忽略，继续本地重置
+    }
+    await this.store.reset();
+    promptAction.showToast({ message: 'ZPass 已重置', duration: 1500 });
+    // 重置后回到主页，由 Index 接管初始化引导
+    router.back();
+  }
+
+  private closeClearVerify(): void {
+    this.showClearVerify = false;
+    this.clearMp = '';
+    this.clearSk = '';
+    this.clearError = '';
+    this.clearBusy = false;
+  }
+
+  /** 云端清空：验证主密码 + Secret Key → 先删云端数据（失败即中止，避免本地清空后被同步拉回）→ 清本地。 */
+  private async doClearWithCloud(): Promise<void> {
+    if (this.clearBusy) return;
+    this.clearError = '';
+    let mpOk = false;
+    try {
+      mpOk = await vaultService.verifyPassword(this.clearMp);
+    } catch (e) {
+      this.clearError = (e as Error).message ?? '主密码验证失败';
+      return;
+    }
+    if (!mpOk) { this.clearError = '主密码错误'; return; }
+    if (!cloudService.verifySecretKey(this.clearSk)) { this.clearError = 'Secret Key 不匹配'; return; }
+    this.clearBusy = true;
+    try {
+      await cloudService.clearAllCloudData();
+      await vaultService.purgeAllData();
+      await this.store.refresh();
+      this.closeClearVerify();
+      promptAction.showToast({ message: '已清空本地与云端所有数据', duration: 1800 });
+    } catch (e) {
+      this.clearError = (e as Error).message ?? '清空失败';
+      this.clearBusy = false;
     }
   }
 
   build() {
+    Stack() {
     Column() {
       Row().height(this.safeArea.top).width('100%');
 
@@ -140,7 +210,7 @@ struct MeData {
         .height(36)
         .justifyContent(FlexAlign.Center)
         .alignItems(HorizontalAlign.Center)
-        .onClick(() => router.back());
+        .onClick(() => { if (!this.importBusy) router.back(); });
 
         Text('数据管理')
           .fontSize(ZType.titleSize)
@@ -181,10 +251,10 @@ struct MeData {
           SettingsSectionHeader({ label: '危险操作' });
           Column() {
             SettingsRowDanger({
-              label: '清空所有条目',
+              label: '清空所有数据',
               icon: $r('app.media.ic_trash'),
               iconColor: this.zc.warn,
-              onTap: () => this.onClearAll(),
+              onTap: () => this.onClearAllData(),
             });
             this.divider();
             SettingsRowDanger({
@@ -219,10 +289,133 @@ struct MeData {
     .align(Alignment.TopStart)
     .backgroundColor(this.zc.bg)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM]);
+      if (this.showClearVerify) {
+        this.clearVerifyOverlay();
+      }
+      if (this.importBusy) {
+        this.importOverlay();
+      }
+    }
+    .width('100%').height('100%');
   }
 
   @Builder
   divider() {
     Divider().strokeWidth(0.5).color(this.zc.line).margin({ left: ZSpacing.lg, right: ZSpacing.lg });
+  }
+
+  @Builder
+  fieldLabel(text: string) {
+    Text(text)
+      .fontSize(ZType.footnoteSize)
+      .fontColor(this.zc.text3)
+      .margin({ bottom: ZSpacing.xs });
+  }
+
+  @Builder
+  clearVerifyOverlay() {
+    Column() {
+      Column({ space: ZSpacing.md }) {
+        Text('清空所有数据')
+          .fontSize(ZType.titleSize).fontWeight(FontWeight.Bold).fontColor(this.zc.text);
+        Text('将永久删除本地所有空间与条目，并删除云端所有保险库数据，无法找回。请输入主密码与 Secret Key 确认。')
+          .fontSize(ZType.footnoteSize).fontColor(this.zc.text3).lineHeight(18).width('100%');
+        Column() {
+          this.fieldLabel('主密码');
+          TextInput({ placeholder: '主密码', text: this.clearMp })
+            .type(InputType.Password)
+            .placeholderColor(this.zc.text4).placeholderFont({ size: ZType.bodySize })
+            .fontColor(this.zc.text).fontSize(ZType.bodySize)
+            .backgroundColor(this.zc.bg).borderRadius(ZRadius.lg)
+            .padding({ left: ZSpacing.md, right: ZSpacing.md }).height(44).width('100%')
+            .enabled(!this.clearBusy)
+            .onChange((v: string) => { this.clearMp = v; });
+        }
+        .alignItems(HorizontalAlign.Start).width('100%');
+        Column() {
+          this.fieldLabel('Secret Key');
+          TextInput({ placeholder: 'Z1-XXXXXX-…', text: this.clearSk })
+            .placeholderColor(this.zc.text4).placeholderFont({ size: ZType.bodySize })
+            .fontColor(this.zc.text).fontSize(ZType.bodySize)
+            .backgroundColor(this.zc.bg).borderRadius(ZRadius.lg)
+            .padding({ left: ZSpacing.md, right: ZSpacing.md }).height(44).width('100%')
+            .enabled(!this.clearBusy)
+            .onChange((v: string) => { this.clearSk = v; });
+        }
+        .alignItems(HorizontalAlign.Start).width('100%');
+        if (this.clearError) {
+          Text(this.clearError).fontSize(ZType.footnoteSize).fontColor(this.zc.danger).width('100%');
+        }
+        Row({ space: ZSpacing.sm }) {
+          Text('取消')
+            .fontSize(ZType.bodySize).fontColor(this.zc.text2)
+            .layoutWeight(1).height(44).textAlign(TextAlign.Center)
+            .backgroundColor(this.zc.bg).borderRadius(ZRadius.lg)
+            .onClick(() => { if (!this.clearBusy) this.closeClearVerify(); });
+          Text(this.clearBusy ? '清空中…' : '确认清空')
+            .fontSize(ZType.bodySize).fontWeight(FontWeight.Medium).fontColor(Color.White)
+            .layoutWeight(1).height(44).textAlign(TextAlign.Center)
+            .backgroundColor(this.zc.danger).borderRadius(ZRadius.lg)
+            .onClick(() => { this.doClearWithCloud(); });
+        }
+        .width('100%');
+      }
+      .width('100%').padding(ZSpacing.xl)
+      .backgroundColor(this.zc.bgElev).borderRadius(ZRadius.xl)
+      .alignItems(HorizontalAlign.Start);
+    }
+    .width('100%').height('100%')
+    .padding({ left: ZSpacing.xl, right: ZSpacing.xl })
+    .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+    .backgroundColor(this.zc.overlay);
+  }
+
+  /** 导入进度百分比（0-100），用于浮层进度条宽度。 */
+  private importPct(): number {
+    if (this.importTotal <= 0) return 0;
+    const pct = Math.floor((this.importDone / this.importTotal) * 100);
+    if (pct < 0) return 0;
+    if (pct > 100) return 100;
+    return pct;
+  }
+
+  /** 导入进行中拦截系统返回手势：返回 true 消费事件，防止页面卸载中断导入。 */
+  onBackPress(): boolean {
+    return this.importBusy;
+  }
+
+  @Builder
+  importOverlay() {
+    Column() {
+      Column({ space: ZSpacing.md }) {
+        LoadingProgress()
+          .width(40).height(40)
+          .color(this.zc.info);
+        Text('正在导入数据…')
+          .fontSize(ZType.titleSize).fontWeight(FontWeight.Bold).fontColor(this.zc.text);
+        if (this.importTotal > 0) {
+          Text(`已导入 ${this.importDone} / ${this.importTotal}`)
+            .fontSize(ZType.footnoteSize).fontColor(this.zc.text3);
+          Stack({ alignContent: Alignment.Start }) {
+            Row().width('100%').height(6).backgroundColor(this.zc.line).borderRadius(3);
+            Row().width(`${this.importPct()}%`).height(6).backgroundColor(this.zc.info).borderRadius(3);
+          }
+          .width('100%').height(6);
+        } else {
+          Text('正在准备…')
+            .fontSize(ZType.footnoteSize).fontColor(this.zc.text3);
+        }
+        Text('导入期间请保持应用在前台，请勿切换页面或关闭应用。')
+          .fontSize(ZType.footnoteSize).fontColor(this.zc.text4).lineHeight(18)
+          .textAlign(TextAlign.Center).width('100%');
+      }
+      .width('100%').padding(ZSpacing.xl)
+      .backgroundColor(this.zc.bgElev).borderRadius(ZRadius.xl)
+      .alignItems(HorizontalAlign.Center);
+    }
+    .width('100%').height('100%')
+    .padding({ left: ZSpacing.xl, right: ZSpacing.xl })
+    .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+    .backgroundColor(this.zc.overlay);
   }
 }

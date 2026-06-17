@@ -8,8 +8,10 @@
 
 import { ZColors, ZColorsClass, ZRadius, ZSpacing, ZType, alpha1f } from '../theme/Tokens';
 import { safeAreaState, SafeAreaState } from '../state/SafeArea';
-import { cloudService, CloudService } from '../lib/CloudService';
+import { cloudService, CloudService, DEFAULT_CLOUD_BASE_URL, LOCAL_CLOUD_BASE_URL } from '../lib/CloudService';
 import { vaultStore, VaultStore } from '../state/VaultStore';
+import { vaultService } from '../lib/VaultService';
+import { appIsDebug } from '../lib/AppInfo';
 import { promptAction, router } from '@kit.ArkUI';
 
 @Entry
@@ -29,6 +31,8 @@ struct CloudAccountPage {
   @Local busy: boolean = false;
   @Local errorText: string = '';
   @Local mfaCode: string = '';
+  /** dev 安装包：放出云服务地址覆盖入口（默认线上，可切本地调试）。 */
+  @Local devMode: boolean = false;
 
   aboutToAppear(): void {
     this.initState();
@@ -40,6 +44,18 @@ struct CloudAccountPage {
     }
     this.serverUrl = this.cs.baseUrl;
     this.email = this.cs.email;
+    this.devMode = appIsDebug();
+  }
+
+  /** 云登录/注册成功后，确保本地保险库已用同一主密码创建（云会话自动恢复依赖同一主密码）。 */
+  private async ensureLocalVault(password: string): Promise<void> {
+    const st = await vaultService.status();
+    if (!st.initialized) {
+      await this.vs.initialize(password);
+      // 标记占位默认空间：首次使用即选云同步时，本地库是刚为云登录建的，其默认空间只是
+      // 初始化必需的占位符。对账下拉到云端空间后清除它（对标 desktop initialize 不建默认空间）。
+      this.cs.markFreshLocalVault();
+    }
   }
 
   /* ------------------------------------------------------------------------ */
@@ -60,8 +76,11 @@ struct CloudAccountPage {
     this.busy = true;
     this.errorText = '';
     try {
-      await this.cs.register(this.email, this.password);
+      const pw = this.password;
+      await this.ensureLocalVault(pw);            // 用同一主密码创建本地保险库（强度校验亦在此）
+      await this.cs.register(this.email, pw);
       this.password = '';
+      if (this.cs.signedIn) await this.cs.syncNow();
       promptAction.showToast({ message: '注册成功，请备份 Secret Key', duration: 2000 });
     } catch (e) {
       this.errorText = (e as Error).message ?? String(e);
@@ -74,9 +93,12 @@ struct CloudAccountPage {
     this.busy = true;
     this.errorText = '';
     try {
-      await this.cs.signIn(this.email, this.password, this.secretKeyInput);
+      const pw = this.password;
+      await this.cs.signIn(this.email, pw, this.secretKeyInput);  // SRP 先校验主密码
+      await this.ensureLocalVault(pw);                            // 校验通过后用同一主密码建本地库
       this.password = '';
       this.secretKeyInput = '';
+      if (this.cs.signedIn) await this.cs.syncNow();              // 本地库就绪后拉取云端数据
       if (!this.cs.mfaRequired) promptAction.showToast({ message: '登录成功', duration: 1200 });
     } catch (e) {
       this.errorText = (e as Error).message ?? String(e);
@@ -96,7 +118,7 @@ struct CloudAccountPage {
       await this.cs.restoreSession(this.password);
       this.password = '';
       if (this.cs.mfaRequired) return;
-      if (this.cs.vaultBound) await this.cs.syncNow();
+      // restoreSession 成功后已自动镜像并同步（establishSession → kickReconcile），无需重复触发
       promptAction.showToast({ message: '云会话已恢复', duration: 1200 });
     } catch (e) {
       this.errorText = (e as Error).message ?? String(e);
@@ -165,6 +187,10 @@ struct CloudAccountPage {
       Scroll() {
         Column({ space: ZSpacing.md }) {
           this.hero();
+
+          if (this.devMode) {
+            this.devServerCard();
+          }
 
           if (this.cs.secretKeyBackup) {
             this.secretKeyCard();
@@ -262,6 +288,51 @@ struct CloudAccountPage {
   @Builder
   fieldLabel(label: string) {
     Text(label).fontSize(ZType.footnoteSize).fontColor(this.zc.text3).margin({ bottom: 6 });
+  }
+
+  /** dev 模式云服务地址覆盖：默认线上 zerx.dev，一键切本地 localhost 调试。 */
+  @Builder
+  devServerCard() {
+    Column({ space: ZSpacing.sm }) {
+      Row({ space: ZSpacing.xs }) {
+        Image($r('app.media.ic_globe')).width(16).height(16).fillColor(this.zc.info);
+        Text('开发者 · 云服务地址')
+          .fontSize(ZType.footnoteSize).fontWeight(FontWeight.Bold).fontColor(this.zc.text).layoutWeight(1);
+      }
+      .width('100%');
+      TextInput({ placeholder: 'https://...', text: this.serverUrl })
+        .placeholderColor(this.zc.text4).placeholderFont({ size: ZType.bodySize })
+        .fontColor(this.zc.text).fontSize(ZType.subheadSize)
+        .fontFamily('HarmonyOS Sans Condensed')
+        .backgroundColor(this.zc.bg).borderRadius(ZRadius.lg)
+        .padding({ left: ZSpacing.md, right: ZSpacing.md }).height(44).width('100%')
+        .enabled(!this.busy)
+        .onChange((v: string) => { this.serverUrl = v; });
+      Row({ space: ZSpacing.sm }) {
+        Text('线上')
+          .fontSize(ZType.subheadSize).fontColor(this.zc.text)
+          .textAlign(TextAlign.Center).layoutWeight(1).height(38)
+          .backgroundColor(this.zc.bg).borderRadius(ZRadius.md)
+          .onClick(() => { this.serverUrl = DEFAULT_CLOUD_BASE_URL; this.onSaveServer(); });
+        Text('本地')
+          .fontSize(ZType.subheadSize).fontColor(this.zc.text)
+          .textAlign(TextAlign.Center).layoutWeight(1).height(38)
+          .backgroundColor(this.zc.bg).borderRadius(ZRadius.md)
+          .onClick(() => { this.serverUrl = LOCAL_CLOUD_BASE_URL; this.onSaveServer(); });
+        Text('保存')
+          .fontSize(ZType.subheadSize).fontWeight(FontWeight.Medium).fontColor(this.zc.accentInk)
+          .textAlign(TextAlign.Center).layoutWeight(1).height(38)
+          .backgroundColor(this.zc.accent).borderRadius(ZRadius.md)
+          .onClick(() => this.onSaveServer());
+      }
+      .width('100%');
+      Text(`当前：${this.cs.baseUrl}`)
+        .fontSize(ZType.captionSize).fontColor(this.zc.text3)
+        .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%');
+    }
+    .width('100%').padding(ZSpacing.lg)
+    .backgroundColor(this.zc.bgElev).borderRadius(ZRadius.xl)
+    .border({ width: 1, color: this.zc.warn });
   }
 
   @Builder

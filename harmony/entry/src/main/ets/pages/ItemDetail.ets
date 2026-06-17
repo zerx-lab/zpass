@@ -276,7 +276,7 @@ struct ItemDetail {
       case 'note': return '笔记内容';
       case 'identity': return '身份信息';
       case 'ssh': return this.fieldStr('apiKey') ? 'API Token' : 'SSH 密钥';
-      case 'passkey': return '通行密钥';
+      case 'passkey': return 'Passkey';
       case 'totp': return '验证器';
       default: return '';
     }

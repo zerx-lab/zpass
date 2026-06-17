@@ -17,7 +17,7 @@ import {
   configureCloud,
   getCloudStatus,
 } from "@/lib/cloud-api";
-import { resolveCloudBaseUrl } from "@/lib/cloud-env";
+import { resolveCloudBaseUrl, setCloudBaseUrlOverride } from "@/lib/cloud-env";
 import { createWailsConfigStorage } from "@/lib/config-storage";
 
 /** 空间自动镜像(1Password 模型)的运行时状态。 */
@@ -101,6 +101,11 @@ interface CloudState {
   init: () => Promise<void>;
   /** 重新拉取后端状态。 */
   refresh: () => Promise<void>;
+  /**
+   * dev 模式快速切换云服务地址：持久化覆盖（zpass.env.json）→ 重新配置后端
+   * → 刷新状态。切换 server 会清掉旧 server 的内存会话（token 按 server 隔离）。
+   */
+  setCloudBaseUrl: (url: string) => Promise<void>;
   /** 应用 cloud:sync:progress 事件载荷。 */
   applyProgress: (p: Partial<CloudSyncProgress>) => void;
   /** 应用 cloud:auth:changed 事件（触发状态刷新）。 */
@@ -188,6 +193,18 @@ export const useCloudStore = create<CloudState>()(
         } catch {
           set({ status: null, realtime: "offline" });
         }
+      },
+
+      setCloudBaseUrl: async (url) => {
+        // 持久化覆盖并刷新 cloud-env 缓存，拿回最终生效（规范化）地址。
+        const next = await setCloudBaseUrlOverride(url);
+        set({ baseUrl: next });
+        try {
+          await configureCloud(next);
+        } catch {
+          // 配置失败不阻塞；refresh 会反映 configured=false。
+        }
+        await get().refresh();
       },
 
       applyProgress: (p) =>

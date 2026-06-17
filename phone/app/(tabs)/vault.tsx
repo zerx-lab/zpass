@@ -45,7 +45,7 @@ const TYPE_SPECS: TypeSpec[] = [
   { type: "identity", label: "身份", icon: "person.fill" },
   { type: "note", label: "安全笔记", icon: "note.text" },
   { type: "ssh", label: "SSH Key", icon: "terminal.fill" },
-  { type: "passkey", label: "通行密钥", icon: "lock.fill" },
+  { type: "passkey", label: "Passkey", icon: "lock.fill" },
 ];
 
 function colorForType(t: VaultItemType, c: ColorPalette): string {

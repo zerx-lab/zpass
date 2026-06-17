@@ -409,6 +409,8 @@ export const en = {
   import_skip_reason_map_error: "Field mapping error",
   import_dropped_dupe_title: "Duplicates to skip",
   import_no_space: "Please select a space first",
+  import_parsing: "Parsing…",
+  import_busy_hint: "Importing — please keep this window open.",
 
   // ── Export dialog ──
   export_title: "Export vault",
@@ -552,8 +554,11 @@ export const en = {
   cloud_err_unknown: "Sync error: {{detail}}",
   // 设置区块
   cloud_settings_title: "Cloud sync",
-  cloud_settings_desc:
-    "Sync your vault securely across devices using your ZPass account.",
+  cloud_dev_server_title: "Developer · Cloud server",
+  cloud_dev_server_online: "Online",
+  cloud_dev_server_local: "Local",
+  cloud_dev_server_save: "Save",
+  cloud_dev_server_current: "Current: {{url}}",
   cloud_not_signed_in: "Not signed in",
   cloud_signin_btn: "Sign in",
   cloud_signout: "Sign out",

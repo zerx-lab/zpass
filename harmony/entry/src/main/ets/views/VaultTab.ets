@@ -46,7 +46,7 @@ const TYPE_SPECS: TypeSpec[] = [
   { type: 'identity', label: '身份', icon: $r('app.media.ic_person') },
   { type: 'note', label: '安全笔记', icon: $r('app.media.ic_note_text') },
   { type: 'ssh', label: 'SSH Key', icon: $r('app.media.ic_terminal') },
-  { type: 'passkey', label: '密钥', icon: $r('app.media.ic_key') },
+  { type: 'passkey', label: 'Passkey', icon: $r('app.media.ic_key') },
 ];
 
 @ComponentV2

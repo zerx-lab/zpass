@@ -93,8 +93,12 @@ export function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
 		const reader = new FileReader();
 		reader.onload = () => {
 			const text = String(reader.result || "");
-			setResult(importBitwardenText(text));
-			setBusy(false);
+			// 先让出一帧把"解析中"渲染出来，再跑同步解析 —— 大文件 JSON.parse + 字段映射会
+			// 阻塞渲染主线程，不先让出会出现一段"无响应空白"。
+			setTimeout(() => {
+				setResult(importBitwardenText(text));
+				setBusy(false);
+			}, 0);
 		};
 		reader.onerror = () => {
 			setResult({ ok: false, reason: "parse_error" });
@@ -173,6 +177,13 @@ export function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
 		}
 	};
 
+	// 导入 / 解析进行中禁止关闭对话框：Escape、点击遮罩、关闭按钮都会被拦截，
+	// 防止中途卸载导致写库 IPC 被打断、失败明细丢失。
+	const handleOpenChange = (next: boolean) => {
+		if (!next && (busy || submitting)) return;
+		onOpenChange(next);
+	};
+
 	// skipped reason → i18n key 映射，未知原因回退原始字符串
 	const skipReasonText = (reason: string): string => {
 		switch (reason) {
@@ -200,7 +211,7 @@ export function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
 	})();
 
 	return (
-		<RadixDialog.Root open={open} onOpenChange={onOpenChange}>
+		<RadixDialog.Root open={open} onOpenChange={handleOpenChange}>
 			<RadixDialog.Portal
 				container={
 					typeof document !== "undefined"
@@ -240,6 +251,7 @@ export function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
 							<Button
 								variant="ghost"
 								size="icon"
+								disabled={busy || submitting}
 								aria-label={t("common_close")}
 								className="-mt-0.5 -mr-1.5"
 							>
@@ -575,11 +587,17 @@ export function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
 					 *   spinner 与图标重叠（Button 内部 loading=true 时只渲染 spinner）
 					 */}
 					<div className="flex shrink-0 flex-nowrap items-center justify-end gap-2 border-t border-(--line-soft) bg-(--bg-elev) px-6 py-3">
+						{(busy || submitting) && (
+							<span className="mr-auto flex items-center gap-2 font-mono text-[11px] text-(--text-3)">
+								<span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-(--line) border-t-(--text)" />
+								{submitting ? t("import_busy_hint") : t("import_parsing")}
+							</span>
+						)}
 						<RadixDialog.Close asChild>
 							<Button
 								variant="ghost"
 								size="md"
-								disabled={submitting}
+								disabled={busy || submitting}
 								className="shrink-0 whitespace-nowrap"
 							>
 								{t("import_cancel")}

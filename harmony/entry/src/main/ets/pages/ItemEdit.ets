@@ -46,7 +46,7 @@ const TYPE_OPTIONS: TypeOption[] = [
   { key: 'note', label: '安全笔记' },
   { key: 'identity', label: '身份信息' },
   { key: 'ssh', label: 'SSH 密钥' },
-  { key: 'passkey', label: '通行密钥' },
+  { key: 'passkey', label: 'Passkey' },
   { key: 'totp', label: '验证码' },
 ];
 

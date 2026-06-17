@@ -35,7 +35,7 @@ import {
   webVaultRecordToPayload,
 } from './CloudCrypto';
 import { fromB64, toB64, utf8 } from './Crypto';
-import { vaultService, type ItemPayload } from './VaultService';
+import { vaultService, spaceIdOfPayload, type ItemPayload } from './VaultService';
 import { readVaultFile, type EncryptedItemRow } from './VaultStorage';
 import { type CloudItemSyncState } from './CloudStorage';
 import { util } from '@kit.ArkTS';
@@ -66,6 +66,8 @@ export type CloudSyncStateMap = Map<string, CloudItemSyncState>;
 export interface SyncContext {
   client: CloudClient;
   vaultId: string;
+  /** 该 vault 绑定的本地空间 id —— 决定本地 manifest 切分与拉取条目的归属空间。 */
+  spaceId: string;
   /** 解封后的 per-vault key（32B，仅内存）。 */
   vaultKey: Uint8Array;
 }
@@ -74,6 +76,8 @@ export interface SyncContext {
 export interface CloudConflict {
   localId: string;
   cloudId: string;
+  /** 冲突所属空间 id（多空间下解决冲突需定位对应 vault/state）。 */
+  spaceId: string;
   /** 'concurrent_edit' | 'delete_vs_edit' */
   kind: string;
   suggestedRemote: boolean;
@@ -295,11 +299,11 @@ async function bridgeConflict(ctx: SyncContext, l: LocalEntry, server: ServerIte
       return { kind: 'noop', conflict: null };
     }
     if (l.updatedAt <= server.updated_at) {
-      await vaultService.ingestForeignDeletion(l.localId, server.updated_at, true);
+      await vaultService.ingestForeignDeletion(l.localId, server.updated_at, ctx.spaceId, true);
       recordTombstoneState(state, l.localId, server.seq, server.updated_at);
       return { kind: 'pulled', conflict: null };
     }
-    return { kind: 'conflict', conflict: makeConflict(l, server, null, 'delete_vs_edit', false) };
+    return { kind: 'conflict', conflict: makeConflict(ctx, l, server, null, 'delete_vs_edit', false) };
   }
   // server live
   const remotePayload = await decodeServerItem(ctx, l.localId, server);
@@ -310,18 +314,18 @@ async function bridgeConflict(ctx: SyncContext, l: LocalEntry, server: ServerIte
   }
   if (l.updatedAt < server.updated_at) {
     if (remotePayload) {
-      await vaultService.ingestForeignPayload(l.localId, remotePayload, remotePayload.createdAt, server.updated_at, true);
+      await vaultService.ingestForeignPayload(l.localId, remotePayload, remotePayload.createdAt, server.updated_at, ctx.spaceId, true);
       recordItemState(state, l.localId, server.seq, serverHash, server.updated_at);
     }
     return { kind: 'pulled', conflict: null };
   }
   const kind = l.deleted ? 'delete_vs_edit' : 'concurrent_edit';
-  return { kind: 'conflict', conflict: makeConflict(l, server, remotePayload, kind, server.revision > l.revision) };
+  return { kind: 'conflict', conflict: makeConflict(ctx, l, server, remotePayload, kind, server.revision > l.revision) };
 }
 
-function makeConflict(l: LocalEntry, server: ServerItem, remotePayload: ItemPayload | null, kind: string, suggestedRemote: boolean): CloudConflict {
+function makeConflict(ctx: SyncContext, l: LocalEntry, server: ServerItem, remotePayload: ItemPayload | null, kind: string, suggestedRemote: boolean): CloudConflict {
   return {
-    localId: l.localId, cloudId: cloudItemId(l.localId), kind, suggestedRemote,
+    localId: l.localId, cloudId: cloudItemId(l.localId), spaceId: ctx.spaceId, kind, suggestedRemote,
     localName: l.payload ? l.payload.name : '',
     remoteName: remotePayload ? remotePayload.name : '',
     localUpdatedAt: l.updatedAt, remoteUpdatedAt: server.updated_at,
@@ -331,9 +335,9 @@ function makeConflict(l: LocalEntry, server: ServerItem, remotePayload: ItemPayl
   };
 }
 
-function conflictFromEntries(l: LocalEntry, r: RemoteEntry, kind: string, suggestedRemote: boolean): CloudConflict {
+function conflictFromEntries(ctx: SyncContext, l: LocalEntry, r: RemoteEntry, kind: string, suggestedRemote: boolean): CloudConflict {
   return {
-    localId: l.localId, cloudId: r.cloudId, kind, suggestedRemote,
+    localId: l.localId, cloudId: r.cloudId, spaceId: ctx.spaceId, kind, suggestedRemote,
     localName: l.payload ? l.payload.name : '',
     remoteName: r.payload ? r.payload.name : '',
     localUpdatedAt: l.updatedAt, remoteUpdatedAt: r.updatedAt,
@@ -369,7 +373,7 @@ async function applyDecision(
       recordTombstoneState(state, r.localId, r.seq, r.updatedAt);
       return;
     }
-    await vaultService.ingestForeignPayload(r.localId, r.payload, r.payload.createdAt, r.updatedAt);
+    await vaultService.ingestForeignPayload(r.localId, r.payload, r.payload.createdAt, r.updatedAt, ctx.spaceId);
     outcome.applied++;
     recordItemState(state, r.localId, r.seq, r.hash, r.updatedAt);
     return;
@@ -396,7 +400,7 @@ async function applyDecision(
     if (l.deletedAt >= r.updatedAt) {
       await pushAndTally(ctx, l, baseSeq, state, outcome); // 本端删除胜出 → 推墓碑
     } else {
-      outcome.conflicts.push(conflictFromEntries(l, r, 'delete_vs_edit', true));
+      outcome.conflicts.push(conflictFromEntries(ctx, l, r, 'delete_vs_edit', true));
     }
     return;
   }
@@ -406,7 +410,7 @@ async function applyDecision(
     if (l.updatedAt > r.updatedAt) {
       await pushAndTally(ctx, l, baseSeq, state, outcome); // 本端编辑胜出 → 复活
     } else {
-      await vaultService.ingestForeignDeletion(l.localId, r.updatedAt);
+      await vaultService.ingestForeignDeletion(l.localId, r.updatedAt, ctx.spaceId);
       outcome.applied++;
       recordTombstoneState(state, l.localId, r.seq, r.updatedAt);
     }
@@ -426,7 +430,7 @@ async function applyDecision(
   }
   if (l.updatedAt < r.updatedAt) {
     if (r.payload) {
-      await vaultService.ingestForeignPayload(l.localId, r.payload, r.payload.createdAt, r.updatedAt);
+      await vaultService.ingestForeignPayload(l.localId, r.payload, r.payload.createdAt, r.updatedAt, ctx.spaceId);
       outcome.applied++;
       recordItemState(state, l.localId, r.seq, r.hash, r.updatedAt);
     }
@@ -434,7 +438,7 @@ async function applyDecision(
   }
   // 同时戳
   if (bothHashed && l.hash !== r.hash) {
-    outcome.conflicts.push(conflictFromEntries(l, r, 'concurrent_edit', r.revision > l.revision));
+    outcome.conflicts.push(conflictFromEntries(ctx, l, r, 'concurrent_edit', r.revision > l.revision));
     return;
   }
   recordItemState(state, l.localId, r.seq, r.hash, r.updatedAt); // 同戳缺 hash → 视为收敛
@@ -464,23 +468,32 @@ async function syncVaultFull(ctx: SyncContext, state: CloudSyncStateMap, outcome
     remoteByLocal.set(entry.localId, entry);
   }
 
-  // 本地全量
+  // 本地全量（仅本空间——多空间下每 vault 1:1 绑定一个空间）
   const localByLocal = new Map<string, LocalEntry>();
-  const live = await vaultService.listItems();
+  const live = await vaultService.listItemsForSpace(ctx.spaceId);
   for (const p of live) {
     const hash = await cloudContentHash(ctx.vaultKey, p);
     localByLocal.set(p.id, { localId: p.id, deleted: false, deletedAt: 0, updatedAt: p.updatedAt, revision: p.revision ?? 1, hash, payload: p });
   }
-  const deleted = await vaultService.listDeleted();
+  const deleted = await vaultService.listDeletedForSpace(ctx.spaceId);
   for (const p of deleted) {
     const delAt = typeof p.deletedAt === 'number' && p.deletedAt > 0 ? p.deletedAt : p.updatedAt;
     localByLocal.set(p.id, { localId: p.id, deleted: true, deletedAt: delAt, updatedAt: p.updatedAt, revision: p.revision ?? 1, hash: '', payload: p });
   }
 
-  // union
+  // union（迁出守护：远端仍有、但本地已不在本空间的条目——若它仍 live 于其它空间，说明已被移走，
+  // 跳过即可：既不拉回本空间，也不动它。残留的云端副本作为已知小限制，留待该 vault 的后续清理。）
   const ids: string[] = [];
   const seen = new Set<string>();
-  remoteByLocal.forEach((_v, k) => { if (!seen.has(k)) { seen.add(k); ids.push(k); } });
+  const remoteIds: string[] = [];
+  remoteByLocal.forEach((_v, k) => remoteIds.push(k));
+  for (const k of remoteIds) {
+    if (!localByLocal.has(k)) {
+      const elsewhere = await vaultService.getItem(k);
+      if (elsewhere) continue; // 已迁往其它空间 → 不拉回
+    }
+    if (!seen.has(k)) { seen.add(k); ids.push(k); }
+  }
   localByLocal.forEach((_v, k) => { if (!seen.has(k)) { seen.add(k); ids.push(k); } });
 
   for (const id of ids) {
@@ -512,14 +525,19 @@ async function localChangeShortlist(ctx: SyncContext, rows: EncryptedItemRow[], 
       if (!st.deleted) candidates.set(id, localTombstoneEntry(row)); // 删除尚未推送
       continue;
     }
-    if (!st) {                        // 全新本地条目
+    if (!st) {                        // 全新本地条目（或属于其它空间）
       const e = await localLiveEntry(ctx, id);
-      if (e) candidates.set(id, e);
-      continue;
+      if (e && spaceIdOfPayload(e.payload!) === ctx.spaceId) candidates.set(id, e);
+      continue;                       // 非本空间 → 跳过（由其所属空间的 vault 处理）
     }
     if (row.updatedAt < st.syncedAt) continue; // 早于收敛 → 未变
     const e = await localLiveEntry(ctx, id);
     if (!e) continue;
+    if (spaceIdOfPayload(e.payload!) !== ctx.spaceId) {
+      // 已迁出本空间 → 清本空间水位、跳过（不推不删；残留云端副本由 syncVaultFull 迁出守护兜住）
+      state.delete(id);
+      continue;
+    }
     if (e.hash === st.syncedHash && !st.deleted) {
       refresh.set(id, row.updatedAt);  // 内容未变、仅时间戳推进 → 只刷新 synced_at
     } else {
@@ -594,19 +612,19 @@ async function syncVaultIncremental(ctx: SyncContext, state: CloudSyncStateMap, 
       if (row.updatedAt > it.updated_at) {
         const l = candidates.get(lid)!;
         outcome.conflicts.push({
-          localId: lid, cloudId: it.item_id, kind: 'delete_vs_edit', suggestedRemote: true,
+          localId: lid, cloudId: it.item_id, spaceId: ctx.spaceId, kind: 'delete_vs_edit', suggestedRemote: true,
           localName: l.payload ? l.payload.name : '', remoteName: '',
           localUpdatedAt: row.updatedAt, remoteUpdatedAt: it.updated_at,
           remoteSeq: it.seq, remoteDeleted: true, remoteCreatedAt: 0, remoteRevision: it.revision,
           remotePayload: null,
         });
       } else {
-        await vaultService.ingestForeignDeletion(lid, it.updated_at);
+        await vaultService.ingestForeignDeletion(lid, it.updated_at, ctx.spaceId);
         outcome.applied++;
         recordTombstoneState(state, lid, it.seq, it.updated_at);
       }
     } else {
-      await vaultService.ingestForeignDeletion(lid, it.updated_at); // 本地未改 → 远端删除胜出
+      await vaultService.ingestForeignDeletion(lid, it.updated_at, ctx.spaceId); // 本地未改 → 远端删除胜出
       outcome.applied++;
       recordTombstoneState(state, lid, it.seq, it.updated_at);
     }
@@ -681,12 +699,12 @@ function wrapNetworkError(e: Object): Error {
 /** 采用对端：强制落地对端 payload / 墓碑，并把水位对齐对端。 */
 export async function resolveConflictRemote(conflict: CloudConflict, state: CloudSyncStateMap): Promise<void> {
   if (conflict.remoteDeleted || !conflict.remotePayload) {
-    await vaultService.ingestForeignDeletion(conflict.localId, conflict.remoteUpdatedAt, true);
+    await vaultService.ingestForeignDeletion(conflict.localId, conflict.remoteUpdatedAt, conflict.spaceId, true);
     recordTombstoneState(state, conflict.localId, conflict.remoteSeq, conflict.remoteUpdatedAt);
     return;
   }
   await vaultService.ingestForeignPayload(
-    conflict.localId, conflict.remotePayload, conflict.remoteCreatedAt, conflict.remoteUpdatedAt, true,
+    conflict.localId, conflict.remotePayload, conflict.remoteCreatedAt, conflict.remoteUpdatedAt, conflict.spaceId, true,
   );
   recordItemState(state, conflict.localId, conflict.remoteSeq, '', conflict.remoteUpdatedAt);
 }
