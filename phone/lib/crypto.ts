@@ -16,6 +16,7 @@ import { argon2id as wasmArgon2id } from "hash-wasm";
 
 import {
   isNativeCryptoAvailable,
+  nativeArgon2idRaw,
   nativeDeriveKEK,
 } from "../modules/zpass-crypto";
 
@@ -48,6 +49,8 @@ export const AAD_VERIFIER = "zpass:verifier";
 /** 信任设备包装 DEK 的 AAD —— 与 desktop trusteddevice entropy 同义，
  *  独立常量避免与 AAD_DEK 互换使用 */
 export const AAD_TRUSTED_DEVICE = "zpass:trusted-device:v1";
+/** DEK 包裹云主密码的 AAD —— 仅本机解锁后解出云密码静默重建会话（不跨端，本地专用）。 */
+export const AAD_CLOUD_CRED = "zpass:cloud-cred:v1";
 
 /* ----------------------------------------------------------------------------
  * Argon2id 参数
@@ -187,6 +190,52 @@ export async function deriveKEKAsync(
   if (HAS_NATIVE) {
     const keyB64 = await nativeDeriveKEK(
       password,
+      toB64(salt),
+      params.memoryKiB,
+      params.iterations,
+      params.parallelism,
+      params.keyLen,
+    );
+    return fromB64(keyB64);
+  }
+  if (HAS_WASM) {
+    return await wasmArgon2id({
+      password,
+      salt,
+      iterations: params.iterations,
+      parallelism: params.parallelism,
+      memorySize: params.memoryKiB,
+      hashLength: params.keyLen,
+      outputType: "binary",
+    });
+  }
+  return nobleArgon2id(password, salt, {
+    m: params.memoryKiB,
+    t: params.iterations,
+    p: params.parallelism,
+    dkLen: params.keyLen,
+  });
+}
+
+/**
+ * Argon2id（raw 字节入参）—— 云同步 2SKD 慢哈希路径使用。
+ *
+ * 与 deriveKEKAsync 的区别：password 走**已归一化的原始字节**（调用方先做
+ * NFKD(trim)），不再对字符串做任何隐式归一化；salt 长度不限（云端盐恒 32B，
+ * 但服务端可能回传其它长度，不强校验）。三层派发与 deriveKEKAsync 一致：
+ *   原生 cryptocore argon2idRaw → hash-wasm → noble 纯 JS。
+ *
+ * 字节对齐 cryptocore `argon2id_raw(normalize_password(pw).as_bytes(), salt, params)`。
+ */
+export async function argon2idRawAsync(
+  password: Uint8Array,
+  salt: Uint8Array,
+  params: Argon2idParams,
+): Promise<Uint8Array> {
+  validateArgon2idParams(params);
+  if (HAS_NATIVE) {
+    const keyB64 = await nativeArgon2idRaw(
+      toB64(password),
       toB64(salt),
       params.memoryKiB,
       params.iterations,

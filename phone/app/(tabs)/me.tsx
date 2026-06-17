@@ -153,6 +153,12 @@ export default function MeScreen() {
 
         <ListGroup header="同步">
           <ListRow
+            title="云同步"
+            value="账户与设备"
+            icon="cloud.fill"
+            onPress={() => router.push("/cloud-account" as never)}
+          />
+          <ListRow
             title="局域网同步"
             value="连接桌面端"
             icon="antenna.radiowaves.left.and.right"

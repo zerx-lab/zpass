@@ -235,11 +235,29 @@ function trustedDeviceFromJSON(
 }
 
 /* ----------------------------------------------------------------------------
- * 读 / 写
+ * 读 / 写 —— 全部经 FIFO 串行，杜绝并发交错
+ *
+ * 原子替换是「写 tmp → 删 dst → move tmp→dst」。tmp 路径固定，删/move 之间 dst 短暂缺失：
+ *   - 并发写：争抢同一 tmp，先完成者 move 走 tmp，后者 move 时 tmp 已不存在 → moveAsync 被拒；
+ *   - 并发读：撞上 dst 缺失窗口 → 误判文件不存在而返回空快照（可致数据丢失）。
+ * 云同步后台写与前台编辑/读取天然并发，故把所有读写排进一条 promise 链 FIFO 执行。
+ * （单次「读-改-写」跨两段队列任务，其丢更新由上层 LWW 同步收敛，非本持久化层职责。）
  * -------------------------------------------------------------------------- */
 
+let ioQueue: Promise<unknown> = Promise.resolve();
+
+function enqueue<T>(op: () => Promise<T>): Promise<T> {
+  const result = ioQueue.then(op);
+  // 链尾吞掉成功/失败，保证一次异常不阻断后续读写；真实结果/异常经 result 回传调用方。
+  ioQueue = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
 /** 读取整个 vault 文件；不存在时返回空快照 */
-export async function readVaultFile(): Promise<VaultFile> {
+async function doReadVaultFile(): Promise<VaultFile> {
   const path = vaultPath();
   const info = await FileSystem.getInfoAsync(path);
   if (!info.exists) {
@@ -274,7 +292,7 @@ export async function readVaultFile(): Promise<VaultFile> {
 }
 
 /** 写入整个 vault 文件，使用 tmp + rename 原子替换 */
-export async function writeVaultFile(file: VaultFile): Promise<void> {
+async function doWriteVaultFile(file: VaultFile): Promise<void> {
   const json: FileJSON = {
     schema: FILE_SCHEMA,
     meta: file.meta ? metaToJSON(file.meta) : null,
@@ -301,9 +319,21 @@ export async function writeVaultFile(file: VaultFile): Promise<void> {
   await FileSystem.moveAsync({ from: tmp, to: dst });
 }
 
+/** 读取整个 vault 文件；不存在时返回空快照。经 FIFO 串行，避免撞上写入的原子替换窗口。 */
+export function readVaultFile(): Promise<VaultFile> {
+  return enqueue(doReadVaultFile);
+}
+
+/** 写入整个 vault 文件（tmp + rename 原子替换）。经 FIFO 串行，杜绝并发写争抢 tmp。 */
+export function writeVaultFile(file: VaultFile): Promise<void> {
+  return enqueue(() => doWriteVaultFile(file));
+}
+
 /** 物理删除 vault（用于"重置保险库"） */
-export async function deleteVaultFile(): Promise<void> {
-  await FileSystem.deleteAsync(vaultPath(), { idempotent: true });
+export function deleteVaultFile(): Promise<void> {
+  return enqueue(() =>
+    FileSystem.deleteAsync(vaultPath(), { idempotent: true }),
+  );
 }
 
 /* ----------------------------------------------------------------------------

@@ -10,6 +10,11 @@ version: "3"
 #   task metro        启动 metro dev server（脱离 run:android 单独开）
 #   task apk:release  一键打包 Android release APK（含最新 .so）
 #
+# 切换云后端地址（仅 dev 模式）：注入 EXPO_PUBLIC_CLOUD_DEV_URL 让 app 默认连本地云后端，
+#   不注入则连线上 https://zpass-app.zerx.dev（生产固定线上）。dev 下云账户页可一键切回线上。
+#   模拟器: EXPO_PUBLIC_CLOUD_DEV_URL=http://10.0.2.2:8080 task dev
+#   真机:   EXPO_PUBLIC_CLOUD_DEV_URL=http://192.168.x.x:8080 task dev
+#
 # 第一次使用需要的工具：
 #   - Task：              go install github.com/go-task/task/v3/cmd/task@latest
 #   - Rust toolchain：    rustup（>=1.85 for edition 2024）
@@ -53,6 +58,10 @@ env:
         for d in "$SDK"/ndk/*/; do latest="${d%/}"; latest="${latest%\\}"; done
         if [ -d "$latest" ]; then echo "$latest"; fi
       fi
+  # 开发期云后端地址（仅 dev 模式生效；Expo 打包时把 EXPO_PUBLIC_* 内联进 bundle）。
+  # 空 → app 默认连线上 zpass-app.zerx.dev；设值 → dev 默认连本地，云账户页可一键切回线上。
+  EXPO_PUBLIC_CLOUD_DEV_URL:
+    sh: echo "${EXPO_PUBLIC_CLOUD_DEV_URL:-}"
 
 tasks:
   default:

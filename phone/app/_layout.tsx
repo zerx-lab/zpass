@@ -14,6 +14,7 @@ import { Colors } from "@/constants/theme";
 import { ThemeProvider, useTheme } from "@/contexts/theme-context";
 import { UiSettingsProvider } from "@/contexts/ui-settings-context";
 import { VaultProvider, useVault } from "@/contexts/vault-context";
+import { CloudProvider } from "@/contexts/cloud-context";
 import { LockOverlay } from "@/components/lock-overlay";
 import { OnboardingOverlay } from "@/components/onboarding-overlay";
 import { DialogHost } from "@/components/ui/dialog";
@@ -104,6 +105,8 @@ function RootLayoutNav() {
         <Stack.Screen name="sync" options={{ headerShown: false }} />
         <Stack.Screen name="sync-host" options={{ headerShown: false }} />
         <Stack.Screen name="sync-conflicts" options={{ headerShown: false }} />
+        <Stack.Screen name="cloud-account" options={{ headerShown: false }} />
+        <Stack.Screen name="cloud-sync" options={{ headerShown: false }} />
         <Stack.Screen name="vault/list" options={{ headerShown: false }} />
         <Stack.Screen name="vault/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="totp/index" options={{ headerShown: false }} />
@@ -137,7 +140,9 @@ export default function RootLayout() {
       <ThemeProvider initialMode="system">
         <UiSettingsProvider>
           <VaultProvider>
-            <RootLayoutNav />
+            <CloudProvider>
+              <RootLayoutNav />
+            </CloudProvider>
           </VaultProvider>
         </UiSettingsProvider>
       </ThemeProvider>

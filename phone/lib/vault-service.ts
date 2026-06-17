@@ -13,6 +13,7 @@ import { Platform } from "react-native";
 import * as SecureStore from "expo-secure-store";
 
 import {
+  AAD_CLOUD_CRED,
   AAD_DEK,
   AAD_TRUSTED_DEVICE,
   AAD_VERIFIER,
@@ -162,9 +163,59 @@ const VALID_TYPES: ReadonlySet<VaultItemType> = new Set<VaultItemType>([
  * 内存状态：dek（解锁后持有的明文 DEK，锁定时抹零并置 null）
  * -------------------------------------------------------------------------- */
 
+/** 空间增删改事件（云同步自动镜像钩子用）。 */
+export interface SpaceMutationEvent {
+  kind: "create" | "rename" | "delete";
+  spaceId: string;
+}
+
 class VaultService {
   private dek: Uint8Array | null = null;
   private lastTsMs = 0;
+  private mutationHooks: (() => void)[] = [];
+  private spaceHooks: ((e: SpaceMutationEvent) => void)[] = [];
+
+  /** 注册条目变更钩子（云同步去抖触发用）。 */
+  registerMutationHook(cb: () => void): void {
+    this.mutationHooks.push(cb);
+  }
+
+  /** 注册空间增删改钩子（云同步自动镜像用）。 */
+  registerSpaceHook(cb: (e: SpaceMutationEvent) => void): void {
+    this.spaceHooks.push(cb);
+  }
+
+  private fireMutation(): void {
+    for (const cb of this.mutationHooks) {
+      try {
+        cb();
+      } catch {
+        // 钩子失败不影响本地写入
+      }
+    }
+  }
+
+  private fireSpaceMutation(kind: SpaceMutationEvent["kind"], spaceId: string): void {
+    for (const cb of this.spaceHooks) {
+      try {
+        cb({ kind, spaceId });
+      } catch {
+        // 同上
+      }
+    }
+  }
+
+  /** 用 DEK 封装云主密码（云同步静默重建会话用）。vault 锁定时抛 locked。 */
+  sealCloudCredential(plaintext: Uint8Array): Uint8Array {
+    if (!this.dek) throw new VaultError("locked", "vault 已锁定");
+    return sealAEAD(this.dek, plaintext, utf8(AAD_CLOUD_CRED));
+  }
+
+  /** 用 DEK 解封 sealCloudCredential 落盘的云凭据密文。锁定抛 locked；密文损坏 → AEAD 校验失败抛错。 */
+  openCloudCredential(ciphertext: Uint8Array): Uint8Array {
+    if (!this.dek) throw new VaultError("locked", "vault 已锁定");
+    return openAEAD(this.dek, ciphertext, utf8(AAD_CLOUD_CRED));
+  }
 
   /** 进程内单调时间戳，避免同毫秒冲突 / 时钟回拨 */
   private nowMs(): number {
@@ -282,6 +333,35 @@ class VaultService {
     // 兼容旧 vault 文件：解锁后保证至少有一个空间存在；旧 item 的
     // 缺省 spaceId 会被 ItemPayload.fields 默认视为 DEFAULT_SPACE_ID。
     await this.ensureSpacesPersisted();
+  }
+
+  /** 校验主密码是否正确（不改变解锁态）。云端清空等危险操作的二次确认用。 */
+  async verifyPassword(password: string): Promise<boolean> {
+    if (!password) return false;
+    const file = await readVaultFile();
+    if (!file.meta) return false;
+    let kek: Uint8Array | null = null;
+    let dek: Uint8Array | null = null;
+    try {
+      kek = await deriveKEKAsync(password, file.meta.salt, file.meta.params);
+      try {
+        dek = openAEAD(kek, file.meta.wrappedDEK, utf8(AAD_DEK));
+      } catch {
+        return false;
+      }
+      let verifierPlain: Uint8Array;
+      try {
+        verifierPlain = openAEAD(dek, file.meta.verifier, utf8(AAD_VERIFIER));
+      } catch {
+        return false;
+      }
+      const ok = utf8Decode(verifierPlain) === VERIFIER_PLAINTEXT;
+      wipeBytes(verifierPlain);
+      return ok;
+    } finally {
+      if (kek) wipeBytes(kek);
+      if (dek) wipeBytes(dek);
+    }
   }
 
   /** 若文件里没有 spaces，落盘一个默认空间；幂等 */
@@ -732,7 +812,7 @@ class VaultService {
    * 新建空间 —— 名称必填、去空白；返回完整记录。
    * order 取当前最大 order + 1，与 UI 显示编号一致。
    */
-  async createSpace(name: string): Promise<Space> {
+  async createSpace(name: string, silent = false): Promise<Space> {
     this.requireUnlocked();
     const trimmed = (name ?? "").trim();
     if (!trimmed) throw new VaultError("space-invalid", "空间名不能为空");
@@ -753,6 +833,7 @@ class VaultService {
       spaces: [...fixed.spaces, created],
       activeSpaceId: fixed.activeSpaceId,
     });
+    if (!silent) this.fireSpaceMutation("create", created.id);
     return created;
   }
 
@@ -772,6 +853,7 @@ class VaultService {
       spaces: next,
       activeSpaceId: fixed.activeSpaceId,
     });
+    this.fireSpaceMutation("rename", id);
   }
 
   /**
@@ -824,6 +906,8 @@ class VaultService {
       spaces: remaining,
       activeSpaceId: nextActive,
     });
+    this.fireSpaceMutation("delete", id);
+    this.fireMutation();
   }
 
   /* ------------------------------------------------------------------------ */
@@ -850,6 +934,35 @@ class VaultService {
       }
     }
     return out;
+  }
+
+  /** 列出所有墓碑（已软删除）条目，按 deletedAt 倒序（云同步推送墓碑用）。 */
+  async listDeleted(): Promise<ItemPayload[]> {
+    this.requireUnlocked();
+    const file = await readVaultFile();
+    const out: ItemPayload[] = [];
+    for (const row of file.items) {
+      if (!(typeof row.deletedAt === "number" && row.deletedAt > 0)) continue;
+      try {
+        out.push(this.decryptRow(row));
+      } catch {
+        // 解密失败的损坏行跳过
+      }
+    }
+    out.sort((a, b) => (b.deletedAt ?? 0) - (a.deletedAt ?? 0));
+    return out;
+  }
+
+  /** 列出某空间下的 live 条目（云同步按空间构建本地 manifest 用）。 */
+  async listItemsForSpace(spaceId: string): Promise<ItemPayload[]> {
+    const all = await this.listItems();
+    return all.filter((p) => spaceIdOfPayload(p) === spaceId);
+  }
+
+  /** 列出某空间下的墓碑条目（云同步推送墓碑用）。 */
+  async listDeletedForSpace(spaceId: string): Promise<ItemPayload[]> {
+    const all = await this.listDeleted();
+    return all.filter((p) => spaceIdOfPayload(p) === spaceId);
   }
 
   async getItem(id: string): Promise<ItemPayload | null> {
@@ -902,6 +1015,7 @@ class VaultService {
     file.spaces = fixed.spaces;
     file.activeSpaceId = fixed.activeSpaceId;
     await writeVaultFile(file);
+    this.fireMutation();
     return payload;
   }
 
@@ -932,6 +1046,7 @@ class VaultService {
     };
     file.items[idx] = this.encryptPayload(next);
     await writeVaultFile(file);
+    this.fireMutation();
     return next;
   }
 
@@ -950,6 +1065,7 @@ class VaultService {
       // 行密文损坏 —— 直接物理移除（无法形成有效 tombstone）
       file.items = file.items.filter((r) => r.id !== id);
       await writeVaultFile(file);
+      this.fireMutation();
       return;
     }
     const now = this.nowMs();
@@ -961,6 +1077,7 @@ class VaultService {
     };
     file.items[idx] = this.encryptPayload(tombstone);
     await writeVaultFile(file);
+    this.fireMutation();
   }
 
   /** 批量导入：每条用新 id + 重新加密；缺省 spaceId 注入当前激活空间 */
@@ -994,6 +1111,7 @@ class VaultService {
     file.spaces = fixed.spaces;
     file.activeSpaceId = fixed.activeSpaceId;
     await writeVaultFile(file);
+    this.fireMutation();
     return rows.length;
   }
 
@@ -1031,34 +1149,121 @@ class VaultService {
     payload: ItemPayload,
     createdAt: number,
     updatedAt: number,
+    spaceId = "",
+    force = false,
   ): Promise<"inserted" | "updated" | "skipped"> {
     this.requireUnlocked();
     if (!id) throw new VaultError("not-found", "ingest: empty id");
-    // 强制 id / 时间戳与对端一致；本端不重新生成 id（保持跨端可识别）
+    // 强制 id / 时间戳与对端一致；spaceId 非空时改写归属空间（云同步多空间模型）。
+    const fields = { ...(payload.fields ?? {}) };
+    if (spaceId) fields.spaceId = spaceId;
     const normalized: ItemPayload = {
-      ...payload,
       id,
+      type: payload.type,
+      name: payload.name,
+      fields,
       createdAt,
       updatedAt,
-      deletedAt: null,
       revision: payload.revision ?? 1,
-      fields: payload.fields ?? {},
+      deletedAt: null,
     };
     const file = await readVaultFile();
     const idx = file.items.findIndex((r) => r.id === id);
     if (idx === -1) {
-      const encrypted = this.encryptPayload(normalized);
-      file.items = [encrypted, ...file.items];
+      file.items = [this.encryptPayload(normalized), ...file.items];
       await writeVaultFile(file);
       return "inserted";
     }
-    if (file.items[idx].updatedAt >= updatedAt) {
+    // force=true 跳过 LWW 比较（云同步「采用对端」冲突解决用）。
+    if (!force && file.items[idx].updatedAt >= updatedAt) {
       return "skipped";
     }
-    const encrypted = this.encryptPayload(normalized);
-    file.items[idx] = encrypted;
+    file.items[idx] = this.encryptPayload(normalized);
     await writeVaultFile(file);
     return "updated";
+  }
+
+  /**
+   * 摄取来自云端的删除墓碑 —— LWW，保留对端 updatedAt（不用本机时钟），避免抖动。
+   *   - 本端不存在该 id → 'skipped'
+   *   - 非 force 且本端较新（updatedAt >= 对端）→ 'skipped'（本端编辑胜出，留给 push）
+   *   - 否则 → 落 tombstone，deletedAt/updatedAt 对齐对端
+   */
+  async ingestForeignDeletion(
+    id: string,
+    updatedAt: number,
+    spaceId = "",
+    force = false,
+  ): Promise<"deleted" | "skipped"> {
+    this.requireUnlocked();
+    if (!id) throw new VaultError("not-found", "ingest: empty id");
+    const file = await readVaultFile();
+    const idx = file.items.findIndex((r) => r.id === id);
+    if (idx === -1) return "skipped";
+    const row = file.items[idx];
+    if (!force && row.updatedAt >= updatedAt) return "skipped";
+    let existing: ItemPayload;
+    try {
+      existing = this.decryptRow(row);
+    } catch {
+      // 损坏行：payload 不可读，直接落墓碑占位（保留原密文字节）
+      file.items[idx] = {
+        id: row.id,
+        payload: row.payload,
+        createdAt: row.createdAt,
+        updatedAt,
+        deletedAt: updatedAt,
+      };
+      await writeVaultFile(file);
+      return "deleted";
+    }
+    const tfields = { ...(existing.fields ?? {}) };
+    if (spaceId) tfields.spaceId = spaceId;
+    const tombstone: ItemPayload = {
+      id: existing.id,
+      type: existing.type,
+      name: existing.name,
+      fields: tfields,
+      createdAt: existing.createdAt,
+      updatedAt,
+      deletedAt: updatedAt,
+      revision: (existing.revision ?? 0) + 1,
+    };
+    file.items[idx] = this.encryptPayload(tombstone);
+    await writeVaultFile(file);
+    return "deleted";
+  }
+
+  /**
+   * 物理删除一个空间及其全部条目（HARD delete：不合并到 fallback、不落墓碑）。
+   * 供云同步消费「vault 删除墓碑」：绑定的云 vault 已被其它设备删除，本端据此清空间+条目。
+   * 不触发空间钩子（避免回环触发云端删除）；拆绑定/刷新由 CloudService 负责。
+   */
+  async purgeSpace(id: string): Promise<void> {
+    this.requireUnlocked();
+    const file = await readVaultFile();
+    const fixed = ensureDefaultsInSnapshot(file);
+    const nextItems: EncryptedItemRow[] = [];
+    for (const row of file.items) {
+      try {
+        const payload = this.decryptRow(row);
+        const curSpace = readSpaceIdFromFields(payload.fields) ?? fixed.activeSpaceId;
+        if (curSpace === id) continue; // 物理删
+      } catch {
+        // 解密失败 → 保留（无法判定归属）
+      }
+      nextItems.push(row);
+    }
+    const remaining = fixed.spaces.filter((s) => s.id !== id);
+    const nextSpaces = remaining.length > 0 ? remaining : [buildDefaultSpace()];
+    const nextActive =
+      fixed.activeSpaceId === id ? sortSpaces(nextSpaces)[0].id : fixed.activeSpaceId;
+    await writeVaultFile({
+      ...file,
+      items: nextItems,
+      spaces: nextSpaces,
+      activeSpaceId: nextActive,
+    });
   }
 
   private encryptPayload(payload: ItemPayload): EncryptedItemRow {
@@ -1137,4 +1342,9 @@ export function readSpaceIdFromFields(
   if (!fields) return undefined;
   const v = fields.spaceId;
   return typeof v === "string" && v ? v : undefined;
+}
+
+/** 取条目所属空间 id（无 spaceId 字段的历史条目归入默认空间）—— 云同步按空间切分的统一口径。 */
+export function spaceIdOfPayload(p: ItemPayload): string {
+  return readSpaceIdFromFields(p.fields) ?? DEFAULT_SPACE_ID;
 }

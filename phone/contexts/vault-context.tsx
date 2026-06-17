@@ -34,6 +34,7 @@ import {
   type CustomField,
 } from "@/lib/custom-fields";
 import { DEFAULT_SPACE_ID, type Space } from "@/lib/spaces";
+import { cloudService } from "@/lib/cloud-service";
 import {
   batchCheckBreaches,
   clearBreachCache,
@@ -386,6 +387,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     setActiveSpaceIdState(null);
     setLocked(true);
     setInitialized(false);
+    cloudService.onVaultLocked();
     // reset 已经在 service 层删了 SecureStore WrapKey 与 trustedDevice 行
     setTrustedDeviceEnabled(false);
     breachGenerationRef.current += 1;
@@ -405,6 +407,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         await refresh();
         setInitialized(true);
         setLocked(false);
+        // 新建本地保险库后也触发云会话恢复（无账户时空操作）。
+        void cloudService.onVaultUnlocked(password);
         return { ok: true };
       } catch (e) {
         return toActionError(e);
@@ -422,6 +426,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         // 这段耗时并入解锁 spinner，避免 LockOverlay 卸载后再看到空列表。
         await refresh();
         setLocked(false);
+        // 解锁后自动恢复云会话并镜像同步（无账户 / 已禁用时空操作）。
+        void cloudService.onVaultUnlocked(password);
         return { ok: true };
       } catch (e) {
         return toActionError(e);
@@ -432,6 +438,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
   const lock = useCallback(() => {
     vaultService.lock();
+    cloudService.onVaultLocked();
     setLocked(true);
     setAllItems([]);
     // 锁定即清空 breach 状态：保留扫描结果会让锁屏后仍能看到条目名，违反
@@ -553,6 +560,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         // 与主密码路径一致：先把 items + spaces 预加载进 state，再翻 locked
         await refresh();
         setLocked(false);
+        // 生物/信任设备解锁无主密码 → 走 DEK 封装的云密码恢复会话。
+        void cloudService.onVaultUnlocked("");
         return true;
       }
       // 失败时不能直接 setTrustedDeviceEnabled(false) —— service 内部对
