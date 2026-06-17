@@ -87,7 +87,7 @@ func ensureGUIRunning() error {
 //
 // 优先级：
 //  1. 环境变量 ZPASS_GUI_BIN（开发 / 自定义安装）
-//  2. nativehost binary 同目录候选名
+//  2. 应用根下的 GUI 主程序（helper 在 resources/bin/<plat>/，GUI 在其上三层）
 //
 // 不查 $PATH —— GUI 通常装在 /Applications 或 Program Files，不入 PATH。
 func locateGUIBinaryForNativeHost() (string, error) {
@@ -118,23 +118,47 @@ func locateGUIBinaryForNativeHost() (string, error) {
 //
 // 与 zpass-agent/launcher.go::guiBinaryCandidates 保持一致。
 func guiBinaryCandidatesForNativeHost(dir string) []string {
-	switch runtime.GOOS {
+	return guiBinaryCandidatesForOS(runtime.GOOS, dir)
+}
+
+// guiBinaryCandidatesForOS 列出指定 GOOS 下要探测的 GUI 可执行文件路径，
+// 相对 helper 二进制自身所在目录 dir 解析。
+//
+// 打包布局（Electron Forge / electron-builder）：每个 Go helper —— 本
+// nativehost、zpass-agent、Go sidecar —— 都随包落在
+//
+//	<root>/resources/bin/<platform>-<arch>/
+//	(macOS: <App>.app/Contents/Resources/bin/<platform>-<arch>/)
+//
+// 即 GUI 主程序所在的「应用根」下三层。Forge 把 executableName 钉死为
+// "zpass"（见 forge.config.ts），所以主程序是 zpass / zpass.exe，而**不是**
+// 历史 Wails 产物名 "ZPassDesktop"。旧代码在 helper 同目录找 ZPassDesktop，
+// 在 Electron 布局下三平台全部命中不到 → 扩展永远「无法启动 Desktop」。
+func guiBinaryCandidatesForOS(goos, dir string) []string {
+	// 应用根：从 <root>/resources/bin/<platform>-<arch>/ 向上三层。
+	// macOS 下解析到 <App>.app/Contents。
+	root := filepath.Join(dir, "..", "..", "..")
+	switch goos {
 	case "linux":
 		return []string{
-			filepath.Join(dir, "ZPassDesktop"),
-			filepath.Join(dir, "ZPass"),
-			filepath.Join(dir, "zpass-desktop"),
+			filepath.Join(root, "zpass"),
+			// 容错：万一某 maker 用了大写产品名。
+			filepath.Join(root, "ZPass"),
 		}
 	case "darwin":
 		return []string{
-			filepath.Join(dir, "..", "..", "..", "ZPass.app"),
+			// 内层 Mach-O（<App>.app/Contents/MacOS/zpass）。探测文件而非
+			// bundle 目录，命中精确；spawn 再反推外层 .app 用 open -a。
+			filepath.Join(root, "MacOS", "zpass"),
+			// 系统安装位置兜底。
 			"/Applications/ZPass.app",
-			filepath.Join(dir, "ZPassDesktop"),
+			"/Applications/zpass.app",
 		}
 	case "windows":
 		return []string{
-			filepath.Join(dir, "ZPassDesktop.exe"),
-			filepath.Join(dir, "ZPass.exe"),
+			filepath.Join(root, "zpass.exe"),
+			// 容错：历史/大写命名。
+			filepath.Join(root, "ZPass.exe"),
 		}
 	}
 	return nil

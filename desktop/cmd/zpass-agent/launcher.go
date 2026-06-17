@@ -170,7 +170,7 @@ func (l *guiLauncher) spawn(binary string) error {
 //
 // 优先级：
 //  1. 环境变量 ZPASS_GUI_BIN
-//  2. agent binary 同目录下查找
+//  2. 应用根下的 GUI 主程序（agent 在 resources/bin/<plat>/，GUI 在其上三层）
 //
 // 不查 $PATH —— GUI 通常不在 $PATH（安装到 /Applications 或 Program Files）。
 func locateGUIBinary() (string, error) {
@@ -182,7 +182,7 @@ func locateGUIBinary() (string, error) {
 		return "", fmt.Errorf("ZPASS_GUI_BIN=%s not found", env)
 	}
 
-	// 2. agent binary 同目录
+	// 2. 应用根（agent binary 上三层）
 	agentBin, err := os.Executable()
 	if err != nil {
 		return "", fmt.Errorf("os.Executable: %w", err)
@@ -201,27 +201,48 @@ func locateGUIBinary() (string, error) {
 
 // guiBinaryCandidates 返回各平台 GUI binary 候选路径
 //
-// 名字来源：desktop/build/config.yml 里 productName = "ZPass" /
-// Wails 默认输出 ZPassDesktop。
+// 与 zpass-native-host/launcher.go::guiBinaryCandidatesForNativeHost 保持一致。
 func guiBinaryCandidates(dir string) []string {
-	switch runtime.GOOS {
+	return guiBinaryCandidatesForOS(runtime.GOOS, dir)
+}
+
+// guiBinaryCandidatesForOS 列出指定 GOOS 下要探测的 GUI 可执行文件路径，
+// 相对 agent 二进制自身所在目录 dir 解析。
+//
+// 打包布局（Electron Forge / electron-builder）：每个 Go helper —— 本
+// agent、zpass-native-host、Go sidecar —— 都随包落在
+//
+//	<root>/resources/bin/<platform>-<arch>/
+//	(macOS: <App>.app/Contents/Resources/bin/<platform>-<arch>/)
+//
+// 即 GUI 主程序所在的「应用根」下三层。Forge 把 executableName 钉死为
+// "zpass"（见 forge.config.ts），所以主程序是 zpass / zpass.exe，而**不是**
+// 历史 Wails 产物名 "ZPassDesktop"。
+func guiBinaryCandidatesForOS(goos, dir string) []string {
+	// 应用根：从 <root>/resources/bin/<platform>-<arch>/ 向上三层。
+	// macOS 下解析到 <App>.app/Contents。
+	root := filepath.Join(dir, "..", "..", "..")
+	switch goos {
 	case "linux":
 		return []string{
-			filepath.Join(dir, "ZPassDesktop"),
-			filepath.Join(dir, "ZPass"),
-			filepath.Join(dir, "zpass-desktop"),
+			filepath.Join(root, "zpass"),
+			// 容错：万一某 maker 用了大写产品名。
+			filepath.Join(root, "ZPass"),
 		}
 	case "darwin":
-		// macOS：先找 .app bundle，再找裸 binary
 		return []string{
-			filepath.Join(dir, "..", "..", "..", "ZPass.app"),
+			// 内层 Mach-O（<App>.app/Contents/MacOS/zpass）。探测文件而非
+			// bundle 目录，命中精确；spawn 再反推外层 .app 用 open -a。
+			filepath.Join(root, "MacOS", "zpass"),
+			// 系统安装位置兜底。
 			"/Applications/ZPass.app",
-			filepath.Join(dir, "ZPassDesktop"),
+			"/Applications/zpass.app",
 		}
 	case "windows":
 		return []string{
-			filepath.Join(dir, "ZPassDesktop.exe"),
-			filepath.Join(dir, "ZPass.exe"),
+			filepath.Join(root, "zpass.exe"),
+			// 容错：历史/大写命名。
+			filepath.Join(root, "ZPass.exe"),
 		}
 	}
 	return nil

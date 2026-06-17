@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"os"
 	filepathpkg "path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -83,5 +84,111 @@ func TestDispatchMessageGUIUnavailable(t *testing.T) {
 	}
 	if resp.Error != errCodeDesktopUnavailable {
 		t.Fatalf("want errCodeDesktopUnavailable, got %q", resp.Error)
+	}
+}
+
+// TestGUIBinaryCandidatesPackagedLayout pins the Electron packaged-layout
+// resolution that regressed after the Wails->Electron migration. Every Go
+// helper ships under <root>/resources/bin/<platform>-<arch>/, three levels
+// below the app root where the GUI executable (executableName "zpass") lives.
+// The pre-fix code probed the helper's OWN directory for the old Wails name
+// "ZPassDesktop", so locate failed on all three platforms and the extension's
+// "启动 Desktop" button always returned errCodeDesktopUnavailable.
+func TestGUIBinaryCandidatesPackagedLayout(t *testing.T) {
+	// helperDir mimics <root>/resources/bin/<platform>-<arch>/ (macOS:
+	// <App>.app/Contents/Resources/bin/<arch>/). The leading segment differs
+	// per case only cosmetically; the 3-up math is what matters.
+	cases := []struct {
+		goos string
+		// helperDir relative segments under a synthetic root.
+		helper []string
+		// wantPrimary is the first (packaged) candidate we must produce.
+		wantPrimary []string
+	}{
+		{
+			goos:        "linux",
+			helper:      []string{"root", "resources", "bin", "linux-x64"},
+			wantPrimary: []string{"root", "zpass"},
+		},
+		{
+			goos:        "windows",
+			helper:      []string{"root", "resources", "bin", "win32-x64"},
+			wantPrimary: []string{"root", "zpass.exe"},
+		},
+		{
+			goos:        "darwin",
+			helper:      []string{"ZPass.app", "Contents", "Resources", "bin", "darwin-arm64"},
+			wantPrimary: []string{"ZPass.app", "Contents", "MacOS", "zpass"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.goos, func(t *testing.T) {
+			dir := filepathpkg.Join(tc.helper...)
+			got := guiBinaryCandidatesForOS(tc.goos, dir)
+			if len(got) == 0 {
+				t.Fatalf("no candidates for goos=%s", tc.goos)
+			}
+			want := filepathpkg.Join(tc.wantPrimary...)
+			if got[0] != want {
+				t.Fatalf("goos=%s primary candidate = %q, want %q (all: %v)", tc.goos, got[0], want, got)
+			}
+			// Regression guard: the helper's own directory must never be a
+			// candidate (that was the old broken behavior).
+			for _, c := range got {
+				if filepathpkg.Dir(c) == dir {
+					t.Fatalf("goos=%s candidate %q sits in the helper dir %q (Wails-era bug)", tc.goos, c, dir)
+				}
+			}
+		})
+	}
+}
+
+// TestLocateGUIBinaryFindsPackagedExecutable is the end-to-end resolution:
+// build the real packaged tree on disk for the host platform, drop the GUI
+// executable at the app root, and assert a candidate from the helper dir
+// resolves it via fileExistsNH (exactly locateGUIBinaryForNativeHost's loop,
+// minus the un-fakeable os.Executable lookup).
+func TestLocateGUIBinaryFindsPackagedExecutable(t *testing.T) {
+	tmp := t.TempDir()
+	platDir := runtime.GOOS + "-" + runtime.GOARCH
+	helperDir := filepathpkg.Join(tmp, "resources", "bin", platDir)
+	if err := os.MkdirAll(helperDir, 0o755); err != nil {
+		t.Fatalf("mkdir helper: %v", err)
+	}
+
+	// Place the GUI executable where the Electron packaged layout puts it.
+	var guiPath string
+	switch runtime.GOOS {
+	case "windows":
+		guiPath = filepathpkg.Join(tmp, "zpass.exe")
+	case "darwin":
+		macOS := filepathpkg.Join(tmp, "Contents", "MacOS")
+		if err := os.MkdirAll(macOS, 0o755); err != nil {
+			t.Fatalf("mkdir MacOS: %v", err)
+		}
+		// On darwin the helper sits at <App>.app/Contents/Resources/bin/<arch>,
+		// so rebuild helperDir under Contents to keep the 3-up math honest.
+		helperDir = filepathpkg.Join(tmp, "Contents", "Resources", "bin", platDir)
+		if err := os.MkdirAll(helperDir, 0o755); err != nil {
+			t.Fatalf("mkdir darwin helper: %v", err)
+		}
+		guiPath = filepathpkg.Join(macOS, "zpass")
+	default:
+		guiPath = filepathpkg.Join(tmp, "zpass")
+	}
+	if err := os.WriteFile(guiPath, []byte("#!/bin/true\n"), 0o755); err != nil {
+		t.Fatalf("write gui binary: %v", err)
+	}
+
+	var found string
+	for _, c := range guiBinaryCandidatesForOS(runtime.GOOS, helperDir) {
+		if fileExistsNH(c) {
+			found = c
+			break
+		}
+	}
+	if found == "" {
+		t.Fatalf("no candidate resolved the packaged GUI at %q (helper=%q, candidates=%v)",
+			guiPath, helperDir, guiBinaryCandidatesForOS(runtime.GOOS, helperDir))
 	}
 }
