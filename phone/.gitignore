@@ -3,6 +3,13 @@
 # dependencies
 node_modules/
 
+# 包管理器：phone 统一只用 bun，bun.lock 是唯一锁文件。
+# 忽略其它包管理器的锁文件/配置，防止误用 pnpm/npm 后把它们提交进仓库。
+package-lock.json
+pnpm-lock.yaml
+pnpm-workspace.yaml
+yarn.lock
+
 # Expo
 .expo/
 dist/

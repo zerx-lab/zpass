@@ -41,6 +41,7 @@ ZPass 是一款**零知识架构**的跨平台密码管理器。本仓库为 mon
 
 - `desktop` 的业务逻辑只写在 Go；Electron 主进程只守护 sidecar、暴露窗口控件。详见 [`desktop/AGENTS.md`](./desktop/AGENTS.md) 的 wailscompat 章节。
 - `phone/android/` 是 `expo prebuild` 产物（gitignored），任何修改会被下一次 prebuild 抹掉。需要注入 native 资源时通过 `phone/plugins/with-cryptocore.js` 等 config plugin。
+- **`phone` 包管理器只用 [bun](https://bun.sh)**：`bun.lock` 是唯一锁文件，`package.json` 用 `packageManager` 字段钉死 bun 版本。CI（`.github/workflows/phone-android-build.yml`）用 `bun install --frozen-lockfile`，改 `package.json` 依赖后**必须 `cd phone && bun install` 同步 `bun.lock` 并一起提交**，否则 frozen 校验失败、打包中断。**禁止**在 `phone` 用 npm / pnpm / yarn——它们的锁文件已在 `.gitignore` 屏蔽，不会进仓库。
 - `website/public/demo/` 是 `design/` 的快照，不会自动同步，更新原型后需手动同步。
 
 ## 常用命令
