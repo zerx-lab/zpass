@@ -1,10 +1,21 @@
 import { defineConfig } from "wxt";
 
 export default defineConfig({
-  manifest: {
+  // `key` 仅注入开发(unpacked,command === "serve")构建,用来把扩展 ID 钉成
+  // chromeExtensionIdFromKey(key)(见 desktop/electron/src/main/nmh-install.ts),
+  // 本地调试时 native messaging 的 allowed_origins 才能静态算出。
+  //
+  // 上架包(wxt build / wxt zip,command === "build")必须去掉 key:商店为每个
+  // item 维护自己的公钥与扩展 ID,包里携带不一致的 key 会被商店拒绝上传
+  // (“清单中 key 字段的值与当前内容不符”)。
+  manifest: ({ command }) => ({
     name: "ZPass",
     description: "Secure autofill for ZPass desktop vaults.",
-    key: "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArlMje6Tpk7iDCihHmujNEAnNQd3X3eRlwmyOC3jcfY3OTR6o1x0uAOoLGKvilu71hOjwnVLXvekvpQvO/i5cg0NUkqJpgdBOZgGcb9Bd7VUxCiouG5STqJUkzT+0UxYwhUkcxTXcjaeEQ00i1PDlrnISzZVxM2YQQvTtrx4qhOYgsuVA2JlwfQ8Zf0bbSFlreyPwEBUjRd4LFCn2y9qO8MNI3PjoW5WQHXRKJeyg8QBSK+wcNQDChWSlymIYzgRVK5KdCKccGf33i5Q0t9Wy1l2ywQ1PVhST5OYN1FOjoyZf9DrzCnAbBTe4w5sQQJnfxiDyZ5k52A9LzvBKfL85/QIDAQAB",
+    ...(command === "serve"
+      ? {
+          key: "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArlMje6Tpk7iDCihHmujNEAnNQd3X3eRlwmyOC3jcfY3OTR6o1x0uAOoLGKvilu71hOjwnVLXvekvpQvO/i5cg0NUkqJpgdBOZgGcb9Bd7VUxCiouG5STqJUkzT+0UxYwhUkcxTXcjaeEQ00i1PDlrnISzZVxM2YQQvTtrx4qhOYgsuVA2JlwfQ8Zf0bbSFlreyPwEBUjRd4LFCn2y9qO8MNI3PjoW5WQHXRKJeyg8QBSK+wcNQDChWSlymIYzgRVK5KdCKccGf33i5Q0t9Wy1l2ywQ1PVhST5OYN1FOjoyZf9DrzCnAbBTe4w5sQQJnfxiDyZ5k52A9LzvBKfL85/QIDAQAB",
+        }
+      : {}),
     permissions: ["nativeMessaging", "activeTab", "tabs", "storage"],
     host_permissions: ["http://*/*", "https://*/*"],
     // - save-popup.html 走 browser.windows.create({ type: "popup" })，
@@ -41,5 +52,5 @@ export default defineConfig({
       96: "icon/96.png",
       128: "icon/128.png",
     },
-  },
+  }),
 });

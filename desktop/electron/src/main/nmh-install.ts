@@ -51,12 +51,19 @@ const HOST_NAME = "com.zerx_lab.zpass";
 // Firefox manifest 用 allowed_extensions 限定调用方,该 id 在 wxt 配置里是固定值。
 const FIREFOX_EXT_ID = "zpass-extension@zerx-lab.local";
 
-// 与 extension/wxt.config.ts 中 manifest.key 同步。Chrome 从 key (base64 SPKI
-// public key)派生固定 extension id:sha256(der) 前 16 字节的 hex,每个 hex 字符
-// c (0-f) 映射为字符 'a' + int(c) (a-p)。所以只要 key 不变,扩展无论 unpacked
-// 加载还是商店上线,id 都一样,allowed_origins 可以静态算出。
+// 与 extension/wxt.config.ts 中【开发(unpacked)构建】注入的 manifest.key 同步。
+// Chrome 从 key (base64 SPKI public key)派生固定 extension id:sha256(der) 前
+// 16 字节的 hex,每个 hex 字符 c (0-f) 映射为字符 'a' + int(c) (a-p)。
+//
+// 两类安装来源 id 不同,allowed_origins 必须同时收两者:
+//   - unpacked / dev:带 CHROME_MANIFEST_KEY → id = chromeExtensionIdFromKey(key)。
+//   - 上架包:不带 key,商店用自己注册的公钥重签 → id = CHROME_STORE_EXT_ID。
 const CHROME_MANIFEST_KEY =
   "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArlMje6Tpk7iDCihHmujNEAnNQd3X3eRlwmyOC3jcfY3OTR6o1x0uAOoLGKvilu71hOjwnVLXvekvpQvO/i5cg0NUkqJpgdBOZgGcb9Bd7VUxCiouG5STqJUkzT+0UxYwhUkcxTXcjaeEQ00i1PDlrnISzZVxM2YQQvTtrx4qhOYgsuVA2JlwfQ8Zf0bbSFlreyPwEBUjRd4LFCn2y9qO8MNI3PjoW5WQHXRKJeyg8QBSK+wcNQDChWSlymIYzgRVK5KdCKccGf33i5Q0t9Wy1l2ywQ1PVhST5OYN1FOjoyZf9DrzCnAbBTe4w5sQQJnfxiDyZ5k52A9LzvBKfL85/QIDAQAB";
+
+// Chrome Web Store 给本 item 分配的固定 extension id(发布者后台「文件包 → ID」)。
+// 商店用自己注册的公钥决定 id,与上面 CHROME_MANIFEST_KEY 派生的 dev id 不同。
+const CHROME_STORE_EXT_ID = "dafhkofilckgmnlclnkciddccogpfcdm";
 
 function chromeExtensionIdFromKey(b64: string): string {
   const der = Buffer.from(b64, "base64");
@@ -79,14 +86,14 @@ interface BrowserTarget {
   registryKey?: string;
 }
 
-function macTargets(chromeExtId: string): BrowserTarget[] {
+function macTargets(chromeExtIds: string[]): BrowserTarget[] {
   const support = join(homedir(), "Library", "Application Support");
   const chromiumBody = (path: string) => ({
     name: HOST_NAME,
     description: "ZPass native messaging host",
     path,
     type: "stdio",
-    allowed_origins: [`chrome-extension://${chromeExtId}/`],
+    allowed_origins: chromeExtIds.map((id) => `chrome-extension://${id}/`),
   });
   return [
     {
@@ -119,7 +126,7 @@ function macTargets(chromeExtId: string): BrowserTarget[] {
   ];
 }
 
-function winTargets(chromeExtId: string): BrowserTarget[] {
+function winTargets(chromeExtIds: string[]): BrowserTarget[] {
   // LOCALAPPDATA / APPDATA 理论上一定有值;拿不到就放弃探测(返回空列表),
   // 不要猜路径。
   const localAppData = process.env.LOCALAPPDATA;
@@ -137,7 +144,7 @@ function winTargets(chromeExtId: string): BrowserTarget[] {
     description: "ZPass native messaging host",
     path,
     type: "stdio",
-    allowed_origins: [`chrome-extension://${chromeExtId}/`],
+    allowed_origins: chromeExtIds.map((id) => `chrome-extension://${id}/`),
   });
   return [
     {
@@ -240,11 +247,14 @@ export async function installNativeMessagingHosts(): Promise<void> {
     return;
   }
 
-  const chromeExtId = chromeExtensionIdFromKey(CHROME_MANIFEST_KEY);
+  const chromeExtIds = [
+    chromeExtensionIdFromKey(CHROME_MANIFEST_KEY),
+    CHROME_STORE_EXT_ID,
+  ];
   const targets =
     process.platform === "darwin"
-      ? macTargets(chromeExtId)
-      : winTargets(chromeExtId);
+      ? macTargets(chromeExtIds)
+      : winTargets(chromeExtIds);
 
   for (const t of targets) {
     if (!existsSync(t.probeDir)) continue;

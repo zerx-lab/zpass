@@ -161,9 +161,22 @@ The probe rule is "only write manifests for browsers the user actually has":
 | Edge    | `~/Library/Application Support/Microsoft Edge`  | `~/Library/Application Support/Microsoft Edge/NativeMessagingHosts/com.zerx_lab.zpass.json` |
 | Firefox | `~/Library/Application Support/Firefox`         | `~/Library/Application Support/Mozilla/NativeMessagingHosts/com.zerx_lab.zpass.json` |
 
-The Chrome extension id is computed from `wxt.config.ts`'s `manifest.key`
-(deterministic), so `allowed_origins` does not need a manual id update across
-unpacked / Chrome Web Store builds.
+There are two install sources with **different** extension ids, and the desktop
+auto-installer (`desktop/electron/src/main/nmh-install.ts`) writes both into
+`allowed_origins`:
+
+- **Unpacked / dev** (`wxt dev`): `wxt.config.ts` injects `manifest.key`, so the
+  id is `chromeExtensionIdFromKey(key)` = `nlnkemblgkpcpepbholdkcmcfgjhgfda`.
+- **Chrome Web Store**: store builds (`wxt build` / `wxt zip`) deliberately omit
+  `key` — a web store registers its own public key per item and rejects any
+  package whose `key` disagrees with it ("清单中 key 字段的值与当前内容不符").
+  The store re-signs with its own key, so the published id is store-assigned:
+  `dafhkofilckgmnlclnkciddccogpfcdm`.
+
+Both ids are hard-coded in `nmh-install.ts` (`CHROME_MANIFEST_KEY` →
+derived dev id, and `CHROME_STORE_EXT_ID`), so macOS native messaging works
+for either install. On Windows, pass the id you actually use to
+`install-chrome.ps1 -ExtensionId` (the store id for a store install).
 
 ### Windows — Chrome / Edge
 
