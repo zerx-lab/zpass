@@ -129,6 +129,7 @@ package() {
   local host_name="com.zerx_lab.zpass"
   local host_bin="/opt/zpass/resources/bin/linux-${NODE_ARCH}/zpass-native-host"
   local chrome_ext_id="nlnkemblgkpcpepbholdkcmcfgjhgfda"
+  local chrome_store_ext_id="dafhkofilckgmnlclnkciddccogpfcdm"
   local firefox_ext_id="zpass-extension@zerx-lab.local"
 
   local chromium_manifest="{
@@ -136,7 +137,7 @@ package() {
   \"description\": \"ZPass native messaging host\",
   \"path\": \"\${host_bin}\",
   \"type\": \"stdio\",
-  \"allowed_origins\": [\"chrome-extension://\${chrome_ext_id}/\"]
+  \"allowed_origins\": [\"chrome-extension://\${chrome_ext_id}/\", \"chrome-extension://\${chrome_store_ext_id}/\"]
 }"
   local firefox_manifest="{
   \"name\": \"\${host_name}\",

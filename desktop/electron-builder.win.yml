@@ -52,6 +52,10 @@ nsis:
   # 不做差分包 / 不配 publish: 当前没有接入 electron-builder 的自动更新通道,
   # 关掉以免它去生成/索要 latest.yml 之类的更新元数据。
   differentialPackage: false
+  # 自定义 NSIS 钩子: 安装/卸载前 taskkill 常驻的 zpass-native-host.exe /
+  # zpass-agent.exe。这两个 helper 由浏览器 / GUI 之外的生命周期驱动, 升级时
+  # 仍可能在跑并锁住自身 .exe, 导致 NSIS 覆盖/删除失败。见脚本内详注。
+  include: scripts/nsis/installer.nsh
 
 # NSIS 工具链版本。默认 "0.0.0" 的 legacy 拆包 (nsis-3.0.4.1 + nsis-resources-3.4.1)
 # 在 electron-builder 26.15.2/26.15.3 上有 bug: getNsisElevatePath 去 nsis-3.0.4.1

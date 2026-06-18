@@ -1,9 +1,10 @@
-// 浏览器 Native Messaging Host manifest 静默装/更新 —— macOS + Windows。
+// 浏览器 Native Messaging Host manifest 静默装/更新 —— macOS + Windows + Linux。
 //
 // ---------------------------------------------------------------------------
 // 为什么放在主进程
 //
-// 两个平台的 NMH 发现机制不同,但都不需要提权,可以在 GUI 启动时静默完成:
+// 三个平台的 NMH 发现机制不同,但都只写用户级路径、不需要提权,可以在 GUI 启动时
+// 静默完成:
 //
 //   - macOS:Chrome / Edge / Firefox 只认
 //     ~/Library/Application Support/<browser>/NativeMessagingHosts/<name>.json
@@ -12,6 +13,9 @@
 //     注册表键的默认值读 manifest 的绝对路径。manifest 本体可以放任意稳定
 //     位置(我们放 userData/NativeMessagingHosts/<browser>/),写完文件后用
 //     系统自带的 reg.exe 把 HKCU 键指过去。HKCU 无需 UAC 提权。
+//   - Linux:浏览器扫描用户级 ~/.config/<browser>/NativeMessagingHosts/<name>.json
+//     (Firefox 用 ~/.mozilla/native-messaging-hosts/),直接写文件即可,无需注册表
+//     或系统级 /etc(后者只在打包脚本 make-arch.sh 里用,需 root)。
 //
 // 用户期望"打开 ZPass 就能用",所以这里把 manifest 写入放在 GUI 启动时,内容
 // 不变就跳过,内容变了(典型场景:版本升级换 host binary 路径)就静默覆盖。
@@ -22,7 +26,8 @@
 //   - 仅当浏览器的用户配置目录已存在时为它写 manifest,避免在没装该浏览器的
 //     机器上凭空创建 Google/Chrome 之类的目录树 / 注册表键。
 //   - manifest 文件 0644:Chrome / Firefox 以当前用户运行,需要可读;扩展不写。
-//   - 不动系统级路径(/Library、HKLM),只写用户级 ~/Library / HKCU。无需提权。
+//   - 不动系统级路径(/Library、HKLM、/etc),只写用户级 ~/Library / HKCU /
+//     ~/.config / ~/.mozilla。无需提权。
 //
 // ---------------------------------------------------------------------------
 // 版本/路径变更触发"自动更新"
@@ -177,6 +182,64 @@ function winTargets(chromeExtIds: string[]): BrowserTarget[] {
   ];
 }
 
+function linuxTargets(chromeExtIds: string[]): BrowserTarget[] {
+  // Linux 没有注册表:浏览器直接扫描用户级目录里的 <HOST_NAME>.json,所以
+  // manifestDir 就是发现路径本身(不像 win 那样另存 userData 再用键指过去)。
+  // probeDir 取各浏览器 profile 根目录(manifestDir 的父),存在即说明装过该浏览器。
+  // XDG_CONFIG_HOME 优先,未设时回落 ~/.config(freedesktop 约定)。Firefox 用
+  // ~/.mozilla(不随 XDG)。
+  const configHome =
+    process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
+  const chromiumBody = (path: string) => ({
+    name: HOST_NAME,
+    description: "ZPass native messaging host",
+    path,
+    type: "stdio",
+    allowed_origins: chromeExtIds.map((id) => `chrome-extension://${id}/`),
+  });
+  // Chromium 系:profile 根 → 其下的 NativeMessagingHosts/。目录名与 make-arch.sh
+  // 的系统级 /etc 路径对应(google-chrome→/etc/opt/chrome 等),这里是用户级等价物。
+  const chromiumDirs: Array<[string, string]> = [
+    ["Chrome", "google-chrome"],
+    ["Chromium", "chromium"],
+    ["Edge", "microsoft-edge"],
+    ["Vivaldi", "vivaldi"],
+  ];
+  const targets: BrowserTarget[] = chromiumDirs.map(([label, dir]) => {
+    const profileRoot = join(configHome, dir);
+    return {
+      label,
+      probeDir: profileRoot,
+      manifestDir: join(profileRoot, "NativeMessagingHosts"),
+      build: chromiumBody,
+    };
+  });
+  // Brave 的 profile 根多一层 BraveSoftware/Brave-Browser/。
+  const braveRoot = join(configHome, "BraveSoftware", "Brave-Browser");
+  targets.push({
+    label: "Brave",
+    probeDir: braveRoot,
+    manifestDir: join(braveRoot, "NativeMessagingHosts"),
+    build: chromiumBody,
+  });
+  // Firefox:profile 在 ~/.mozilla/firefox/,但 manifest 放 ~/.mozilla/native-messaging-hosts/
+  // (Firefox 官方约定)。用 ~/.mozilla/firefox 做存在性探测。
+  const mozillaRoot = join(homedir(), ".mozilla");
+  targets.push({
+    label: "Firefox",
+    probeDir: join(mozillaRoot, "firefox"),
+    manifestDir: join(mozillaRoot, "native-messaging-hosts"),
+    build: (path) => ({
+      name: HOST_NAME,
+      description: "ZPass native messaging host",
+      path,
+      type: "stdio",
+      allowed_extensions: [FIREFOX_EXT_ID],
+    }),
+  });
+  return targets;
+}
+
 // 与 backend.ts 的 resolveBinaryPath 同模式:packaged 走 resourcesPath/bin/,
 // dev 走 appPath/bin/。host binary 在 task build:nativehost 时落入
 // bin/<platform>-<arch>/zpass-native-host[.exe]。
@@ -227,17 +290,23 @@ async function writeIfChanged(
 }
 
 /**
- * 给装了 Chrome / Edge / Firefox 的 macOS / Windows 用户静默装 NMH。
+ * 给装了 Chrome / Edge / Firefox(及 Linux 上的 Chromium / Brave / Vivaldi)的
+ * macOS / Windows / Linux 用户静默装 NMH。
  *
  * 调用约定:
- *   - 不支持的平台(Linux 暂未实现):直接 return,不报错。
+ *   - 不支持的平台:直接 return,不报错。
  *   - host binary 找不到(dev 没跑过 task build:nativehost):log warning 后 return,
  *     不写指向不存在二进制的 manifest。
  *   - 单个浏览器写入失败不影响其它浏览器和 GUI 启动:全程 try/catch。
  *   - manifest 内容字节一致则不写;Windows 注册表 add /f 本身幂等。
  */
 export async function installNativeMessagingHosts(): Promise<void> {
-  if (process.platform !== "darwin" && process.platform !== "win32") return;
+  if (
+    process.platform !== "darwin" &&
+    process.platform !== "win32" &&
+    process.platform !== "linux"
+  )
+    return;
 
   const hostPath = resolveNativeHostBinary();
   if (!hostPath) {
@@ -254,7 +323,9 @@ export async function installNativeMessagingHosts(): Promise<void> {
   const targets =
     process.platform === "darwin"
       ? macTargets(chromeExtIds)
-      : winTargets(chromeExtIds);
+      : process.platform === "win32"
+        ? winTargets(chromeExtIds)
+        : linuxTargets(chromeExtIds);
 
   for (const t of targets) {
     if (!existsSync(t.probeDir)) continue;
