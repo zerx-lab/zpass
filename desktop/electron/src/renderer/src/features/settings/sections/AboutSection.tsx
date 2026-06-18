@@ -5,11 +5,12 @@ import { Row, Section } from "../shared";
 export function AboutSection() {
 	const { t } = useTranslation();
 
-	// 版本号与构建标识目前是硬编码，后续可通过 Tauri 的 @tauri-apps/api/app
-	// 的 getVersion() / getName() 读取真实 metadata；当前 UI 先走常量，避免
-	// 每次开 Settings 页都发起一次 IPC。
+	// 版本号仍是硬编码（暂无统一 build-stamp）。构建标识由 Vite 在编译期静态
+	// 注入的 import.meta.env.PROD 决定：`task dev` 走 vite dev server（DEV=true）
+	// 显示 "dev"；`task build`/`task make` 及 CI 的 `pnpm run package/make` 走
+	// production 构建（PROD=true）显示 "release"。无运行时 IPC 开销。
 	const version = "0.1.0";
-	const build = "dev";
+	const build = import.meta.env.PROD ? "release" : "dev";
 
 	// 说明：
 	//   "源代码"行已移除 —— ZPass 并非开源项目，不向用户暴露仓库地址，避免
