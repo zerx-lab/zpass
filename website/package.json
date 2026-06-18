@@ -1,7 +1,7 @@
 {
   "name": "zpass-website",
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "ZPass 官网 — 基于零知识架构的跨平台密码管理器",
   "scripts": {
