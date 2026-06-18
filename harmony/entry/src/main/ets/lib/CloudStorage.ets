@@ -272,3 +272,79 @@ export async function clearCloudState(): Promise<void> {
     // 静默：删失败不阻塞登出（下次写会覆盖）
   }
 }
+
+/* ----------------------------------------------------------------------------
+ * 换账户归属残留（仅记录"上一个云账户绑定过哪些本地空间"，无任何密钥）
+ *
+ * 为什么要它：signOut 会 clearCloudState() 删整份主状态（含全部密钥/绑定），
+ * 于是换账户登录 B 时已无从知道哪些本地空间曾属于上一个账户 A。若不区分，
+ * doReconcile 会把 A 残留的云空间当作"本地待上云"撑爆 B 配额（致 B 无法同步）
+ * 或按同名误领养（串账）。但又**不能整库重置**——用户可能有从不上云的纯本地空间，
+ * 那些必须保留。
+ *
+ * 解法：signOut 把"当前账户 accountId + 它绑定过的 spaceId 列表"写入这份独立的
+ * 无密钥残留文件。换账户 B 登录、其 accountId ≠ 残留 accountId 时，只清理残留里
+ * 列出的（曾被 A 云绑定的）空间；纯本地空间从不进入此列表，天然保留。消费后删除。
+ * -------------------------------------------------------------------------- */
+
+const OWNER_FILE: string = 'zpass-cloud-owner-v1.json';
+
+/** 上一个云账户的归属残留：哪个账户、绑定过哪些本地空间。 */
+export interface CloudOwnerResidue {
+  accountId: string;
+  spaceIds: string[];
+}
+
+function ownerPath(): string | null {
+  const dir = AppStorage.get<string>(FILES_DIR_KEY);
+  if (!dir) return null;
+  return `${dir}/${OWNER_FILE}`;
+}
+
+/** 写归属残留（signOut 调用）。失败静默——它只是优化换号清理的提示，不阻塞登出。 */
+export async function saveCloudOwnerResidue(residue: CloudOwnerResidue): Promise<void> {
+  const path = ownerPath();
+  if (!path) return;
+  try {
+    const handle = await fs.open(
+      path,
+      fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC,
+    );
+    try {
+      await fs.write(handle.fd, JSON.stringify(residue));
+    } finally {
+      await fs.close(handle.fd);
+    }
+  } catch (_e) {
+    // 静默
+  }
+}
+
+/** 读归属残留；不存在/损坏返回 null。 */
+export async function loadCloudOwnerResidue(): Promise<CloudOwnerResidue | null> {
+  const path = ownerPath();
+  if (!path) return null;
+  try {
+    if (!(await fs.access(path))) return null;
+    const parsed = JSON.parse(await fs.readText(path)) as CloudOwnerResidue;
+    if (!parsed || typeof parsed.accountId !== 'string' || !Array.isArray(parsed.spaceIds)) return null;
+    const spaceIds: string[] = [];
+    for (const id of parsed.spaceIds) {
+      if (typeof id === 'string' && id && spaceIds.indexOf(id) < 0) spaceIds.push(id);
+    }
+    return { accountId: parsed.accountId, spaceIds };
+  } catch (_e) {
+    return null;
+  }
+}
+
+/** 删除归属残留（消费后 / 同账户重登）。 */
+export async function clearCloudOwnerResidue(): Promise<void> {
+  const path = ownerPath();
+  if (!path) return;
+  try {
+    if (await fs.access(path)) await fs.unlink(path);
+  } catch (_e) {
+    // 静默
+  }
+}

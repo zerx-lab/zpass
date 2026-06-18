@@ -130,6 +130,12 @@ interface CloudState {
   addPendingRemoteDelete: (vaultId: string) => void;
   /** 移除待删记录(删除成功 / 已不存在 / 非本人 owner)。 */
   clearPendingRemoteDelete: (vaultId: string) => void;
+  /**
+   * 清空所有账户作用域的持久状态(忽略/分离/待删/墓碑游标),仅保留 deviceId。
+   * 登出或切换云账户时必须调用 —— 这些集合不按 accountId 区分,残留会污染
+   * 下一个账户的镜像对账(错误跳过镜像 / 反复重试不属于本账户的删除)。
+   */
+  resetAccountScopedState: () => void;
 }
 
 function genDeviceId(): string {
@@ -274,6 +280,14 @@ export const useCloudStore = create<CloudState>()(
         set((s) => ({
           pendingRemoteDeletes: s.pendingRemoteDeletes.filter((v) => v !== vaultId),
         })),
+
+      resetAccountScopedState: () =>
+        set({
+          ignoredVaultIds: [],
+          detachedSpaceIds: [],
+          pendingRemoteDeletes: [],
+          tombstoneCursors: {},
+        }),
     }),
     {
       name: "zpass.cloud",

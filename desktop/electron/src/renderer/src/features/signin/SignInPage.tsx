@@ -38,6 +38,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/Button";
 import { MiniTitlebar } from "@/components/MiniTitlebar";
 import { registerCloud, signInCloud } from "@/lib/cloud-api";
+import { translateCloudError } from "@/lib/cloud-errors";
 import { vaultApi } from "@/lib/vault-api";
 import { useAccountStore } from "@/stores/account";
 import { useCloudStore } from "@/stores/cloud";
@@ -108,26 +109,6 @@ function looksLikeSecretKey(s: string): boolean {
 	return SECRET_KEY_CANON_RE.test(canon.slice(2));
 }
 
-/** 将后端抛出的 Error 映射到 i18n 错误 key */
-function mapError(e: unknown): string {
-	const msg = e instanceof Error ? e.message.toLowerCase() : String(e).toLowerCase();
-	if (msg.includes("not configured") || msg.includes("no server")) return "cloud_err_not_configured";
-	if (msg.includes("multi-factor") || msg.includes("mfa")) return "cloud_err_mfa";
-	if (msg.includes("secret key must match") || msg.includes("z1-")) return "cloud_err_secretkey_format";
-	// 认证失败常见短语
-	if (
-		msg.includes("invalid") ||
-		msg.includes("credentials") ||
-		msg.includes("unauthorized") ||
-		msg.includes("incorrect") ||
-		msg.includes("wrong password") ||
-		msg.includes("401")
-	) {
-		return "cloud_err_credentials";
-	}
-	return "cloud_err_generic";
-}
-
 /* ── 主组件 ──────────────────────────────────────────────────────────── */
 
 type PageMode = "signin" | "register" | "save-key";
@@ -196,10 +177,10 @@ export function SignInPage() {
 		e.preventDefault();
 		if (loading) return;
 
-		if (!isLikelyEmail(email)) { setErrorKey("signin_err_email"); return; }
-		if (password.trim().length === 0) { setErrorKey("signin_err_password"); return; }
-		if (!secretKey.trim()) { setErrorKey("cloud_err_secretkey_required"); return; }
-		if (!looksLikeSecretKey(secretKey)) { setErrorKey("cloud_err_secretkey_format"); return; }
+		if (!isLikelyEmail(email)) { setErrorKey(t("signin_err_email")); return; }
+		if (password.trim().length === 0) { setErrorKey(t("signin_err_password")); return; }
+		if (!secretKey.trim()) { setErrorKey(t("cloud_err_secretkey_required")); return; }
+		if (!looksLikeSecretKey(secretKey)) { setErrorKey(t("cloud_err_secretkey_format")); return; }
 
 		setErrorKey(null);
 		setLoading(true);
@@ -215,7 +196,7 @@ export function SignInPage() {
 			await bootstrapLocalVault(password);
 			navigate(from, { replace: true });
 		} catch (e) {
-			setErrorKey(mapError(e));
+			setErrorKey(translateCloudError(e instanceof Error ? e.message : String(e), t));
 		} finally {
 			setLoading(false);
 		}
@@ -226,9 +207,9 @@ export function SignInPage() {
 		e.preventDefault();
 		if (loading) return;
 
-		if (!isLikelyEmail(email)) { setErrorKey("signin_err_email"); return; }
-		if (password.trim().length === 0) { setErrorKey("signin_err_password"); return; }
-		if (password !== confirmPwd) { setErrorKey("cloud_err_pwd_mismatch"); return; }
+		if (!isLikelyEmail(email)) { setErrorKey(t("signin_err_email")); return; }
+		if (password.trim().length === 0) { setErrorKey(t("signin_err_password")); return; }
+		if (password !== confirmPwd) { setErrorKey(t("cloud_err_pwd_mismatch")); return; }
 
 		setErrorKey(null);
 		setLoading(true);
@@ -242,7 +223,7 @@ export function SignInPage() {
 			});
 			setMode("save-key");
 		} catch (e) {
-			setErrorKey(mapError(e));
+			setErrorKey(translateCloudError(e instanceof Error ? e.message : String(e), t));
 		} finally {
 			setLoading(false);
 		}
@@ -410,7 +391,7 @@ export function SignInPage() {
 								{errorKey && (
 									<>
 										<ShieldAlert size={13} strokeWidth={1.5} className="mt-0.5 shrink-0 text-(--text-3)" />
-										<span>{t(errorKey)}</span>
+										<span>{errorKey}</span>
 									</>
 								)}
 							</div>
@@ -534,7 +515,7 @@ export function SignInPage() {
 								{errorKey && (
 									<>
 										<ShieldAlert size={13} strokeWidth={1.5} className="mt-0.5 shrink-0 text-(--text-3)" />
-										<span>{t(errorKey)}</span>
+										<span>{errorKey}</span>
 									</>
 								)}
 							</div>

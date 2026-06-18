@@ -17,8 +17,10 @@ import { useNavigate } from "react-router-dom";
 import { ExportDialog } from "@/components/ExportDialog";
 import { ImportDialog } from "@/components/ImportDialog";
 import { SpaceAvatar } from "@/components/SpaceAvatar";
-import { SHORTCUTS, formatShortcut } from "@/lib/keys";
+import { signOutCloud } from "@/lib/cloud-api";
+import { formatShortcut, SHORTCUTS } from "@/lib/keys";
 import { useAccountStore } from "@/stores/account";
+import { useCloudStore } from "@/stores/cloud";
 import { useLockStore } from "@/stores/lock";
 import { type Space, useActiveSpace, useSpacesStore } from "@/stores/spaces";
 
@@ -239,6 +241,25 @@ function WorkspaceSwitcherMain({
 	const lock = useLockStore((s) => s.lock);
 	const accountMode = useAccountStore((s) => s.mode);
 	const signOut = useAccountStore((s) => s.signOut);
+
+	// 退出登录：必须先吊销云会话并删钥匙串凭据(否则 CloudAutoRestore 下次解锁
+	// 会用残留 pw- 静默重登旧账户),再清空账户作用域的本地镜像状态(忽略/分离/
+	// 待删/墓碑游标不按账户区分,残留会污染下一账户对账),最后翻转本地 UI 账户态。
+	const handleSignOut = () => {
+		void (async () => {
+			if (useCloudStore.getState().status?.signedIn) {
+				try {
+					await signOutCloud();
+				} catch {
+					// 云端登出失败(离线)不阻塞本地登出:钥匙串凭据已尽力清除,
+					// 本地状态仍需重置,避免换账户串数据。
+				}
+				await useCloudStore.getState().refresh();
+			}
+			useCloudStore.getState().resetAccountScopedState();
+			signOut();
+		})();
+	};
 
 	// 导入 / 导出对话框开关 —— 由下方菜单项触发，渲染在 Root 子节点（独立于 Content 生命周期）
 	const [importOpen, setImportOpen] = useState(false);
@@ -595,7 +616,7 @@ function WorkspaceSwitcherMain({
 					{/* 登录 / 退出 —— 跟随账户状态切换 */}
 					{accountMode === "signed-in" ? (
 						<DropdownMenu.Item
-							onSelect={signOut}
+							onSelect={handleSignOut}
 							className={clsx(
 								"mx-1 mt-1 mb-1 flex h-9 cursor-default items-center gap-2 rounded-sm px-2 text-[12.5px]",
 								"text-(--text-2) transition-colors select-none",

@@ -119,6 +119,7 @@ export function CloudSyncSection() {
     setSignOutBusy(true);
     try {
       await signOutCloud();
+      cloudStore.resetAccountScopedState();
       await cloudStore.refresh();
     } catch {
       // 登出失败不需要提示（状态刷新后 UI 自动更新）

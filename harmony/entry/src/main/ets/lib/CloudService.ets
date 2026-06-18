@@ -62,9 +62,13 @@ import {
   clearCloudState,
   loadCloudState,
   saveCloudState,
+  saveCloudOwnerResidue,
+  loadCloudOwnerResidue,
+  clearCloudOwnerResidue,
   type CloudAccountRecord,
   type CloudVaultBinding,
   type CloudItemSyncState,
+  type CloudOwnerResidue,
 } from './CloudStorage';
 import {
   CloudSyncError,
@@ -472,6 +476,11 @@ export class CloudService {
         // 离线 / 已失效 → 忽略，本地清理继续
       }
     }
+    // 在清空 bindings/accountId 前，捕获"本账户绑定过哪些本地空间"作为换号清理残留。
+    // 只记 spaceId（无密钥）；纯本地空间从不绑定 → 不入列 → 换号时不会被误删。
+    const ownerAccountId = this.accountId;
+    const ownedSpaceIds: string[] = [];
+    this.bindings.forEach((b) => ownedSpaceIds.push(b.spaceId));
     this.tearDownSession();
     this.clearMfaPending();
     this.conflicts = [];
@@ -500,6 +509,14 @@ export class CloudService {
       // 忽略
     }
     await clearCloudState();
+    // 写归属残留：若本账户绑定过本地空间，登出后保留一条"A 绑定过这些 spaceId"的无密钥记录，
+    // 供换账户登录时精确清理 A 残留云空间（保留纯本地空间）。无绑定则清掉旧残留。
+    if (ownerAccountId && ownedSpaceIds.length > 0) {
+      const residue: CloudOwnerResidue = { accountId: ownerAccountId, spaceIds: ownedSpaceIds };
+      await saveCloudOwnerResidue(residue);
+    } else {
+      await clearCloudOwnerResidue();
+    }
     await this.refreshSpaceStates();
   }
 
@@ -720,6 +737,11 @@ export class CloudService {
    */
   private async doReconcile(): Promise<string> {
     if (!vaultService.isUnlocked()) return '';
+    // 换账户清理：消费上一个云账户的归属残留。若残留账户 ≠ 当前账户（真换号），
+    // 物理删除残留里列出的、当前仍未被本账户绑定的本地空间（A 的云空间残留）——
+    // 必须先于 step1/step2，避免 A 残留撑爆 B 配额或按同名误领养。纯本地空间从不在残留
+    // 列表里，绝不受影响。消费后删残留（幂等：非换号 / 无残留时为空操作）。
+    await this.purgePrevOwnerResidue();
     // ── step 0：删除墓碑传播（先于 listVaults，使下方 remote 反映删除后的状态）+ 重试待删 vault ──
     // 命中本地绑定的「主动删除」墓碑 → 物理删本地空间（与「失去访问」区分：后者仍走 detached 保留）。
     let changed = false;
@@ -848,6 +870,46 @@ export class CloudService {
       this.removeDefaultAfterFocus = true;
     }
     return firstSignIn ? firstPulledSpaceId : '';
+  }
+
+  /**
+   * 换账户清理：消费上一个云账户登出时写下的归属残留。
+   *
+   * 残留 = { accountId, spaceIds }，由 signOut 在清空 bindings 前从绑定派生（仅 spaceId，无密钥）。
+   * 仅当 vault 已解锁、残留存在、且残留 accountId ≠ 当前账户（真换号，非同账户重登）时，
+   * 物理删除残留里列出的、当前仍未被本账户绑定的本地空间——它们是上一个账户的云空间残留，
+   * 若不删会被 doReconcile 当作"本地待上云"撑爆新账户配额（致新账户无法同步）或按同名误领养（串账）。
+   *
+   * 安全性：纯本地空间从不进入云绑定 → 从不在残留列表里 → 绝不会被删。已被本账户重新绑定的
+   * 空间（同名领养竞态）也跳过。无论是否换号，消费后删除残留（幂等）。
+   */
+  private async purgePrevOwnerResidue(): Promise<void> {
+    if (!vaultService.isUnlocked()) return;
+    const residue = await loadCloudOwnerResidue();
+    if (!residue) return;
+    // 同账户重登（残留就是当前账户）或残留为空 → 不删任何空间，仅清残留。
+    if (!residue.accountId || residue.accountId === this.accountId || residue.spaceIds.length === 0) {
+      await clearCloudOwnerResidue();
+      return;
+    }
+    let purgedAny = false;
+    for (const spaceId of residue.spaceIds) {
+      if (this.bindings.has(spaceId)) continue; // 已被本账户重新绑定 → 保留
+      try {
+        await vaultService.purgeSpace(spaceId);
+        purgedAny = true;
+      } catch (_e) {
+        // 单个删除失败（空间已不存在 / 为最后一个空间）不影响其余
+      }
+      // 残留空间可能曾在内存留有同步水位 / detached 标记 → 一并清掉，防污染新账户对账
+      this.syncStates.delete(spaceId);
+      this.detachedSpaces.delete(spaceId);
+      this.overQuotaSpaces.delete(spaceId);
+    }
+    await clearCloudOwnerResidue();
+    if (purgedAny) {
+      try { await vaultStore.refresh(); } catch (_e) {}
+    }
   }
 
   /**
