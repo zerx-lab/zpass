@@ -190,6 +190,16 @@ export class InlineMenuBridge {
     }
     state.ciphers = payload;
 
+    // 解锁状态但本 origin 无任何可填条目 —— 没有信息可填, 不该弹浮层干扰视觉。
+    // 直接走 close 路径:广播 zpass.inlineMenu.close 让顶层 frame controller
+    // 拆掉(乐观打开的)injector 浮层 + 断 list port。
+    // (锁定态保留:placeholder 带"打开 ZPass"解锁 CTA, 是可操作的有效引导。
+    //  TOTP 模式下空列表同理无可填, 一并关闭。)
+    if (payload.unlocked && payload.items.length === 0) {
+      this.handleClose(tabId);
+      return;
+    }
+
     // sub-frame 触发的 open 路径:浮层必须挂在顶层 frame。给顶层 frame
     // 发 remoteOpen, 让它的 controller 用 injector 挂浮层 + 启动 iframe
     // 来 connect 本 background port 接 ciphers。

@@ -219,10 +219,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # `wxt zip` 默认目标是 chrome, 加 -b firefox 切到 firefox MV2.
-      # firefox 包额外生成 *-sources.zip (AMO 审核要求, 因为构建用了 minify).
-      - name: Build Chrome MV3 zip
+      # 上架商店包(无 key):默认 -b chrome。商店用自己的公钥重签,id = dafhkof...
+      - name: Build Chrome MV3 zip (store, no key)
         run: npx wxt zip
+
+      # 自托管手动加载包(带 key):自定义 browser 串 chrome-selfhost 触发
+      # wxt.config.ts 注入 manifest.key,使解压加载后 id 恒为 nlnkem...
+      # (已被 desktop NMH allowed_origins 收录,native messaging 直通,与
+      # 解压目录路径无关)。--mv3 显式钉死,避免未知 browser 串被猜成 MV2。
+      # 产物名 .output/<pkg>-<version>-chrome-selfhost.zip。
+      - name: Build Chrome MV3 zip (self-host, with key)
+        run: npx wxt zip -b chrome-selfhost --mv3
 
       - name: Build Firefox MV2 zip
         run: npx wxt zip -b firefox
@@ -237,6 +244,9 @@ jobs:
           mkdir -p release
           shopt -s nullglob
 
+          for f in .output/*-chrome-selfhost.zip; do
+            cp "$f" "release/ZPass-extension-chrome-selfhost.zip"
+          done
           for f in .output/*-chrome.zip; do
             cp "$f" "release/ZPass-extension-chrome.zip"
           done

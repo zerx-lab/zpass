@@ -229,9 +229,10 @@ const PLATFORM_METAS: PlatformMeta[] = [
 				label: "Chrome 手动加载 (.zip)",
 				arch: "chromium",
 				format: "zip",
-				filename: "ZPass-extension-chrome.zip",
-				noteZh: "解压后从开发者模式加载",
-				noteEn: "Unpack and load via developer mode",
+				filename: "ZPass-extension-chrome-selfhost.zip",
+				noteZh: "解压后从开发者模式加载 · 固定扩展 ID,免配置直连桌面端",
+				noteEn:
+					"Unpack and load via developer mode · fixed extension ID, connects to desktop out of the box",
 			},
 			{
 				label: "Firefox",
@@ -304,8 +305,8 @@ export const FALLBACK_ASSETS: FallbackAsset[] = [
 	fb("ZPass-linux-x64.zip", 117033929),
 	fb("ZPass-android-arm64-v8a.apk", 42039822),
 	fb("ZPass-android-x86_64.apk", 44797184),
-	fb("ZPass-android-universal.apk", 116368551),
 	fb("ZPass-extension-chrome.zip", 55392),
+	fb("ZPass-extension-chrome-selfhost.zip", 55600),
 	fb("ZPass-extension-firefox.zip", 55366),
 	fb("ZPass-extension-sources.zip", 588881),
 ];
