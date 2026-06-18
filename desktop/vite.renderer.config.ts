@@ -1,7 +1,16 @@
 import { defineConfig } from "vite";
 import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+
+// 版本号唯一权威来源：desktop/package.json 的 version 字段。CI 发布时
+// .github/workflows/desktop-build.yml 会先把 release tag 回写进 package.json，
+// 这里在构建期读出并通过 define 静态注入 renderer，使「关于」页展示的版本
+// 与安装包内嵌版本、git tag 三者一致。
+const pkgVersion = JSON.parse(
+  readFileSync(resolve(__dirname, "package.json"), "utf8"),
+).version as string;
 
 // Renderer (browser) build for the ported ZPass React app.
 //
@@ -33,6 +42,10 @@ const compatRoot = resolve(rendererSrc, "compat");
 
 export default defineConfig({
   root: rendererRoot,
+  // 编译期把版本号常量内联进 bundle，AboutSection 直接引用 __APP_VERSION__。
+  define: {
+    __APP_VERSION__: JSON.stringify(pkgVersion),
+  },
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: [

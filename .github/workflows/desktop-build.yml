@@ -104,6 +104,37 @@ jobs:
       - name: Install pnpm dependencies
         run: pnpm install --frozen-lockfile
 
+      # 把 release tag 回写到 desktop/package.json 的 version，使三处版本一致：
+      #   1. electron-forge / electron-builder 打包时读 package.json → 安装包内嵌版本
+      #   2. vite.renderer.config.ts 构建期读 package.json → 注入 __APP_VERSION__
+      #      → 应用内「关于」页展示
+      #   3. GitHub Release 的 tag 本身
+      #   - push tag v*                  → github.ref_name 去掉 v 前缀
+      #   - workflow_dispatch + tag_name → inputs.tag_name 去掉 v 前缀
+      #   - 其它 dispatch（不发 release）→ 不改，沿用源码里的 version
+      # npm version 只改 package.json，不动 pnpm-lock.yaml，故不破坏 frozen-lockfile。
+      - name: Sync release tag into package.json version
+        env:
+          DISPATCH_TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          raw=""
+          if [[ "${{ github.ref_type }}" == "tag" && -n "${{ github.ref_name }}" ]]; then
+            raw="${{ github.ref_name }}"
+          elif [[ -n "$DISPATCH_TAG_NAME" ]]; then
+            raw="$DISPATCH_TAG_NAME"
+          fi
+          if [[ -z "$raw" ]]; then
+            echo "[skip] no release tag, keep package.json version as-is"
+            exit 0
+          fi
+          version="${raw#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::tag '$raw' is not a valid semver (expected vX.Y.Z)"
+            exit 1
+          fi
+          npm version "$version" --no-git-tag-version --allow-same-version
+          echo "[ok] desktop/package.json version -> $version"
+
       # `task make` 链路里 `task icons` 调 ImageMagick 的 `magick` 命令.
       # Chocolatey 的 imagemagick.app 包含 IM7, 自带 `magick`, 装好后直接在 PATH.
       - name: Install ImageMagick
@@ -218,6 +249,35 @@ jobs:
       # 这里跟 README 走, 用 npm ci 确保锁文件一致.
       - name: Install dependencies
         run: npm ci
+
+      # 把 release tag 回写到 extension/package.json 的 version，WXT 据此写入
+      # 各浏览器 manifest 的 version 字段（manifest version 必须随发布递增，
+      # 否则 Chrome Web Store / AMO 会以「版本号未提升」拒绝上传新版本）。
+      #   - push tag v*                  → github.ref_name 去掉 v 前缀
+      #   - workflow_dispatch + tag_name → inputs.tag_name 去掉 v 前缀
+      #   - 其它 dispatch（不发 release）→ 不改，沿用源码里的 version
+      # 放在 npm ci 之后：npm version 只改 package.json，不动 lockfile，安全。
+      - name: Sync release tag into package.json version
+        env:
+          DISPATCH_TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          raw=""
+          if [[ "${{ github.ref_type }}" == "tag" && -n "${{ github.ref_name }}" ]]; then
+            raw="${{ github.ref_name }}"
+          elif [[ -n "$DISPATCH_TAG_NAME" ]]; then
+            raw="$DISPATCH_TAG_NAME"
+          fi
+          if [[ -z "$raw" ]]; then
+            echo "[skip] no release tag, keep package.json version as-is"
+            exit 0
+          fi
+          version="${raw#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::tag '$raw' is not a valid semver (expected vX.Y.Z)"
+            exit 1
+          fi
+          npm version "$version" --no-git-tag-version --allow-same-version
+          echo "[ok] extension/package.json version -> $version"
 
       # 上架商店包(无 key):默认 -b chrome。商店用自己的公钥重签,id = dafhkof...
       - name: Build Chrome MV3 zip (store, no key)
@@ -366,6 +426,29 @@ jobs:
       - name: Install pnpm dependencies
         run: pnpm install --frozen-lockfile
 
+      # 把 release tag 回写到 desktop/package.json 的 version（同 windows job 说明）。
+      - name: Sync release tag into package.json version
+        env:
+          DISPATCH_TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          raw=""
+          if [[ "${{ github.ref_type }}" == "tag" && -n "${{ github.ref_name }}" ]]; then
+            raw="${{ github.ref_name }}"
+          elif [[ -n "$DISPATCH_TAG_NAME" ]]; then
+            raw="$DISPATCH_TAG_NAME"
+          fi
+          if [[ -z "$raw" ]]; then
+            echo "[skip] no release tag, keep package.json version as-is"
+            exit 0
+          fi
+          version="${raw#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::tag '$raw' is not a valid semver (expected vX.Y.Z)"
+            exit 1
+          fi
+          npm version "$version" --no-git-tag-version --allow-same-version
+          echo "[ok] desktop/package.json version -> $version"
+
       - name: Build (task make → AppImage + deb + rpm + zip)
         env:
           GOOS: linux
@@ -504,6 +587,29 @@ jobs:
 
       - name: Install pnpm dependencies
         run: pnpm install --frozen-lockfile
+
+      # 把 release tag 回写到 desktop/package.json 的 version（同 windows job 说明）。
+      - name: Sync release tag into package.json version
+        env:
+          DISPATCH_TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          raw=""
+          if [[ "${{ github.ref_type }}" == "tag" && -n "${{ github.ref_name }}" ]]; then
+            raw="${{ github.ref_name }}"
+          elif [[ -n "$DISPATCH_TAG_NAME" ]]; then
+            raw="$DISPATCH_TAG_NAME"
+          fi
+          if [[ -z "$raw" ]]; then
+            echo "[skip] no release tag, keep package.json version as-is"
+            exit 0
+          fi
+          version="${raw#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::tag '$raw' is not a valid semver (expected vX.Y.Z)"
+            exit 1
+          fi
+          npm version "$version" --no-git-tag-version --allow-same-version
+          echo "[ok] desktop/package.json version -> $version"
 
       # macos-14 runner 不再预装 ImageMagick 7, 显式 brew install.
       # `task icons` 依赖 `magick` 命令把 ../assets/logo.png 缩放成各尺寸 PNG.

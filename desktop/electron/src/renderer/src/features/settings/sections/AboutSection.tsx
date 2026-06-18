@@ -5,11 +5,13 @@ import { Row, Section } from "../shared";
 export function AboutSection() {
 	const { t } = useTranslation();
 
-	// 版本号仍是硬编码（暂无统一 build-stamp）。构建标识由 Vite 在编译期静态
-	// 注入的 import.meta.env.PROD 决定：`task dev` 走 vite dev server（DEV=true）
-	// 显示 "dev"；`task build`/`task make` 及 CI 的 `pnpm run package/make` 走
-	// production 构建（PROD=true）显示 "release"。无运行时 IPC 开销。
-	const version = "0.1.0";
+	// 版本号由 Vite 在编译期静态注入 __APP_VERSION__（见 vite.renderer.config.ts），
+	// 权威来源是 desktop/package.json 的 version 字段。CI 发布时由
+	// .github/workflows/desktop-build.yml 把 release tag 回写进 package.json，
+	// 因此应用内"关于"展示的版本与安装包、git tag 三者完全一致。构建标识由
+	// import.meta.env.PROD 决定：`task dev` 走 vite dev server（DEV=true）显示
+	// "dev"；production 构建（PROD=true）显示 "release"。无运行时 IPC 开销。
+	const version = __APP_VERSION__;
 	const build = import.meta.env.PROD ? "release" : "dev";
 
 	// 说明：
