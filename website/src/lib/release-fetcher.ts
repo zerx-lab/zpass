@@ -12,13 +12,20 @@ import {
 	FALLBACK_VERSION,
 } from "../data/release";
 
+// 国内加速镜像代理前缀，格式：代理域名 + 原始 GitHub 下载 URL
+// 当代理不可用时，客户端会自动降级到原始 GitHub 地址（见 Release.astro 的 initDownloadFallback）
+const PROXY_PREFIX = "https://ghfast.top/";
+
 const RELEASE_API_URL =
 	"https://api.github.com/repos/zerx-lab/zpass/releases/latest";
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
 export interface ReleaseAssetData {
+	/** 原始 GitHub 下载地址 */
 	url: string;
+	/** 国内加速镜像地址（ghfast.top 代理），客户端探活失败后降级到 url */
+	mirrorUrl: string;
 	sizeBytes: number;
 }
 
@@ -42,10 +49,18 @@ interface CacheEntry {
 let cache: CacheEntry | null = null;
 let inflight: Promise<ReleaseData> | null = null;
 
+function makeMirror(ghUrl: string): string {
+	return PROXY_PREFIX + ghUrl;
+}
+
 function buildFallback(): ReleaseData {
 	const assets = new Map<string, ReleaseAssetData>();
 	for (const a of FALLBACK_ASSETS) {
-		assets.set(a.filename, { url: a.url, sizeBytes: a.sizeBytes });
+		assets.set(a.filename, {
+			url: a.url,
+			mirrorUrl: makeMirror(a.url),
+			sizeBytes: a.sizeBytes,
+		});
 	}
 	return {
 		version: FALLBACK_VERSION,
@@ -89,6 +104,7 @@ async function fetchFromGithub(): Promise<ReleaseData> {
 		for (const a of json.assets ?? []) {
 			assets.set(a.name, {
 				url: a.browser_download_url,
+				mirrorUrl: makeMirror(a.browser_download_url),
 				sizeBytes: a.size,
 			});
 		}

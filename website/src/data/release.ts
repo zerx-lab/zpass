@@ -30,8 +30,10 @@ export interface ReleaseAsset {
 	filename: string;
 	/** 字节数，前端格式化为 "134 MB" / "46 KB" */
 	sizeBytes: number;
-	/** 直接下载 URL */
+	/** 直接下载 URL（原始 GitHub 地址，代理失败时的最终降级目标） */
 	url: string;
+	/** 国内加速镜像 URL，客户端探活失败后自动降级到 url */
+	mirrorUrl?: string;
 	/**
 	 * 应用商店链接（如 Chrome 应用商店）。设置后该资产渲染为"前往商店安装"按钮，
 	 * 在新标签页打开而非直接下载，且 url 取此值、不参与 GitHub 文件名匹配。
@@ -58,7 +60,7 @@ export interface PlatformGroup {
 }
 
 /** 资产展示元数据（不含 url / sizeBytes，那两项由 GitHub API 提供，兜底见下方）。 */
-type AssetMeta = Omit<ReleaseAsset, "url" | "sizeBytes">;
+type AssetMeta = Omit<ReleaseAsset, "url" | "sizeBytes" | "mirrorUrl">;
 
 interface PlatformMeta {
 	id: PlatformId;
@@ -285,13 +287,15 @@ interface FallbackAsset {
 	filename: string;
 	sizeBytes: number;
 	url: string;
+	mirrorUrl: string;
 }
 
-const fb = (filename: string, sizeBytes: number): FallbackAsset => ({
-	filename,
-	sizeBytes,
-	url: `${FALLBACK_BASE_URL}/${filename}`,
-});
+const PROXY_PREFIX = "https://ghfast.top/";
+
+const fb = (filename: string, sizeBytes: number): FallbackAsset => {
+	const url = `${FALLBACK_BASE_URL}/${filename}`;
+	return { filename, sizeBytes, url, mirrorUrl: PROXY_PREFIX + url };
+};
 
 export const FALLBACK_ASSETS: FallbackAsset[] = [
 	fb("ZPass-darwin-arm64.dmg", 133012367),
@@ -345,8 +349,10 @@ export function buildPlatforms(release: ReleaseData): PlatformGroup[] {
 				fromApi?.url ??
 				fromFallback?.url ??
 				`${FALLBACK_BASE_URL}/${meta.filename}`;
+			const mirrorUrl =
+				fromApi?.mirrorUrl ?? fromFallback?.mirrorUrl ?? undefined;
 			const sizeBytes = fromApi?.sizeBytes ?? fromFallback?.sizeBytes ?? 0;
-			return { ...meta, url, sizeBytes };
+			return { ...meta, url, mirrorUrl, sizeBytes };
 		}),
 	}));
 }

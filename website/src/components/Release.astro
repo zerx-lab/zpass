@@ -197,7 +197,11 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 								</div>
 								<a
 									class="btn primary dl-primary-btn"
-									href={p.primary.url}
+									href={p.primary.mirrorUrl ?? p.primary.url}
+									data-src={p.primary.url}
+									{...(p.primary.mirrorUrl
+										? { "data-mirror": p.primary.mirrorUrl }
+										: {})}
 									rel="noopener"
 									{...p.isStore
 										? { target: "_blank" }
@@ -278,7 +282,11 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 											<li class="dl-other">
 												<a
 													class="dl-other-link"
-													href={asset.url}
+													href={asset.mirrorUrl ?? asset.url}
+													data-src={asset.url}
+													{...(asset.mirrorUrl
+														? { "data-mirror": asset.mirrorUrl }
+														: {})}
 													rel="noopener"
 													download
 												>
@@ -397,6 +405,46 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 		</p>
 	</div>
 </section>
+
+<script>
+	/**
+	 * 下载加速：所有带 data-mirror 的下载链接默认指向代理地址（ghfast.top）。
+	 * 页面加载后异步探活代理，若 HEAD 请求在 3s 内失败则将 href 回退到 data-src
+	 * （原始 GitHub 地址），保证国内慢但可用，国外直链不受影响。
+	 *
+	 * 探活结果在页面生命周期内只做一次，所有链接统一切换。
+	 */
+	(function initDownloadFallback() {
+		const links = Array.from(
+			document.querySelectorAll<HTMLAnchorElement>("a[data-mirror][data-src]"),
+		);
+		if (links.length === 0) return;
+
+		// 取第一个代理 URL 的 origin 做探活（所有链接同一个代理域名）
+		let probeUrl: string;
+		try {
+			probeUrl = new URL(links[0].dataset.mirror!).origin + "/";
+		} catch {
+			return; // URL 解析失败，保持当前 href 不动
+		}
+
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), 3000);
+
+		fetch(probeUrl, { method: "HEAD", signal: controller.signal, mode: "no-cors" })
+			.then(() => {
+				// 代理可达：href 已是镜像地址，无需操作
+			})
+			.catch(() => {
+				// 代理不可达：将所有下载链接的 href 切回原始 GitHub 地址
+				for (const link of links) {
+					const src = link.dataset.src;
+					if (src) link.href = src;
+				}
+			})
+			.finally(() => clearTimeout(timer));
+	})();
+</script>
 
 <style>
 	.download-section {
