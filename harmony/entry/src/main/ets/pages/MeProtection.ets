@@ -166,7 +166,6 @@ struct MeProtection {
       promptAction.showToast({ message: '已启用生物解锁', duration: 1500 });
     } catch (e) {
       this.confirmPwError = (e as Error).message;
-      this.confirmPw = '';
     }
   }
 
@@ -342,7 +341,6 @@ struct MeProtection {
           .enabled(!this.store.busy)
           .onChange((v: string) => {
             this.confirmPw = v;
-            this.confirmPwError = '';
           })
           .onSubmit(() => this.onConfirmEnable());
 
