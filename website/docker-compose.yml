@@ -1,0 +1,21 @@
+# ZPass 官网部署编排
+# ---------------------------------------------------------------------------
+# 单服务：在服务器上构建镜像并以 SSR 长驻进程运行 entry.mjs。
+# 端口默认映射宿主 127.0.0.1:4321（假定前置 Nginx/Caddy 反代 + TLS）。
+# 如需直接对外暴露，把 HOST_BIND 设为 0.0.0.0。
+# 可通过同目录 .env 覆盖 HOST_BIND / HOST_PORT。
+# ---------------------------------------------------------------------------
+services:
+  website:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: zpass-website:latest
+    container_name: zpass-website
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - HOST=0.0.0.0
+      - PORT=4321
+    ports:
+      - "${HOST_BIND:-127.0.0.1}:${HOST_PORT:-4322}:4321"

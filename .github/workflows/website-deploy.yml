@@ -1,0 +1,61 @@
+name: Deploy Website
+
+# ZPass 官网自动部署 workflow
+# ---------------------------------------------------------------------------
+# 触发：push 到默认分支且改动落在 website/ 子树（或本 workflow 自身）。
+#       亦支持 workflow_dispatch 手动触发。
+#
+# 机制：website 为 Astro + @astrojs/node standalone SSR，产物 entry.mjs 需
+#       Node 长驻进程，故用服务器侧 Docker Compose 承载。CI 仅负责通过 SSH
+#       触发服务器拉取最新代码并 `docker compose up -d --build` 滚动重启，
+#       构建在服务器上完成（避免镜像跨网传输）。
+#
+# 依赖 Secrets：
+#   DEPLOY_HOST / DEPLOY_PORT / DEPLOY_USER / DEPLOY_SSH_KEY / DEPLOY_PATH
+#   DEPLOY_BRANCH（可选，缺省 main）
+# ---------------------------------------------------------------------------
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "website/**"
+      - ".github/workflows/website-deploy.yml"
+  workflow_dispatch:
+
+# 同一时间只跑一个部署，新 push 取消进行中的旧部署
+concurrency:
+  group: website-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: SSH Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          # 注入目标路径与分支供脚本使用
+          envs: DEPLOY_PATH,DEPLOY_BRANCH
+          script_stop: true
+          script: |
+            set -euo pipefail
+            BRANCH="${DEPLOY_BRANCH:-main}"
+            cd "$DEPLOY_PATH"
+            REPO_ROOT="$(git rev-parse --show-toplevel)"
+            echo "==> 自举：先同步仓库以获取最新 deploy.sh"
+            git -C "$REPO_ROOT" fetch --prune origin "$BRANCH"
+            git -C "$REPO_ROOT" checkout "$BRANCH"
+            git -C "$REPO_ROOT" reset --hard "origin/$BRANCH"
+            echo "==> 执行部署脚本"
+            chmod +x ./deploy.sh
+            ./deploy.sh "$BRANCH"
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_BRANCH: ${{ secrets.DEPLOY_BRANCH }}

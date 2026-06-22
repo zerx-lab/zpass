@@ -1,0 +1,17 @@
+# 构建上下文裁剪：只把源码与锁文件送进镜像，产物与依赖在容器内重建
+node_modules
+dist
+.output
+.astro
+.git
+.github
+.vscode
+.idea
+*.log
+.DS_Store
+.env
+.env.*
+# 部署相关文件无需进镜像
+docker-compose.yml
+deploy.sh
+README.md
