@@ -354,6 +354,38 @@ jobs:
           fail_on_unmatched_files: false
           files: extension/release/*
 
+      # 自动发布到 Chrome Web Store。上传的是上架包 ZPass-extension-chrome.zip
+      # (无 key,商店用自己的公钥重签,item id = dafhkofilckgmnlclnkciddccogpfcdm)。
+      # 仅在正式发布(tag v* 或 dispatch release=true)且 4 个 CWS Secret 齐全时执行:
+      #   - CWS_EXTENSION_ID   商店 item id
+      #   - CWS_CLIENT_ID      OAuth2 client id
+      #   - CWS_CLIENT_SECRET  OAuth2 client secret
+      #   - CWS_REFRESH_TOKEN  OAuth2 refresh token
+      # publish: true → 上传后直接提交审核并自动发布(审核通过后上线);若想停在
+      # 「待发布草稿」由人工点发布,把 publish 改为 false。
+      # 注意:manifest version 必须比商店现有版本高,否则 API 报版本未提升而失败,
+      # 这由上面「Sync release tag into package.json version」保证(tag 即版本号)。
+      - name: Publish to Chrome Web Store
+        if: >-
+          steps.release_ctx.outputs.publish == 'true' &&
+          env.CWS_EXTENSION_ID != '' &&
+          env.CWS_CLIENT_ID != '' &&
+          env.CWS_CLIENT_SECRET != '' &&
+          env.CWS_REFRESH_TOKEN != ''
+        env:
+          CWS_EXTENSION_ID: ${{ secrets.CWS_EXTENSION_ID }}
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+        uses: mnao305/chrome-extension-upload@v5.0.0
+        with:
+          file-path: extension/release/ZPass-extension-chrome.zip
+          extension-id: ${{ secrets.CWS_EXTENSION_ID }}
+          client-id: ${{ secrets.CWS_CLIENT_ID }}
+          client-secret: ${{ secrets.CWS_CLIENT_SECRET }}
+          refresh-token: ${{ secrets.CWS_REFRESH_TOKEN }}
+          publish: true
+
   # ===========================================================================
   # Linux x64 - AppImage + .deb + .rpm + .pkg.tar.zst + 便携 zip
   # ===========================================================================
