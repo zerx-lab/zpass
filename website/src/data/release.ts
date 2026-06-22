@@ -257,19 +257,13 @@ const PLATFORM_METAS: PlatformMeta[] = [
 ];
 
 // ============================================================================
-// 兜底数据（GitHub API 不可达时使用）
+// 降级文案（GitHub API 不可达时使用）
 // ============================================================================
 
-export const FALLBACK_VERSION = "v0.0.6";
-export const FALLBACK_TAG_URL =
-	"https://github.com/zerx-lab/zpass/releases/tag/v0.0.6";
-const FALLBACK_BASE_URL =
-	"https://github.com/zerx-lab/zpass/releases/download/v0.0.6";
-
-// GitHub Releases API 不可达时使用的占位 changelog。
+// GitHub Releases API 不可达时展示的占位 changelog（不含具体版本号）。
 // 真实更新日志由 .github/workflows/release-notes.yml 在 tag 发布时通过
 // git-cliff 生成并写入 release body，再由 release-fetcher 读取展示。
-export const FALLBACK_RELEASE_BODY = `## v0.0.6
+export const FALLBACK_RELEASE_BODY = `## Latest release
 
 ### Features
 
@@ -283,55 +277,20 @@ export const FALLBACK_RELEASE_BODY = `## v0.0.6
 - Cross-platform desktop installer pipeline
 `;
 
-interface FallbackAsset {
-	filename: string;
-	sizeBytes: number;
-	url: string;
-	mirrorUrl: string;
-}
-
-const PROXY_PREFIX = "https://ghfast.top/";
-
-const fb = (filename: string, sizeBytes: number): FallbackAsset => {
-	const url = `${FALLBACK_BASE_URL}/${filename}`;
-	return { filename, sizeBytes, url, mirrorUrl: PROXY_PREFIX + url };
-};
-
-export const FALLBACK_ASSETS: FallbackAsset[] = [
-	fb("ZPass-darwin-arm64.dmg", 133012367),
-	fb("ZPass-darwin-arm64.zip", 119856097),
-	fb("ZPass-windows-x64-Setup.exe", 140372992),
-	fb("ZPass-windows-x64.zip", 142053094),
-	fb("ZPass-linux-x64.AppImage", 119069176),
-	fb("ZPass-linux-x64.deb", 91936350),
-	fb("ZPass-linux-x64.rpm", 96114141),
-	fb("ZPass-linux-x64.pkg.tar.zst", 113276971),
-	fb("ZPass-linux-x64.zip", 117033929),
-	fb("ZPass-android-arm64-v8a.apk", 42039822),
-	fb("ZPass-android-x86_64.apk", 44797184),
-	fb("ZPass-extension-chrome.zip", 55392),
-	fb("ZPass-extension-chrome-selfhost.zip", 55600),
-	fb("ZPass-extension-firefox.zip", 55366),
-	fb("ZPass-extension-sources.zip", 588881),
-];
-
 // ============================================================================
 // 合并：把 release 数据 + 本地元数据 → 给 UI 渲染用的 PlatformGroup[]
 // ============================================================================
 
 /**
- * 根据从 GitHub API（或兜底）拿到的 release 数据，结合本地展示元数据生成
- * 平台分组的资产清单。
+ * 根据从 GitHub API 拿到的 release 数据，结合本地展示元数据生成平台分组的资产清单。
+ * 仅在非降级态（API 成功且有资产）调用；降级态由 Release.astro 直接渲染引导卡。
  *
  * - 资产顺序、label、note、recommended 全部来自本地元数据
  * - url / sizeBytes 优先取 release.assets 中按 filename 匹配的项
- * - 若资产在 release 中缺失，退到兜底快照中按 filename 取（再没有就用占位）
+ * - 若某资产在本次 release 中缺失，退到 GitHub 的 latest 下载重定向（始终指向最新版，
+ *   绝不会指向写死的旧版本）
  */
 export function buildPlatforms(release: ReleaseData): PlatformGroup[] {
-	const fallbackByName = new Map<string, FallbackAsset>(
-		FALLBACK_ASSETS.map((a) => [a.filename, a]),
-	);
-
 	return PLATFORM_METAS.map((p) => ({
 		id: p.id,
 		titleZh: p.titleZh,
@@ -344,14 +303,11 @@ export function buildPlatforms(release: ReleaseData): PlatformGroup[] {
 				return { ...meta, url: meta.storeUrl, sizeBytes: 0 };
 			}
 			const fromApi = release.assets.get(meta.filename);
-			const fromFallback = fallbackByName.get(meta.filename);
 			const url =
 				fromApi?.url ??
-				fromFallback?.url ??
-				`${FALLBACK_BASE_URL}/${meta.filename}`;
-			const mirrorUrl =
-				fromApi?.mirrorUrl ?? fromFallback?.mirrorUrl ?? undefined;
-			const sizeBytes = fromApi?.sizeBytes ?? fromFallback?.sizeBytes ?? 0;
+				`https://github.com/zerx-lab/zpass/releases/latest/download/${meta.filename}`;
+			const mirrorUrl = fromApi?.mirrorUrl ?? undefined;
+			const sizeBytes = fromApi?.sizeBytes ?? 0;
 			return { ...meta, url, mirrorUrl, sizeBytes };
 		}),
 	}));

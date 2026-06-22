@@ -22,7 +22,7 @@ import {
 	type PlatformGroup,
 	type ReleaseAsset,
 } from "../data/release";
-import { getLatestRelease } from "../lib/release-fetcher";
+import { getLatestRelease, RELEASES_LATEST_URL } from "../lib/release-fetcher";
 
 export interface Props {
 	t: SiteStrings;
@@ -38,9 +38,12 @@ const sectionClass =
 		? "download-section"
 		: `download-section section--${variant}`;
 
-// SSR 时拉取最新 release（24h 模块缓存），并按本地展示元数据合成平台分组。
+// SSR 时拉取最新 release。GitHub API 不可达 / 无资产时进入降级态（degraded），
+// 此时不渲染任何带版本号的下载直链，改为引导用户前往 GitHub Releases 页面自行下载。
 const release = await getLatestRelease();
-const PLATFORMS = buildPlatforms(release);
+const degraded = release.degraded;
+// 降级态下不构建平台网格，避免渲染出旧版或失效链接。
+const PLATFORMS = degraded ? [] : buildPlatforms(release);
 const RELEASE_VERSION = release.version;
 const RELEASE_TAG_URL = release.tagUrl;
 
@@ -100,12 +103,55 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 						{t.download_release_notes}
 						<span class="arrow" aria-hidden="true">→</span>
 					</a>
-					<span class="download-version mono">{RELEASE_VERSION}</span>
+					{!degraded && (
+						<span class="download-version mono">{RELEASE_VERSION}</span>
+					)}
 				</div>
 			</div>
 		</div>
 
+		{degraded && (
+			<div class="dl-degraded reveal">
+				<div class="dl-degraded-icon" aria-hidden="true">
+					<svg
+						viewBox="0 0 24 24"
+						width="28"
+						height="28"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="1.6"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+					>
+						<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+						<path d="M7 10l5 5 5-5" />
+						<path d="M12 15V3" />
+					</svg>
+				</div>
+				<h3 class="dl-degraded-title">
+					{isZh ? "无法获取最新版本信息" : "Couldn't load the latest release"}
+				</h3>
+				<p class="dl-degraded-sub">
+					{isZh
+						? "GitHub 接口暂时不可用，为避免下载到旧版本，请前往 GitHub Releases 页面自行下载最新安装包。"
+						: "GitHub's API is temporarily unavailable. To avoid downloading an outdated build, please grab the latest installer from the GitHub Releases page."}
+				</p>
+				<a
+					class="btn primary dl-degraded-btn"
+					href={RELEASES_LATEST_URL}
+					target="_blank"
+					rel="noopener"
+				>
+					<span class="dl-btn-text">
+						{isZh ? "前往 GitHub Releases" : "Open GitHub Releases"}
+					</span>
+					<span class="arrow" aria-hidden="true">→</span>
+				</a>
+			</div>
+		)}
+
 		<!-- ========== 平台下载卡片网格 ========== -->
+		{!degraded && (
 		<div class="download-grid">
 			{
 				resolved.map((p) => (
@@ -382,8 +428,10 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 				</div>
 			</article>
 		</div>
+		)}
 
 		<!-- ========== 底部说明 ========== -->
+		{!degraded && (
 		<p class="download-foot mono reveal">
 			<svg
 				viewBox="0 0 24 24"
@@ -403,6 +451,7 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 			<span class="sep" aria-hidden="true">·</span>
 			<span>{t.release_note}</span>
 		</p>
+		)}
 	</div>
 </section>
 
@@ -450,6 +499,48 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 	.download-section {
 		padding: 80px 0;
 		border-bottom: 1px solid var(--line-soft);
+	}
+
+	/* ============== 降级态引导卡（GitHub API 不可达） ============== */
+	.dl-degraded {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		text-align: center;
+		gap: 16px;
+		padding: 56px 32px;
+		border: 1px solid var(--line-soft);
+		border-radius: 16px;
+		background: var(--surface, rgba(127, 127, 127, 0.04));
+	}
+	.dl-degraded-icon {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 56px;
+		height: 56px;
+		border-radius: 50%;
+		border: 1px solid var(--line-soft);
+		color: var(--text-3);
+	}
+	.dl-degraded-title {
+		font-size: 20px;
+		font-weight: 600;
+		margin: 0;
+		color: var(--text);
+	}
+	.dl-degraded-sub {
+		max-width: 560px;
+		margin: 0;
+		font-size: 14px;
+		line-height: 1.6;
+		color: var(--text-3);
+	}
+	.dl-degraded-btn {
+		margin-top: 8px;
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
 	}
 
 	/* ============== 顶部头 ============== */
