@@ -64,7 +64,9 @@ function SectionLabel({ children, collapsed }: { children: React.ReactNode; coll
 		return <div className="mx-3 my-2 h-px bg-(--line)" />;
 	}
 	return (
-		<div className="px-4 pt-5 pb-2 text-[11px] uppercase tracking-[0.08em] text-(--text-3)">
+		// 对齐 standalone 设计稿 .nav-label：mono 10px / tracking .13em / text-4，
+		// 间距 margin:13px 8px 3px（收紧分组间距，原 pt-5 偏大）。
+		<div className="mx-2 mt-[13px] mb-[3px] flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.13em] text-(--text-4) first:mt-1">
 			{children}
 		</div>
 	);
@@ -110,32 +112,48 @@ function NavRow({
 			className={({ isActive }) => {
 				const active = computeActive(isActive);
 				return clsx(
-					// data-active 让伪元素 indicator 仅在选中时出现，
-					// 替代过去 active 时把整行换成 --bg-active 的 web 化做法
-					"group relative mx-2 flex h-9 items-center gap-2.5 rounded-(--radius) transition-colors",
-					collapsed ? "justify-center px-0" : "px-2.5",
+					// 对齐 standalone 设计稿 .nav-item：padding 6px 9px（展开态用 py-1.5 px-2.5，
+					// 内容撑开约 30px，比原固定 h-9=36px 更紧凑贴合设计稿）。
+					// 收起态保持 h-9 方形以容纳居中图标。
+					"group relative mx-2 flex items-center gap-2.5 rounded-(--radius) transition-colors",
+					collapsed ? "h-9 justify-center px-0" : "py-1.5 px-2.5",
+					// active：bg-active + text + 左 3px brand 竖条（zpass-nav-active）+ 字重 500，
+					// 图标转 brand 色（设计稿 .nav-item.is-active .ni-ico { color: brand }）。
 					active
-						? "bg-(--bg-active) text-(--text) zpass-nav-active"
+						? "bg-(--bg-active) font-medium text-(--text) zpass-nav-active"
 						: "text-(--text-2) hover:bg-(--bg-hover) hover:text-(--text)",
 				);
 			}}
 		>
-			<Icon size={14} strokeWidth={1.5} className={clsx("shrink-0", collapsed && "mx-auto")} />
-			{!collapsed && (
-				<>
-					<span className="flex-1 truncate text-[13px]">{label}</span>
-					{count != null && (
-						<span className="rounded-full border border-(--line-soft) bg-(--bg-elev-2) px-1.5 py-px font-mono text-[10.5px] text-(--text-3)">
-							{count}
-						</span>
-					)}
-					{badge && (
-						<span className="ml-auto rounded-full border border-(--line-soft) bg-(--bg-elev-2) px-1.5 py-px font-mono text-[10px] text-(--text-2)">
-							{badge}
-						</span>
-					)}
-				</>
-			)}
+			{({ isActive }: { isActive: boolean }) => {
+				const active = computeActive(isActive);
+				return (
+					<>
+						<Icon
+							size={14}
+							strokeWidth={1.5}
+							className={clsx(
+								"shrink-0",
+								collapsed && "mx-auto",
+								active ? "text-(--brand)" : "text-(--text-3)",
+							)}
+						/>
+						{!collapsed && (
+							<>
+								<span className="flex-1 truncate text-[13px]">{label}</span>
+								{count != null && (
+									<span className="font-mono text-[10.5px] text-(--text-4)">{count}</span>
+								)}
+								{badge && (
+									<span className="ml-auto rounded-full border border-(--line-soft) bg-(--bg-elev-2) px-1.5 py-px font-mono text-[10px] text-(--text-2)">
+										{badge}
+									</span>
+								)}
+							</>
+						)}
+					</>
+				);
+			}}
 		</NavLink>
 	);
 }
@@ -188,10 +206,12 @@ export function Sidebar({ sidebarState }: SidebarProps) {
 			data-sidebar-collapsed={collapsed ? "true" : "false"}
 		>
 			{/* ── 主体 aside ──
-			 * 关键视觉锚点：在 bg-elev 底色之上叠 --bg-gradient 软渐晕（顶 brand 蓝 + 上方一丝白光），
-			 * 模拟 Linear / Arc 的"舞台灯"环境光，去掉过去大面积纯色 sidebar 的 web 廉价感。
+			 * 玻璃质感侧边栏：半透明 elev 底（titlebar-glass：72% elev + blur24 saturate150）
+			 * 叠 --bg-gradient 软渐晕。AppShell 画布是 --bg（比 elev 暗一档），半透明底
+			 * 透出一丝画布暗色 + blur 柔化渐变，形成 Linear / Arc 的"舞台灯"通透感，
+			 * 与主内容 --bg-elev 白纸拉开层次。
 			 */}
-			<aside className="flex h-full w-full min-w-0 flex-col bg-(--bg-elev) zpass-bg-gradient overflow-hidden">
+			<aside className="flex h-full w-full min-w-0 flex-col titlebar-glass zpass-bg-gradient overflow-hidden">
 				{/* WorkspaceSwitcher — 收起时显示 logo 方块 */}
 				<WorkspaceSwitcher collapsed={collapsed} />
 
@@ -298,7 +318,7 @@ export function Sidebar({ sidebarState }: SidebarProps) {
 				 * WorkspaceSwitcher 的下拉菜单。
 				 * border-top 改用 line-soft —— 软线只勾出层级而不抢视觉。
 				 */}
-				<div className="shrink-0 border-t border-(--line-soft) bg-(--bg-elev) flex items-center gap-1.5 px-2.5 py-2">
+				<div className="shrink-0 border-t border-(--line-soft) flex items-center gap-1.5 px-2.5 py-2">
 					{/* 头像按钮 —— 点击切换侧边栏收起/展开
 					 *   收起态：hover 时头像淡出、叠加展开箭头
 					 *   展开态：与右侧 ChevronsLeft 等效，点击收起

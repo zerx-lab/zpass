@@ -567,6 +567,26 @@ html:not([data-theme]) {
 		0 32px 80px -24px rgba(37, 99, 235, 0.2);
 }
 
+/* ─── 标题栏毛玻璃（Titlebar frosted glass） ─────────────────────
+ * 自定义 Titlebar(fixed, Portal 到 #titlebar-root)贴顶。原本是
+ * 不透明 --bg-elev 实色,套壳感强。改为半透明 elev 底 + blur+saturate,
+ * 让其下滚动的主内容透出一层环境色,贴近 macOS / Windows 11 Mica
+ * 标题栏质感。配方与 .zpass-glass 同源(blur 略轻 —— 顶栏窄,过重模糊
+ * 反而糊成一片;不加外阴影 —— 顶栏已有 border-b 做分隔)。
+ * 严禁紫色相(feedback: brand_color)。
+ * ──────────────────────────────────────────────────────────── */
+.titlebar-glass {
+	background-color: color-mix(in srgb, var(--bg-elev) 72%, transparent);
+	backdrop-filter: blur(24px) saturate(150%);
+	-webkit-backdrop-filter: blur(24px) saturate(150%);
+}
+
+[data-theme="light"] .titlebar-glass {
+	/* 浅色 --bg-elev=#ffffff,半透明后偏灰发脏,改用略冷 --bg-elev-2
+	 * 抬高不透明度,保留玻璃感的同时维持顶栏明度,与浅色 .zpass-glass 同策略 */
+	background-color: color-mix(in srgb, var(--bg-elev-2) 80%, transparent);
+}
+
 /* ─── disabled hover 锁定（C5） ────────────────────────────────
  * Tailwind 的 disabled: 与 hover: 同优先级，用户把鼠标移到 disabled
  * 按钮上时 hover:opacity-90 仍会生效，造成"明明禁用却变亮"的视觉。

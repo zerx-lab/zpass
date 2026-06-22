@@ -1,8 +1,7 @@
-import { Bell, ChevronRight, Moon, Plus, Search, Sun } from "lucide-react";
+import { Bell, ChevronRight, Plus, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useMatch, useNavigate, useSearchParams } from "react-router-dom";
 import { formatShortcut, SHORTCUTS } from "@/lib/keys";
-import { usePrefsStore } from "@/stores/prefs";
 import { useUIStore } from "@/stores/ui";
 import { useVaultStore, type VaultFilter } from "@/stores/vault";
 
@@ -81,9 +80,6 @@ export function Topbar() {
 	const { pathname } = useLocation();
 	const navigate = useNavigate();
 	const section = resolveSection(pathname);
-
-	const theme = usePrefsStore((s) => s.theme);
-	const setTheme = usePrefsStore((s) => s.setTheme);
 
 	const openCmdk = useUIStore((s) => s.openCmdk);
 	const requestNewItem = useUIStore((s) => s.requestNewItem);
@@ -272,18 +268,6 @@ export function Topbar() {
 				<kbd className="rounded border border-(--line-soft) bg-(--bg) px-1.5 py-0.5 font-mono text-[10px] text-(--text-3)">
 					{formatShortcut(SHORTCUTS.CMDK_OPEN)}
 				</kbd>
-			</button>
-
-			{/* 主题切换 —— 明暗切换是高频动作，保留在 Topbar
-			 * icon-only 按钮 hover 仅底色变化、active 微缩,对标 macOS Mail / Finder toolbar
-			 */}
-			<button
-				type="button"
-				onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-				title={theme === "dark" ? t("topbar_theme_light") : t("topbar_theme_dark")}
-				className="flex h-8 w-8 items-center justify-center rounded-(--radius) text-(--text-2) transition-[background,color,transform] duration-100 hover:bg-(--bg-hover) hover:text-(--text) active:bg-(--bg-active) active:scale-[0.96]"
-			>
-				{theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
 			</button>
 
 			{/* 通知 —— 当前为占位，没有 panel/路由 */}

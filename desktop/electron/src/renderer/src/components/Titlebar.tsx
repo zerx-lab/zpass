@@ -1,12 +1,15 @@
 import { Events, Window } from "@wailsio/runtime";
 import { clsx } from "clsx";
-import { Copy as MaxIcon, Minus, Square, X } from "lucide-react";
+import { Copy as MaxIcon, Minus, Moon, Search, Square, Sun, X } from "lucide-react";
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { CloudTitlebarStatus } from "@/components/CloudTitlebarStatus";
+import { formatShortcut, SHORTCUTS } from "@/lib/keys";
 import { isMacOS } from "@/lib/platform";
 import { usePrefsStore } from "@/stores/prefs";
+import { useUIStore } from "@/stores/ui";
 
 /**
  * 自定义标题栏（Custom Titlebar）—— Wails 3 版本
@@ -110,7 +113,11 @@ export function Titlebar() {
   const mac = isMacOS();
   // 品牌标识颜色随主题切换 —— 与 assets/logo-{light,dark}.svg 颜色策略一致
   const theme = usePrefsStore((s) => s.theme);
+  const setTheme = usePrefsStore((s) => s.setTheme);
   const brandFill = theme === "dark" ? "#F5F1E8" : "#0A2540";
+  // 标题栏中央搜索框 —— 点击打开 ⌘K 命令面板（与 Topbar 搜索入口同一目标）
+  const { t } = useTranslation();
+  const openCmdk = useUIStore((s) => s.openCmdk);
 
   // 订阅窗口尺寸/状态变化，保持最大化图标与真实状态同步
   useEffect(() => {
@@ -250,7 +257,7 @@ export function Titlebar() {
         // 在 DOM 中位于 #portal-root 之后，同 z 下 Titlebar 总是绘制在上。
         // 不再用 relative —— 改成 fixed 直接占据视口顶部 36px。
         "fixed inset-x-0 top-0 z-50 flex h-9 items-center select-none",
-        "border-b border-(--line) bg-(--bg-elev)",
+        "border-b border-(--line) titlebar-glass",
       )}
       // 外层标题栏整体作为拖拽源（CSS 自定义属性会 inherit 到子元素，
       // 子元素是按钮的会显式 no-drag 开洞）。macOS 下额外向右偏移 80px
@@ -306,8 +313,54 @@ export function Titlebar() {
 				*/}
       <CloudTitlebarStatus />
 
-      {/* 中央拖拽区 —— 占据剩余空间；双击 Wails 3 原生支持切换最大化 */}
+      {/* 中央居中搜索框 —— 对齐 standalone 设计稿 .tb-search。
+				点击打开 ⌘K 命令面板（与 Topbar 搜索入口同一 openCmdk 目标）。
+				按钮自身 no-drag 开洞，左右两侧 flex-1 撑出居中（等价设计稿 margin:0 auto）。
+				宽度 min(420px,38vw) 同设计稿；高度走 7px 圆角档、bg-elev-2 凹陷底，
+				hover 仅换底色（NSSearchField 风，不做 border-color shift）。 */}
       <div className="h-full flex-1" aria-hidden="true" />
+      <button
+        type="button"
+        onClick={openCmdk}
+        style={NO_DRAG_STYLE}
+        title={t("topbar_search") ?? ""}
+        className={clsx(
+          "flex h-[26px] w-[min(420px,38vw)] shrink-0 items-center gap-2 px-2.5",
+          "rounded-(--radius) border border-(--line-soft) bg-(--bg-elev-2)",
+          "text-[12.5px] text-(--text-4) transition-colors",
+          "hover:bg-(--bg-hover) hover:text-(--text-3)",
+        )}
+      >
+        <Search size={13} strokeWidth={1.8} className="shrink-0" />
+        <span className="truncate">{t("topbar_search")}</span>
+        <div className="flex-1" />
+        <kbd className="shrink-0 rounded-[4px] border border-(--line-soft) bg-(--bg-elev) px-1 py-px font-mono text-[10.5px] text-(--text-3)">
+          {formatShortcut(SHORTCUTS.CMDK_OPEN)}
+        </kbd>
+      </button>
+      <div className="h-full flex-1" aria-hidden="true" />
+
+      {/* 右侧操作区（tb-actions）—— 主题切换。
+				对齐 standalone 设计稿：明暗切换从 Topbar 上移到 titlebar 右侧。
+				no-drag 开洞；mac/win 均渲染（与平台无关）。位于搜索框之后、
+				Win/Linux 窗口三键之前。hover 走窗口按钮同款 --titlebar-btn-hover token。 */}
+      <div className="flex h-full items-center px-1" style={NO_DRAG_STYLE}>
+        <button
+          type="button"
+          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          title={theme === "dark" ? t("topbar_theme_light") : t("topbar_theme_dark")}
+          aria-label={
+            theme === "dark" ? t("topbar_theme_light") : t("topbar_theme_dark")
+          }
+          className={clsx(
+            "flex h-7 w-7 items-center justify-center rounded-[5px]",
+            "text-(--text-3) transition-colors",
+            "hover:bg-(--titlebar-btn-hover) hover:text-(--text)",
+          )}
+        >
+          {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
+        </button>
+      </div>
 
       {/*
 				右侧窗口控件 —— 仅 Windows / Linux 渲染。

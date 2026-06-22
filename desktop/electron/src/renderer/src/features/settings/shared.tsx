@@ -59,7 +59,7 @@ export function Section({
 	children: React.ReactNode;
 }) {
 	return (
-		<section className="flex flex-col rounded-xl border border-(--line) bg-(--bg-elev)">
+		<section className="flex flex-col rounded-xl border border-(--line-soft) bg-(--bg-elev-2) shadow-sm">
 			<header className="flex items-center gap-2.5 border-b border-(--line-soft) px-5 py-4">
 				<Icon size={15} strokeWidth={1.5} className="text-(--text-2)" />
 				<div className="flex min-w-0 flex-1 flex-col leading-tight">
