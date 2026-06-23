@@ -430,16 +430,27 @@ export function CloudSyncSection() {
                       : ""}
                   </span>
                 </div>
-                {progress.total > 0 && (
-                  <div className="h-1.5 overflow-hidden rounded-full bg-(--bg)">
-                    <div
-                      className="h-full rounded-full bg-(--text-2) transition-[width] duration-300"
-                      style={{
-                        width: `${Math.min(100, Math.floor((progress.processed / progress.total) * 100))}%`,
-                      }}
-                    />
-                  </div>
-                )}
+                {progress.stage !== "error" &&
+                  (progress.total > 0 && progress.processed > 0 ? (
+                    // 有可量化进度:确定宽度填充。
+                    <div className="h-1.5 overflow-hidden rounded-full bg-(--bg)">
+                      <div
+                        className="h-full rounded-full bg-(--text-2) transition-[width] duration-300"
+                        style={{
+                          width: `${Math.min(100, Math.floor((progress.processed / progress.total) * 100))}%`,
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    // 进行中但 processed 仍为 0(如推送单个 vault 完成前一直 0/1):
+                    // 用脉动的半条 + 滑动高亮明确传达「同步中」而非「卡死」。
+                    // animate-pulse 是 Tailwind 内置 utility(不依赖全局 CSS),
+                    // 叠加自定义滑动条双保险:任一生效都能看到「在动」。
+                    <div className="relative h-1.5 overflow-hidden rounded-full bg-(--bg)">
+                      <div className="absolute inset-0 animate-pulse rounded-full bg-(--text-3) opacity-60" />
+                      <div className="zpass-progress-indeterminate" />
+                    </div>
+                  ))}
                 {progress.error && (
                   <div className="text-[11.5px] text-(--text-3)">
                     {translateCloudError(progress.error, t)}

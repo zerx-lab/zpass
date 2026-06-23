@@ -73,6 +73,16 @@ func TestCloudDecide(t *testing.T) {
 			conflictKindOf: map[string]string{"a": "delete_vs_edit"},
 		},
 		{
+			// Equal timestamps: the delete is NOT strictly newer, so it must not
+			// silently win. Surfaced as a conflict, matching the CAS path
+			// (bridgePushConflict) so a concurrent remote edit is never dropped.
+			name:           "local delete tied with remote edit is a conflict",
+			local:          []SyncManifestEntry{ent("a", 10, "", 10)}, // tombstone at 10
+			remote:         []SyncManifestEntry{ent("a", 10, "h1", 0)},
+			want:           want{conflicts: []string{"a"}},
+			conflictKindOf: map[string]string{"a": "delete_vs_edit"},
+		},
+		{
 			name:   "local-only tombstone is skipped",
 			local:  []SyncManifestEntry{ent("a", 5, "", 30)},
 			remote: nil,

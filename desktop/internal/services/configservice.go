@@ -60,9 +60,14 @@ package services
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sync"
+	"time"
 )
 
 // 配置根目录名称 —— 所有文件都落在 `<home>/.config/zpass/` 下
@@ -75,6 +80,44 @@ const (
 	appConfigDirname  = "zpass"
 	maxNamespaceLen   = 64
 )
+
+// nsLocks 按 namespace 串行化写入。同一 namespace 的并发写（zustand 高频
+// setState → setItem，尤其云同步状态 zpass.cloud 在 SSE/进度事件下被密集
+// 刷新）若同时 rename 到同一目标文件，在 Windows 上会相互、或与外部进程
+// （杀软扫描 / 资源管理器索引 / 文件同步工具短暂打开目标）争用,触发
+// MoveFileEx 的 ERROR_ACCESS_DENIED（"Access is denied"）。先用进程内锁消除
+// writer 之间的自争用,再叠加 renameWithRetry 兜底外部进程的瞬时持有。
+var nsLocks sync.Map // namespace(string) -> *sync.Mutex
+
+func namespaceLock(namespace string) *sync.Mutex {
+	v, _ := nsLocks.LoadOrStore(namespace, &sync.Mutex{})
+	return v.(*sync.Mutex)
+}
+
+// renameWithRetry 原子替换目标文件,对 Windows 的瞬时 EACCES（目标被其他
+// 进程短暂打开导致 MoveFileEx 失败）做短退避重试。POSIX 的 rename(2) 原子且
+// 不会因目标被打开而失败,首次即成功,重试逻辑零代价（仅 Windows 真正用到）。
+func renameWithRetry(oldPath, newPath string) error {
+	const maxAttempts = 8
+	backoff := 5 * time.Millisecond
+	var err error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		err = os.Rename(oldPath, newPath)
+		if err == nil {
+			return nil
+		}
+		// 仅对「访问被拒」这类瞬时锁争用重试;其它错误（路径不存在、权限不足
+		// 等）立即返回,重试无意义。Windows 上 EACCES 暴露为 fs.ErrPermission。
+		if runtime.GOOS != "windows" || !errors.Is(err, fs.ErrPermission) {
+			return err
+		}
+		time.Sleep(backoff)
+		if backoff < 80*time.Millisecond {
+			backoff *= 2
+		}
+	}
+	return err
+}
 
 // ConfigService 是 Wails 3 注入到前端的服务对象。
 //
@@ -246,6 +289,12 @@ func (c *ConfigService) Write(namespace, value string) error {
 		return err
 	}
 
+	// 串行化同一 namespace 的写,消除并发 rename 到同一目标文件的自争用
+	// （Windows 上是 "Access is denied" 的主因之一）。不同 namespace 互不阻塞。
+	lock := namespaceLock(namespace)
+	lock.Lock()
+	defer lock.Unlock()
+
 	// 校验 value 是合法 JSON —— Unmarshal 仅为结构验证，
 	// 解析结果不使用（原样写入磁盘保留前端的 key 顺序与数字精度）
 	var probe any
@@ -285,7 +334,7 @@ func (c *ConfigService) Write(namespace, value string) error {
 	// rename 在同目录下跨平台均为原子操作（POSIX rename(2) + NTFS MoveFileEx）。
 	// 如果目标文件已存在，rename 会覆盖它（Go 的 os.Rename 在 Windows 上
 	// 使用 MoveFileEx 带 MOVEFILE_REPLACE_EXISTING，行为与 POSIX 一致）。
-	if err := os.Rename(tmpPath, finalPath); err != nil {
+	if err := renameWithRetry(tmpPath, finalPath); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("rename %s -> %s: %w", tmpPath, finalPath, err)
 	}

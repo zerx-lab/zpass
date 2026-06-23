@@ -148,7 +148,16 @@ async function doReconcile(): Promise<void> {
 		//    本地空间。放最前,使下面 listLinkedSpaces 拿到的是已清理过的绑定,
 		//    被自动删的空间不会再落入 step1 的 detached 分支。
 		const accountId = useCloudStore.getState().status?.accountId ?? "";
+		// 账户守卫:整轮 reconcile 含多次 await,期间用户可能登出/切账户。
+		// 任一关键写入(解绑/绑定/建空间/删云端/还原焦点)前确认仍是同一在线账户,
+		// 否则中止本轮 —— 切换后的新账户会以自己的 accountId 重新对账,避免把
+		// 旧账户的对账结果(空间增删、焦点还原)误施加到新账户的空间集上。
+		const sameAccount = (): boolean => {
+			const st = useCloudStore.getState().status;
+			return !!st?.signedIn && (st.accountId ?? "") === accountId;
+		};
 		if (await processDeletionTombstones(accountId)) changed = true;
+		if (!sameAccount()) return;
 
 		// ── 重试待删的云端 vault(此前删除失败的;幂等)。删除必达的兜底:确保删除
 		//    最终到达服务端、写出墓碑、传到其他设备。
@@ -177,6 +186,9 @@ async function doReconcile(): Promise<void> {
 		// reconcile 中途 createSpace 会自动切换激活空间;结束后还原,
 		// 避免后台对账偷走用户当前的空间焦点。
 		const prevActive = useSpacesStore.getState().activeSpaceId;
+		// listLinkedSpaces/listRemoteVaults 的 await 期间可能切了账户:此后所有
+		// 解绑/绑定/建空间都基于上面拉取的旧账户视图,中止以免污染新账户空间集。
+		if (!sameAccount()) return;
 
 		// ── 1. 绑定指向的云端 vault 已不存在(其他设备删除)→ 解绑 + 标记 detached
 		for (const l of linked) {
@@ -246,8 +258,9 @@ async function doReconcile(): Promise<void> {
 			}
 		}
 
-		// 还原对账前的激活空间(仅当它仍存在;首次登录本地无空间时保持新激活)
-		if (prevActive && useSpacesStore.getState().spaces.some((s) => s.id === prevActive)) {
+		// 还原对账前的激活空间(仅当仍是同账户且它仍存在;首次登录本地无空间时保持
+		// 新激活)。切了账户则不还原:prevActive 属于旧账户,不能抢新账户的焦点。
+		if (sameAccount() && prevActive && useSpacesStore.getState().spaces.some((s) => s.id === prevActive)) {
 			useSpacesStore.getState().switchSpace(prevActive);
 		}
 

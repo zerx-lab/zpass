@@ -170,6 +170,17 @@ export async function signOutCloud(): Promise<void> {
 }
 
 /**
+ * 锁定本地 vault 时一并清空后端云会话的内存密钥(账户 X25519 私钥 + 各 vault
+ * key)。不删钥匙串里的 JWT / DEK 包裹凭据 —— 解锁后 CloudAutoRestore /
+ * UnlockPage 会经 RestoreSession 透明重建会话。与 vaultApi.lock 同属"锁定即
+ * 抹零内存敏感态"的 defense-in-depth:云会话密钥与 vault DEK 同等敏感,不应
+ * 在锁定后继续驻留。fire-and-forget 调用,后端无活动会话时为 no-op。
+ */
+export async function lockCloudSession(): Promise<void> {
+  await callCloud("LockSession", () => $WailsCall.ByName(`${SVC}.LockSession`) as Promise<void>);
+}
+
+/**
  * 用本地解锁时输入的主密码静默恢复云会话。
  *
  * 零知识约束下账户私钥不落盘,每次启动必须用主密码重新派生;但 email +

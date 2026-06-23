@@ -44,6 +44,7 @@
 
 import { create } from "zustand";
 import { cancelClipboardClear } from "@/lib/clipboard";
+import { lockCloudSession } from "@/lib/cloud-api";
 import { vaultApi } from "@/lib/vault-api";
 
 export interface LockState {
@@ -135,6 +136,11 @@ export interface LockState {
 function fireBackendLock(): void {
 	void vaultApi.lock().catch(() => {
 		// vaultApi.lock 内部已经 console.error，这里静默防御性兜底
+	});
+	// 同等抹零云会话的内存密钥(账户私钥 + vault keys)。与本地 DEK 同周期清理:
+	// 锁定后云会话密钥不应继续驻留。fire-and-forget,无活动会话时后端 no-op。
+	void lockCloudSession().catch(() => {
+		// callCloud 内部已记录;静默兜底防 unhandled rejection。
 	});
 	// 取消任何 pending 的 clipboard 清空定时器，并抹掉 lastWritten 副本
 	cancelClipboardClear();

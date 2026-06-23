@@ -187,7 +187,11 @@ func buildServices() (*deps, error) {
 	// periodic loop + sign-in kick cover remote pulls.
 	emit := func(event string, payload any) {
 		hubEmit(event, payload)
-		if event == "vault:changed" {
+		// Only USER edits nudge a push. A vault:changed emitted by the sync
+		// engine itself (applying pulled remote items, kind="cloud-sync") must
+		// NOT re-nudge — that would livelock: pull → notify → nudge → pull …
+		// (observed as an endless "vault keys pushed" / "pushing 0/1" loop).
+		if event == "vault:changed" && !services.IsCloudSyncChange(payload) {
 			cloudSvc.NudgeSync()
 		}
 	}

@@ -812,7 +812,7 @@ func (s *CloudService) runSync(parent context.Context, full bool, scope map[stri
 	// the items list. IngestForeignPayload does not call notifyVaultChanged
 	// itself (to avoid per-item spam), so we emit one batch notification here.
 	if s.vault != nil && (summary.Pulled > 0 || summary.Pushed > 0) {
-		s.vault.notifyVaultChanged("cloud-sync", "", "")
+		s.vault.notifyVaultChanged(cloudSyncChangeKind, "", "")
 	}
 
 	summary.Conflicts = s.conflictCount()
@@ -1358,13 +1358,17 @@ func cloudDecide(local, remote []SyncManifestEntry) (pulls, pushes []string, con
 			continue
 		}
 		if l.DeletedAt > 0 {
-			// Local deleted, remote still live.
-			if l.DeletedAt >= r.UpdatedAt {
-				pushes = append(pushes, l.ID) // our delete is newer → push tombstone
+			// Local deleted, remote still live. A tie (equal timestamps) is NOT
+			// a clear win for the delete: treat it as a conflict so a concurrent
+			// remote edit is never silently dropped. This mirrors the CAS path
+			// (bridgePushConflict), where an equal-instant delete-vs-live-edit
+			// also records a conflict rather than pushing the tombstone.
+			if l.DeletedAt > r.UpdatedAt {
+				pushes = append(pushes, l.ID) // our delete is strictly newer → push tombstone
 			} else {
 				conflicts = append(conflicts, syncMergeConflict{
 					ID: l.ID, Kind: "delete_vs_edit", Local: l, Remote: r,
-					SuggestedRemote: true, // remote edited after our delete
+					SuggestedRemote: true, // remote edited at-or-after our delete
 				})
 			}
 			continue

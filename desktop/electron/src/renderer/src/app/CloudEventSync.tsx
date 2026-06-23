@@ -154,6 +154,12 @@ export function CloudEventSync() {
       void reconcileCloudSpaces();
     });
 
+    // cloud:vault:locked —— 本地 vault 锁定时后端清空了云会话内存密钥。刷新
+    // 状态让 UI 翻为未登录(signedIn=false);解锁后 CloudAutoRestore 会重建会话。
+    const offVaultLocked = Events.On("cloud:vault:locked", () => {
+      void useCloudStore.getState().refresh();
+    });
+
     // 网络恢复 / 系统挂起恢复 —— SSE 长连接大概率已半开，poke 后端
     // 杀掉旧流立即重连并触发一次补偿同步。两个来源可能几乎同时触发
     // （解锁后网络栈紧跟着上线），用时间戳做 ~2s 节流避免重复 IPC。
@@ -198,6 +204,7 @@ export function CloudEventSync() {
       if (typeof offError === "function") offError();
       if (typeof offRealtime === "function") offRealtime();
       if (typeof offVaultDeleted === "function") offVaultDeleted();
+      if (typeof offVaultLocked === "function") offVaultLocked();
       window.removeEventListener("online", pokeRealtime);
       window.removeEventListener("focus", reconcileOnFocus);
       offSystemResumed?.();

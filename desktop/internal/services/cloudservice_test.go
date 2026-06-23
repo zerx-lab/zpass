@@ -71,3 +71,51 @@ func TestCloudStatusReportsStoreBackend(t *testing.T) {
 		t.Fatalf("fresh service should not be signed in")
 	}
 }
+
+// TestCloudLockSessionWipesInMemoryKeys pins the lock-time contract: locking the
+// local vault must wipe the cloud session's in-memory key material (account
+// private key + per-vault keys) and flip SignedIn to false, while a no-session
+// call is a safe no-op.
+func TestCloudLockSessionWipesInMemoryKeys(t *testing.T) {
+	s := NewCloudService(nil)
+	if err := s.Configure("http://127.0.0.1:1"); err != nil {
+		t.Fatal(err)
+	}
+
+	// No active session: LockSession must be a no-op (no panic, nil error).
+	if err := s.LockSession(); err != nil {
+		t.Fatalf("LockSession with no session: got %v, want nil", err)
+	}
+	if s.Status().SignedIn {
+		t.Fatalf("no-session LockSession must not mark signed in")
+	}
+
+	// Plant a session with sensitive key material, as establishSession would.
+	s.mu.Lock()
+	sess := &cloudSession{
+		email:     "user@example.com",
+		accountID: "acct-1",
+		token:     "jwt",
+		vaultKeys: map[string][]byte{"v1": {1, 2, 3, 4}},
+	}
+	sess.priv[0] = 0x42
+	s.session = sess
+	s.mu.Unlock()
+	if !s.Status().SignedIn {
+		t.Fatalf("planted session should report SignedIn")
+	}
+
+	if err := s.LockSession(); err != nil {
+		t.Fatalf("LockSession: %v", err)
+	}
+
+	s.mu.RLock()
+	sessionGone := s.session == nil
+	s.mu.RUnlock()
+	if !sessionGone {
+		t.Fatalf("LockSession must drop the session reference")
+	}
+	if s.Status().SignedIn {
+		t.Fatalf("after LockSession the service must report signed-out")
+	}
+}

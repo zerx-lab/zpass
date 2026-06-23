@@ -656,6 +656,32 @@ func (s *CloudService) Stop() error {
 	return nil
 }
 
+// LockSession wipes the in-memory cloud session (account X25519 private key and
+// per-vault keys) when the local vault locks, WITHOUT deleting the persisted
+// JWT or the DEK-wrapped auto-unlock credentials. It mirrors the local
+// VaultService.Lock contract ("locking clears all in-memory secret material"):
+// the cloud session holds key material just as sensitive as the vault DEK, so
+// it must not outlive the lock. The background loop and keychain creds survive,
+// so the next unlock can transparently rebuild the session via RestoreSession
+// (CloudAutoRestore / UnlockPage). Idempotent: tearing down an already-cleared
+// session is a no-op. Safe to call fire-and-forget from the lock path.
+func (s *CloudService) LockSession() error {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	s.mu.RLock()
+	hadSession := s.session != nil
+	s.mu.RUnlock()
+	if !hadSession {
+		return nil
+	}
+	s.teardownSession()
+	// Tell the renderer the cloud session went away so its status flips to
+	// signed-out until the next unlock restores it. Keep the cached email so the
+	// quick re-unlock UI can still show who was signed in.
+	s.emitEvent("cloud:vault:locked", map[string]any{"updatedAt": nowMillis()})
+	return nil
+}
+
 // teardownSession clears the client token and wipes the in-memory session. It
 // leaves the background loop running (the loop is process-scoped and simply
 // no-ops while signed out). Caller holds opMu; mu is taken internally. No

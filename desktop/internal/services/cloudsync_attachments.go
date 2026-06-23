@@ -37,6 +37,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/zerx-lab/zpass/internal/cloud"
 	"github.com/zerx-lab/zpass/internal/cloudcrypto"
@@ -146,25 +147,59 @@ func (s *CloudService) deleteRemoteAttachments(ctx context.Context, client *clou
 // synced attachments the server no longer lists (deleted remotely — the server
 // hard-deletes, so a successful list is the authoritative live set).
 func (s *CloudService) pullRemoteAttachments(ctx context.Context, client *cloud.Client, spaceID, vaultID string, vaultKey []byte, itemIDs []string) {
+	// Filter to items that exist locally in this space first (cheap local reads),
+	// so we never fire a network list for items we'd skip anyway.
+	local := make([]string, 0, len(itemIDs))
 	for _, id := range itemIDs {
-		// Only items that exist locally in this space — never resurrect an item
-		// just because it has attachments.
 		row, err := s.vault.db.GetItem(id)
 		if err != nil || row == nil || row.DeletedAt != nil || row.SpaceID != spaceID {
 			continue
 		}
-		metas, err := client.ListAttachments(ctx, vaultID, cloudItemID(id))
-		if err != nil {
-			s.emitEvent("cloud:sync:warning", map[string]any{"itemId": id, "message": "list remote attachments: " + err.Error()})
+		local = append(local, id)
+	}
+	if len(local) == 0 {
+		return
+	}
+
+	// The attachment API is item-scoped: a full reconcile would otherwise fire
+	// one ListAttachments per item SERIALLY (hundreds of round-trips for a large
+	// vault → the sync visibly stalls). Fan the network listing out across a
+	// bounded worker pool; the per-item local DB writes (ingest / cleanup) still
+	// run serially below, where the vault mutex already serialises them.
+	type listResult struct {
+		itemID string
+		metas  []cloud.AttachmentMeta
+		err    error
+	}
+	const listConcurrency = 12
+	results := make([]listResult, len(local))
+	sem := make(chan struct{}, listConcurrency)
+	var wg sync.WaitGroup
+	for i, id := range local {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, id string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			metas, err := client.ListAttachments(ctx, vaultID, cloudItemID(id))
+			results[i] = listResult{itemID: id, metas: metas, err: err}
+		}(i, id)
+	}
+	wg.Wait()
+
+	for _, res := range results {
+		if res.err != nil {
+			s.emitEvent("cloud:sync:warning", map[string]any{"itemId": res.itemID, "message": "list remote attachments: " + res.err.Error()})
 			continue
 		}
+		id := res.itemID
 		have, err := s.vault.db.AttachmentCloudIDs(id)
 		if err != nil {
 			s.emitEvent("cloud:sync:warning", map[string]any{"itemId": id, "message": "local attachment ids: " + err.Error()})
 			continue
 		}
-		remote := make(map[string]struct{}, len(metas))
-		for _, m := range metas {
+		remote := make(map[string]struct{}, len(res.metas))
+		for _, m := range res.metas {
 			remote[m.ID] = struct{}{}
 			if _, ok := have[m.ID]; ok {
 				continue // already have it

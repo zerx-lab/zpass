@@ -483,6 +483,35 @@ html:not([data-theme]) {
 	}
 }
 
+/* ─── 不确定进度条（indeterminate progress） ──────────────────────
+ * 同步「正在进行但无法量化」的阶段（如推送一个 vault:processed 在完成前
+ * 一直是 0/1），确定宽度会让进度条停在 0% 看起来像卡死。改用一段在轨道内
+ * 来回滑动的高亮块,明确传达「进行中」。CloudSyncSection 在 processed===0
+ * 且阶段进行中时套用 .zpass-progress-indeterminate。
+ * ──────────────────────────────────────────────────────────── */
+@keyframes zpass-progress-indeterminate {
+	0% {
+		left: -40%;
+		width: 40%;
+	}
+	50% {
+		width: 55%;
+	}
+	100% {
+		left: 100%;
+		width: 40%;
+	}
+}
+
+.zpass-progress-indeterminate {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	border-radius: 9999px;
+	background: var(--text-2);
+	animation: zpass-progress-indeterminate 1.1s ease-in-out infinite;
+}
+
 /* ─── 标签工具类（A4：统一 mono uppercase 标签） ───────────────
  * 项目里散落多处 `font-mono text-[10.5px] uppercase tracking-[0.08em] text-(--text-3)`
  * 组合，字距值还分 0.05em / 0.08em / 0.1em / 0.12em / 0.14em 五种。
@@ -623,18 +652,34 @@ button:disabled:hover,
 /* ─── 系统偏好：reduce-motion（无障碍兜底） ───────────────────
  * 三端用户都可以在系统偏好里勾选"减弱动效"（macOS 辅助功能 / Win 显示
  * 设置 / GNOME 通用辅助 / KDE 工作区行为）。Electron 通过 prefers-reduced-motion
- * media query 透传该偏好；我们在全局把所有动画 / 过渡时长压到 ~0，
+ * media query 透传该偏好；我们在全局把所有【装饰性】动画 / 过渡时长压到 ~0，
  * 避免眩晕 / 视觉敏感用户被动效干扰。
  * 不要写在组件层 —— 一处兜底比 30+ 组件各自判断更安全。
+ *
+ * ⚠ 豁免【功能性加载指示器】：spinner（.animate-spin，如「立即同步」按钮内的
+ * 转圈）与不确定进度条（.zpass-progress-indeterminate）表达的是「正在进行」的
+ * 实时状态反馈,不是装饰。把它们也压到 0.001ms 会让圈/条静止,用户误以为卡死
+ * —— 与 reduce-motion 要解决的「干扰」无关,反而制造「无反馈」的可用性问题。
+ * WCAG 同样把必要的加载提示与装饰动效区别对待。故用 :not() 把这两类排除在
+ * 压制之外,并显式给回正常时长。
  * ──────────────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
-	*,
+	*:not(.animate-spin):not(.zpass-progress-indeterminate),
 	*::before,
 	*::after {
 		animation-duration: 0.001ms !important;
 		animation-iteration-count: 1 !important;
 		transition-duration: 0.001ms !important;
 		scroll-behavior: auto !important;
+	}
+	/* 加载指示器保持转动:覆盖回正常时长与无限循环。 */
+	.animate-spin {
+		animation-duration: 1s !important;
+		animation-iteration-count: infinite !important;
+	}
+	.zpass-progress-indeterminate {
+		animation-duration: 1.1s !important;
+		animation-iteration-count: infinite !important;
 	}
 }
 

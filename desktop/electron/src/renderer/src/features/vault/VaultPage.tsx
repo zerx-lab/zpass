@@ -1381,11 +1381,20 @@ export function VaultPage() {
 									fieldStr(cached?.fields, "rpId") ||
 									fieldStr(cached?.fields, "host") ||
 									null;
+								// 同域名多账户场景:在标题(域名)下方显示账户名,一眼区分。
+								// 取已解密缓存里的用户名/账户字段;未缓存则回退条目类型。
+								const subtitle =
+									fieldStr(cached?.fields, "username") ||
+									fieldStr(cached?.fields, "userName") ||
+									fieldStr(cached?.fields, "account") ||
+									fieldStr(cached?.fields, "email") ||
+									null;
 								return (
 									<VaultListRow
 										key={it.id}
 										item={it}
 										host={host}
+										subtitle={subtitle}
 										selected={selectedId === it.id}
 										onClick={() => selectItem(it.id)}
 										onContextMenu={(event) => openListContextMenu(event, it.id)}
@@ -1526,6 +1535,7 @@ export function VaultPage() {
 function VaultListRow({
 	item,
 	host,
+	subtitle,
 	selected,
 	onClick,
 	onContextMenu,
@@ -1534,6 +1544,9 @@ function VaultListRow({
 	item: VaultItemSummary;
 	/** 可选 host(url/rpId/host),命中 itemDetails 缓存时由父传入,用于 favicon 加载 */
 	host?: string | null;
+	/** 可选账户名(username/account/email),命中缓存时由父传入,显示在标题下方
+	 *  以区分同域名多账户。未缓存时为 null,回退展示条目类型。 */
+	subtitle?: string | null;
 	selected: boolean;
 	onClick: () => void;
 	onContextMenu: (event: React.MouseEvent<HTMLButtonElement>) => void;
@@ -1583,9 +1596,17 @@ function VaultListRow({
 				<ItemIcon type={item.type} name={item.name} host={host} variant="row" />
 				<div className="min-w-0 flex-1">
 					<div className="truncate text-[13px] text-(--text)">{item.name}</div>
-					<div className="truncate font-mono text-[10.5px] tracking-wider text-(--text-3) uppercase">
-						{item.type} · {relativeTime(item.updatedAt)}
-					</div>
+					{subtitle ? (
+						// 有账户名:常规可读字体展示账户名 + 相对时间,区分同域名多账户。
+						<div className="truncate text-[11.5px] text-(--text-3)">
+							{subtitle} · {relativeTime(item.updatedAt)}
+						</div>
+					) : (
+						// 无缓存账户名:回退原 等宽大写类型 + 相对时间。
+						<div className="truncate font-mono text-[10.5px] tracking-wider text-(--text-3) uppercase">
+							{item.type} · {relativeTime(item.updatedAt)}
+						</div>
+					)}
 				</div>
 			</button>
 		</li>
