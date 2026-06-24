@@ -20,12 +20,14 @@ import Desktop from "../components/Desktop.astro";
 import Mobile from "../components/Mobile.astro";
 import Security from "../components/Security.astro";
 import Changelog from "../components/Changelog.astro";
+import Pricing from "../components/Pricing.astro";
 import Faq from "../components/Faq.astro";
 import Footer from "../components/Footer.astro";
 import ContactDialog from "../components/ContactDialog.astro";
 
 import { applyVersion, getStrings } from "../i18n/strings";
 import { getLatestRelease } from "../lib/release-fetcher";
+import { getPricingTiers } from "../lib/pricing-fetcher";
 
 // 走 SSR：每次请求都通过 release-fetcher 取最新版本（命中 24h 缓存时无外网开销），
 // 用拿到的版本号把所有 `{version}` 占位符替换成真实值，再交给子组件渲染。
@@ -34,6 +36,8 @@ export const prerender = false;
 const locale = "en" as const;
 const release = await getLatestRelease();
 const t = applyVersion(getStrings(locale), release.version);
+// 套餐档与运营平台同源（公开端点拉取，失败降级内置文案）。
+const pricingTiers = await getPricingTiers(locale, t);
 
 // 页面级 SEO
 const title = "ZPass — a calmer password manager";
@@ -58,6 +62,7 @@ const description =
 		<Mobile t={t} />
 		<Release t={t} locale={locale} variant="soft" />
 		<Security t={t} variant="ink" />
+		<Pricing t={t} tiers={pricingTiers} />
 		<Changelog t={t} variant="soft" />
 		<Faq t={t} />
 	</main>

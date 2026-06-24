@@ -1,33 +1,28 @@
 ---
 // ============================================================================
 // Pricing — 定价方案
-// 4 档：Free(免费) / Personal / Family / Team
-// 居中的 Personal 档使用 .featured 高亮样式(带 accent 边框 + 阴影)。
-// 数据来自 i18n strings 中的 PriceTier 结构。
+// 套餐数据来自 zpass_cloud 公开端点（与 SaaS 运营平台同源 plans 表），由页面
+// SSR 时通过 pricing-fetcher 拉取并映射成 PricingTier[]，作为 `tiers` 传入。
+// 后端不可达时 pricing-fetcher 降级到内置 i18n 文案，组件无需感知。
 //
-// 注:前期开发期所有 CTA 均链接到 #download 邮件订阅区,而非真实下单/下载。
+// 居中的推荐档使用 .featured 高亮样式（带 accent 边框 + 阴影）；
+// 联系销售档（contact）渲染为打开商务联系弹窗的按钮，而非下单链接。
 // ============================================================================
 
-import type { SiteStrings, PriceTier } from "../i18n/strings";
+import type { SiteStrings } from "../i18n/strings";
+import type { PricingTier } from "../lib/pricing-fetcher";
 
 export interface Props {
 	t: SiteStrings;
+	/** 由页面 SSR 拉取并映射的套餐档（与运营平台同源）。 */
+	tiers: PricingTier[];
 	/** 章节背景变体 */
 	variant?: "default" | "soft" | "ink" | "blue";
 }
 
-const { t, variant = "default" } = Astro.props;
+const { t, tiers, variant = "default" } = Astro.props;
 const sectionClass =
 	variant === "default" ? "section" : `section section--${variant}`;
-
-// 4 档定价数据，按从入门到企业的顺序排列
-// featured 标记控制高亮样式，默认高亮 Personal（最常被选择的方案）
-const tiers: Array<{ tier: PriceTier; featured?: boolean; contact?: boolean }> = [
-	{ tier: t.pricing_solo },
-	{ tier: t.pricing_personal, featured: true },
-	{ tier: t.pricing_family },
-	{ tier: t.pricing_team, contact: true },
-];
 ---
 
 <section class={sectionClass} id="pricing">
@@ -42,9 +37,10 @@ const tiers: Array<{ tier: PriceTier; featured?: boolean; contact?: boolean }> =
 
 		<div class="pricing-grid">
 			{
-				tiers.map(({ tier, featured, contact }) => (
+				tiers.map((tier) => (
 					<div
-						class={"price-card reveal" + (featured ? " featured" : "")}
+						class={"price-card reveal" + (tier.featured ? " featured" : "")}
+						data-plan={tier.plan}
 					>
 						<div class="name mono">{tier.name}</div>
 						<div class="price">{tier.price}</div>
@@ -56,7 +52,7 @@ const tiers: Array<{ tier: PriceTier; featured?: boolean; contact?: boolean }> =
 							))}
 						</ul>
 
-						{contact ? (
+						{tier.contact ? (
 							<button
 								class="btn"
 								data-contact-open="business"
@@ -66,7 +62,7 @@ const tiers: Array<{ tier: PriceTier; featured?: boolean; contact?: boolean }> =
 						) : (
 							<a
 								href="#download"
-								class={"btn" + (featured ? " primary" : "")}
+								class={"btn" + (tier.featured ? " primary" : "")}
 							>
 								{tier.cta} <span class="arrow">→</span>
 							</a>
