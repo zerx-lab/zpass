@@ -1,0 +1,223 @@
+name: Build Extension
+
+# ZPass 浏览器扩展打包 / 发布 workflow（WXT，跨浏览器同源构建）
+# -----------------------------------------------------------------------------
+# 目标:
+#   - Chrome (MV3) 上架包 zip（无 key，商店重签）
+#   - Chrome (MV3) 自托管包 zip（带 key，固定 id nlnkem...）
+#   - Firefox (MV2) zip + sources.zip（AMO 审核需提交源码，扩展用了 minify）
+#
+# 为什么独立成一个 workflow（而不是塞进 desktop-build.yml）:
+#   仓库是「每端独立 release」模型（见 .github/actions/detect-and-version）。
+#   extension 必须有自己的 component=extension 的变化检测与 release tag
+#   （extension-vX.Y.Z），否则会跟着 desktop 的 detect 跑、把扩展产物误推到
+#   desktop-vX.Y.Z release（曾发生:desktop-v0.1.6 里混入了 extension zip）。
+#
+# 触发方式:
+#   1. push tags 'v*'         自动按变化检测发布到 extension-vX.Y.Z
+#   2. workflow_dispatch      release=true + tag_name 非空时上传;force 跳过 diff
+# -----------------------------------------------------------------------------
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "是否在构建完成后上传到 GitHub Release（需配合 tag_name）"
+        required: false
+        default: false
+        type: boolean
+      tag_name:
+        description: "Release 的 tag 名（如 v0.1.0），release=true 时必填"
+        required: false
+        type: string
+      force:
+        description: "跳过目录变化检测，强制打包发布（手动补发某个版本时用）"
+        required: false
+        default: false
+        type: boolean
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: extension-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "20"
+
+jobs:
+  # ===========================================================================
+  # 变化检测 + 版本解析（解耦核心）
+  # ---------------------------------------------------------------------------
+  # extension 关心 extension/ 自身与共享的 assets/（品牌图标）。任一在「上一个
+  # vX.Y.Z tag → 当前 tag」之间有改动才发布 extension 端 release。
+  # 独立 release tag = extension-vX.Y.Z；展示版本 = X.Y.Z。
+  # ===========================================================================
+  detect:
+    name: Detect extension changes
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.dv.outputs.changed }}
+      publish: ${{ steps.dv.outputs.publish }}
+      version: ${{ steps.dv.outputs.version }}
+      source_tag: ${{ steps.dv.outputs.source_tag }}
+      release_tag: ${{ steps.dv.outputs.release_tag }}
+    steps:
+      - name: Checkout (full history for tag diff)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: dv
+        uses: ./.github/actions/detect-and-version
+        with:
+          component: extension
+          paths: "extension assets"
+          ref_type: ${{ github.ref_type }}
+          ref_name: ${{ github.ref_name }}
+          event_name: ${{ github.event_name }}
+          dispatch_tag: ${{ inputs.tag_name }}
+          dispatch_release: ${{ inputs.release }}
+          dispatch_force: ${{ inputs.force }}
+
+  # ===========================================================================
+  # Browser Extension - Chrome MV3 + Firefox MV2 (+ sources.zip for AMO)
+  # ===========================================================================
+  build-extension:
+    name: Browser Extension (Chrome + Firefox)
+    runs-on: ubuntu-latest
+    needs: detect
+    if: needs.detect.outputs.changed == 'true'
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+        working-directory: extension
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # extension/ 同时存在 bun.lock 和 package-lock.json, README 写的是 npm,
+      # 这里跟 README 走, 用 npm ci 确保锁文件一致.
+      - name: Install dependencies
+        run: npm ci
+
+      # 版本号由 detect job 统一解析；回写到 extension/package.json，WXT 据此写入
+      # 各浏览器 manifest 的 version（manifest version 必须随发布递增，否则
+      # Chrome Web Store / AMO 以「版本号未提升」拒绝）。npm version 不动 lockfile。
+      - name: Sync release version into package.json
+        env:
+          APP_VERSION: ${{ needs.detect.outputs.version }}
+        run: |
+          npm version "$APP_VERSION" --no-git-tag-version --allow-same-version
+          echo "[ok] extension/package.json version -> $APP_VERSION"
+
+      # 上架商店包(无 key):默认 -b chrome。商店用自己的公钥重签,id = dafhkof...
+      - name: Build Chrome MV3 zip (store, no key)
+        run: npx wxt zip
+
+      # 自托管手动加载包(带 key):自定义 browser 串 chrome-selfhost 触发
+      # wxt.config.ts 注入 manifest.key,使解压加载后 id 恒为 nlnkem...
+      # (已被 desktop NMH allowed_origins 收录,native messaging 直通,与
+      # 解压目录路径无关)。--mv3 显式钉死,避免未知 browser 串被猜成 MV2。
+      # 产物名 .output/<pkg>-<version>-chrome-selfhost.zip。
+      - name: Build Chrome MV3 zip (self-host, with key)
+        run: npx wxt zip -b chrome-selfhost --mv3
+
+      - name: Build Firefox MV2 zip
+        run: npx wxt zip -b firefox
+
+      # WXT 默认命名:
+      #   .output/<pkg-name>-<version>-chrome.zip
+      #   .output/<pkg-name>-<version>-firefox.zip
+      #   .output/<pkg-name>-<version>-sources.zip
+      # 重命名为无版本号的稳定资产名, 与 desktop 资产风格一致.
+      - name: Stage release assets
+        run: |
+          mkdir -p release
+          shopt -s nullglob
+
+          for f in .output/*-chrome-selfhost.zip; do
+            cp "$f" "release/ZPass-extension-chrome-selfhost.zip"
+          done
+          for f in .output/*-chrome.zip; do
+            cp "$f" "release/ZPass-extension-chrome.zip"
+          done
+          for f in .output/*-firefox.zip; do
+            cp "$f" "release/ZPass-extension-firefox.zip"
+          done
+          for f in .output/*-sources.zip; do
+            cp "$f" "release/ZPass-extension-sources.zip"
+          done
+
+          echo "--- release/ contents ---"
+          ls -lah release/
+
+      - name: Generate extension release notes (git-cliff)
+        if: needs.detect.outputs.publish == 'true'
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header --include-path "extension/**"
+        env:
+          OUTPUT: ${{ github.workspace }}/EXTENSION_NOTES.md
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zpass-extension
+          path: extension/release/*
+          if-no-files-found: error
+
+      # 发到 extension 端专属 release（extension-vX.Y.Z）。
+      - name: Publish to extension GitHub Release
+        if: needs.detect.outputs.publish == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.detect.outputs.release_tag }}
+          name: ZPass Extension ${{ needs.detect.outputs.version }}
+          body_path: ${{ github.workspace }}/EXTENSION_NOTES.md
+          generate_release_notes: false
+          fail_on_unmatched_files: false
+          files: extension/release/*
+
+      # 自动发布到 Chrome Web Store。上传的是上架包 ZPass-extension-chrome.zip
+      # (无 key,商店用自己的公钥重签,item id = dafhkofilckgmnlclnkciddccogpfcdm)。
+      # 仅在正式发布(tag v* 或 dispatch release=true)且 4 个 CWS Secret 齐全时执行:
+      #   - CWS_EXTENSION_ID   商店 item id
+      #   - CWS_CLIENT_ID      OAuth2 client id
+      #   - CWS_CLIENT_SECRET  OAuth2 client secret
+      #   - CWS_REFRESH_TOKEN  OAuth2 refresh token
+      # publish: true → 上传后直接提交审核并自动发布(审核通过后上线);若想停在
+      # 「待发布草稿」由人工点发布,把 publish 改为 false。
+      # 注意:manifest version 必须比商店现有版本高,否则 API 报版本未提升而失败,
+      # 这由上面「Sync release version into package.json」保证(tag 即版本号)。
+      - name: Publish to Chrome Web Store
+        if: >-
+          needs.detect.outputs.publish == 'true' &&
+          env.CWS_EXTENSION_ID != '' &&
+          env.CWS_CLIENT_ID != '' &&
+          env.CWS_CLIENT_SECRET != '' &&
+          env.CWS_REFRESH_TOKEN != ''
+        env:
+          CWS_EXTENSION_ID: ${{ secrets.CWS_EXTENSION_ID }}
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+        uses: mnao305/chrome-extension-upload@v5.0.0
+        with:
+          file-path: extension/release/ZPass-extension-chrome.zip
+          extension-id: ${{ secrets.CWS_EXTENSION_ID }}
+          client-id: ${{ secrets.CWS_CLIENT_ID }}
+          client-secret: ${{ secrets.CWS_CLIENT_SECRET }}
+          refresh-token: ${{ secrets.CWS_REFRESH_TOKEN }}
+          publish: true
