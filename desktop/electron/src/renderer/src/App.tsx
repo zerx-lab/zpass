@@ -7,6 +7,7 @@ import { router } from "@/app/router";
 import { Shortcuts } from "@/app/Shortcuts";
 import { SpaceSync } from "@/app/SpaceSync";
 import { ThemeSync } from "@/app/ThemeSync";
+import { UpdateEventSync } from "@/app/UpdateEventSync";
 import { VaultEventSync } from "@/app/VaultEventSync";
 import { ApprovalToast } from "@/features/sshagent/ApprovalToast";
 
@@ -57,6 +58,9 @@ export function App() {
 			 */}
 			<LockSync />
 			<VaultEventSync />
+			{/* 自动更新事件桥 —— 订阅 zpass:update:event,驱动 useUpdateStore +
+			    下载就绪/发现新版的全局 toast。详见 UpdateEventSync.tsx。 */}
+			<UpdateEventSync />
 			{/*
 			 * 云同步事件桥 —— 订阅 cloud:* 后端事件，驱动 useCloudStore 状态更新
 			 * （同步进度 / 认证变化 / 冲突通知）。同时在 mount 时调用 init()

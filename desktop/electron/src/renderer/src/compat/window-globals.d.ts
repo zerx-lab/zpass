@@ -25,6 +25,20 @@ export interface DesktopPlatform {
 	arch: string;
 }
 
+// Mirror of updater.ts / preload's UpdateEvent (kept byte-for-byte in sync).
+export type UpdateEvent =
+	| { kind: "checking" }
+	| {
+			kind: "available";
+			version: string;
+			mode: "auto" | "manual-open";
+			downloadUrl?: string;
+	  }
+	| { kind: "none" }
+	| { kind: "progress"; percent: number }
+	| { kind: "downloaded"; version: string }
+	| { kind: "error"; message: string };
+
 export interface DesktopBridgeShape {
 	handshake(): Promise<DesktopHandshake>;
 	platform(): DesktopPlatform;
@@ -87,6 +101,12 @@ export interface DesktopBridgeShape {
 		 * unsubscribe function.
 		 */
 		onSystemResumed(cb: () => void): () => void;
+	};
+	update: {
+		check(): Promise<void>;
+		install(): Promise<void>;
+		openDownloadPage(url: string): Promise<void>;
+		onEvent(cb: (ev: UpdateEvent) => void): () => void;
 	};
 }
 

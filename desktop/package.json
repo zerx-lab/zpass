@@ -11,6 +11,7 @@
     "@radix-ui/react-select": "^2.2.6",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "electron-updater": "^6.8.9",
     "framer-motion": "^12.38.0",
     "i18next": "^26.0.6",
     "lucide-react": "^1.8.0",
@@ -63,8 +64,9 @@
   "scripts": {
     "codegen": "openapi-typescript openapi.yaml -o electron/src/api/schema.ts",
     "make": "electron-forge make",
-    "make:win:nsis": "electron-builder --win --prepackaged out/zpass-win32-x64 --config electron-builder.win.yml",
+    "make:win:nsis": "electron-builder --win --prepackaged out/zpass-win32-x64 --config electron-builder.win.yml --publish never",
     "package": "electron-forge package",
+    "postinstall": "node scripts/install-electron.mjs",
     "start": "electron-forge start",
     "typecheck": "tsc --noEmit"
   },

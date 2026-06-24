@@ -750,6 +750,18 @@ export const zh: Strings = {
   settings_about_version: "版本",
   settings_about_build: "构建",
   settings_about_source: "源代码",
+  settings_about_update: "更新",
+  update_check: "检查更新",
+  update_checking: "检查中…",
+  update_latest: "已是最新版本",
+  update_failed: "检查失败",
+  update_new_version: "新版本 {{version}}",
+  update_downloading: "下载中 {{percent}}%",
+  update_ready: "更新已就绪",
+  update_restart: "重启并安装",
+  update_open_page: "前往下载",
+  update_ready_toast: "更新 {{version}} 已就绪,可安装",
+  update_available_toast: "发现新版本 {{version}}",
 
   // Tweaks / Settings （保留键值但不再挂载 UI —— 仅为 i18n 类型对齐）
   tw_title: "外观",

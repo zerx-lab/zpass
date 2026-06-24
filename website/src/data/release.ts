@@ -261,8 +261,8 @@ const PLATFORM_METAS: PlatformMeta[] = [
 // ============================================================================
 
 // GitHub Releases API 不可达时展示的占位 changelog（不含具体版本号）。
-// 真实更新日志由 .github/workflows/release-notes.yml 在 tag 发布时通过
-// git-cliff 生成并写入 release body，再由 release-fetcher 读取展示。
+// 真实更新日志由各端 build workflow 在 tag 发布时通过 git-cliff 生成并写入
+// 对应端 release 的 body，再由 release-fetcher 合并展示。
 export const FALLBACK_RELEASE_BODY = `## Latest release
 
 ### Features

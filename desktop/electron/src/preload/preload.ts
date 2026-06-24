@@ -1,5 +1,21 @@
 import { contextBridge, ipcRenderer } from "electron";
 
+// Mirror of updater.ts's UpdateEvent. The preload is built into a separate CJS
+// bundle and never imports main-process source, so the union is duplicated here
+// (kept byte-for-byte in sync) — same convention as window-globals.d.ts.
+type UpdateEvent =
+  | { kind: "checking" }
+  | {
+      kind: "available";
+      version: string;
+      mode: "auto" | "manual-open";
+      downloadUrl?: string;
+    }
+  | { kind: "none" }
+  | { kind: "progress"; percent: number }
+  | { kind: "downloaded"; version: string }
+  | { kind: "error"; message: string };
+
 // Renderer-facing bridge for the ported ZPass app.
 // =============================================================================
 //
@@ -200,6 +216,27 @@ const api = {
       ipcRenderer.on("zpass:system-resumed", listener);
       return () => {
         ipcRenderer.removeListener("zpass:system-resumed", listener);
+      };
+    },
+  },
+
+  update: {
+    /** Trigger an update check. Result arrives via `onEvent`. */
+    check: () => ipcRenderer.invoke("desktop:update:check") as Promise<void>,
+    /** Quit and install the downloaded update (Windows). */
+    install: () => ipcRenderer.invoke("desktop:update:install") as Promise<void>,
+    /** Open a release/download page in the browser (macOS/Linux). */
+    openDownloadPage: (url: string) =>
+      ipcRenderer.invoke("desktop:update:open", url) as Promise<void>,
+    /**
+     * Subscribe to auto-update state events (`zpass:update:event`). Returns an
+     * unsubscribe function. Mirrors the onSystemResumed pattern.
+     */
+    onEvent: (cb: (ev: UpdateEvent) => void) => {
+      const listener = (_e: unknown, ev: UpdateEvent) => cb(ev);
+      ipcRenderer.on("zpass:update:event", listener);
+      return () => {
+        ipcRenderer.removeListener("zpass:update:event", listener);
       };
     },
   },

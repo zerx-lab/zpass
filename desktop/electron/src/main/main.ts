@@ -22,6 +22,12 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { startBackend, type Backend } from "./backend";
 import { installNativeMessagingHosts } from "./nmh-install";
+import {
+  checkForUpdates,
+  initAutoUpdater,
+  openReleasePage,
+  quitAndInstall,
+} from "./updater";
 
 // Boot trace: emit labelled deltas to stderr when RELAY_BOOT_TRACE=1. Used to
 // measure cold-start phase distribution without shipping the noise to users.
@@ -358,6 +364,17 @@ ipcMain.handle(
     await applyLaunchAtLogin(enabled, hidden === true);
   },
 );
+
+// Auto-update IPC — renderer-driven manual check / install / open-download.
+// State transitions are pushed back over the `zpass:update:event` channel.
+ipcMain.handle("desktop:update:check", () => checkForUpdates());
+ipcMain.handle("desktop:update:install", () => {
+  quitAndInstall();
+});
+ipcMain.handle("desktop:update:open", (_ev, url: string) => {
+  if (typeof url !== "string" || url === "") return;
+  openReleasePage(url);
+});
 
 // Save-file dialog — replaces the Wails 3 ExportService dialog. The Go side
 // now takes a path argument (or empty for cancel); we pick the path here.
@@ -1087,6 +1104,12 @@ app.whenReady().then(async () => {
   installTray();
   installAppMenu();
   installPowerMonitor();
+
+  // Auto-update: attach listeners (Windows/packaged), then a delayed startup
+  // check that won't compete with cold-start. Failures stay silent (the
+  // updater emits an `error` event but UpdateEventSync shows no global toast).
+  initAutoUpdater();
+  setTimeout(() => void checkForUpdates(), 8000);
 
   // 免打扰启动只有在托盘可用时才生效 —— 托盘创建失败（Linux 无 indicator
   // host）时隐藏窗口会让应用彻底不可见，降级为正常显示。

@@ -3,8 +3,8 @@
 // Changelog — 最近一次 release 的更新日志
 // ---------------------------------------------------------------------------
 // 内容来源：GitHub Releases API（src/lib/release-fetcher.ts），
-// 其中 release body 由 .github/workflows/release-notes.yml 在 tag 推送时
-// 通过 git-cliff（cliff.toml）生成 —— 单点产出，避免人工维护。
+// 各端独立 release 的 body 由对应 build workflow 用 git-cliff（cliff.toml）
+// 按目录 scope 生成；fetcher 合并各端最新 release 后取版本最高者展示。
 //
 // 设计要点：
 //   - SSR 时直接拉取，并通过 24h 模块缓存复用；

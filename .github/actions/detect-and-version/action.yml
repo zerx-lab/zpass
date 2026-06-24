@@ -1,0 +1,153 @@
+name: Detect path changes & resolve version
+description: >-
+  在 tag / workflow_dispatch 触发下，判断某个端（desktop / phone / extension）
+  关心的目录在「上一个 vX.Y.Z tag → 当前 tag」之间是否有改动，并解析出独立
+  release 所需的 version / 源 tag / 端专属 release tag。供各端 build workflow
+  复用，避免在多处重复同一段 shell。
+
+# 设计要点：
+#   - tag push 事件本身没有可用的 path filter（on.push.paths 对 tag 不生效），
+#     所以解耦只能在 workflow 内部用 git diff 上一个 tag 来判断目录变化。
+#   - 上一个 tag 用 `git describe --abbrev=0 <cur>^ --match 'v[0-9]*'` 取，
+#     只认 vX.Y.Z 形式的版本 tag，端专属 tag（desktop-vX.Y.Z 等）因不匹配
+#     该 glob 而被自动忽略，不会污染基线。
+#   - 找不到上一个 tag（首个版本）时，视为「全部变化」，正常发布。
+#   - workflow_dispatch 且 force=true 时跳过 diff，强制视为有变化（手动补发）。
+#   - 端专属 release tag 形如 <prefix>-vX.Y.Z（如 desktop-v0.1.2），让每个端
+#     拥有独立的 GitHub Release；展示用 version 仍是裸 X.Y.Z。
+
+inputs:
+  component:
+    description: "端标识，用作独立 release tag 前缀（desktop / phone / extension）"
+    required: true
+  paths:
+    description: "空格分隔的目录列表，任一目录有改动即判定该端需要发布"
+    required: true
+  ref_type:
+    description: "github.ref_type"
+    required: true
+  ref_name:
+    description: "github.ref_name"
+    required: true
+  event_name:
+    description: "github.event_name"
+    required: true
+  dispatch_tag:
+    description: "workflow_dispatch 输入的 tag_name"
+    required: false
+    default: ""
+  dispatch_release:
+    description: "workflow_dispatch 输入的 release（true 时才发布）"
+    required: false
+    default: "false"
+  dispatch_force:
+    description: "workflow_dispatch 输入的 force（true 时跳过 diff 强制发布）"
+    required: false
+    default: "false"
+
+outputs:
+  changed:
+    description: "该端关心的目录是否有改动（'true' / 'false'）"
+    value: ${{ steps.resolve.outputs.changed }}
+  publish:
+    description: "是否应当发布到 GitHub Release（'true' / 'false'）"
+    value: ${{ steps.resolve.outputs.publish }}
+  version:
+    description: "裸版本号 X.Y.Z（无 v 前缀），用于回写 package.json / app.json"
+    value: ${{ steps.resolve.outputs.version }}
+  source_tag:
+    description: "源版本 tag vX.Y.Z，用于 git-cliff 区间"
+    value: ${{ steps.resolve.outputs.source_tag }}
+  release_tag:
+    description: "端专属 release tag，<component>-vX.Y.Z"
+    value: ${{ steps.resolve.outputs.release_tag }}
+
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: bash
+      env:
+        COMPONENT: ${{ inputs.component }}
+        WATCH_PATHS: ${{ inputs.paths }}
+        REF_TYPE: ${{ inputs.ref_type }}
+        REF_NAME: ${{ inputs.ref_name }}
+        EVENT_NAME: ${{ inputs.event_name }}
+        DISPATCH_TAG: ${{ inputs.dispatch_tag }}
+        DISPATCH_RELEASE: ${{ inputs.dispatch_release }}
+        DISPATCH_FORCE: ${{ inputs.dispatch_force }}
+      run: |
+        set -euo pipefail
+
+        # ---- 1. 解析源 tag ---------------------------------------------------
+        raw=""
+        if [[ "$REF_TYPE" == "tag" && -n "$REF_NAME" ]]; then
+          raw="$REF_NAME"
+        elif [[ -n "$DISPATCH_TAG" ]]; then
+          raw="$DISPATCH_TAG"
+        fi
+
+        if [[ -z "$raw" ]]; then
+          # 非发布场景（如纯 dispatch 不带 tag）：不发布，也不需要版本。
+          echo "changed=false"     >> "$GITHUB_OUTPUT"
+          echo "publish=false"     >> "$GITHUB_OUTPUT"
+          echo "version="          >> "$GITHUB_OUTPUT"
+          echo "source_tag="       >> "$GITHUB_OUTPUT"
+          echo "release_tag="      >> "$GITHUB_OUTPUT"
+          echo "[skip] no tag in context; nothing to publish"
+          exit 0
+        fi
+
+        if [[ ! "$raw" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+          echo "::error::tag '$raw' is not a valid semver (expected vX.Y.Z)"
+          exit 1
+        fi
+        source_tag="v${raw#v}"
+        version="${source_tag#v}"
+        release_tag="${COMPONENT}-${source_tag}"
+
+        # ---- 2. 判断目录是否变化 --------------------------------------------
+        changed="false"
+
+        if [[ "$EVENT_NAME" == "workflow_dispatch" && "$DISPATCH_FORCE" == "true" ]]; then
+          changed="true"
+          echo "[force] dispatch force=true → treat as changed"
+        else
+          # 上一个版本 tag：只认 vX.Y.Z，忽略端专属 tag。
+          # 当前 tag 不一定已 checkout 到 HEAD，用 source_tag^ 作为起点。
+          prev=""
+          if prev=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "${source_tag}^" 2>/dev/null); then
+            echo "[base] previous version tag = $prev"
+            if ! git diff --quiet "$prev" "$source_tag" -- $WATCH_PATHS; then
+              changed="true"
+            fi
+            echo "--- changed files under [$WATCH_PATHS] ---"
+            git diff --name-only "$prev" "$source_tag" -- $WATCH_PATHS | sed 's/^/  /' || true
+          else
+            # 没有上一个版本 tag = 首个版本，全部视为变化。
+            echo "[base] no previous version tag found → first release, treat as changed"
+            changed="true"
+          fi
+        fi
+
+        # ---- 3. 是否发布 -----------------------------------------------------
+        # tag push：变化即发布。
+        # dispatch：需 release=true 且有变化（或 force）。
+        publish="false"
+        if [[ "$changed" == "true" ]]; then
+          if [[ "$REF_TYPE" == "tag" ]]; then
+            publish="true"
+          elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$DISPATCH_RELEASE" == "true" ]]; then
+            publish="true"
+          fi
+        fi
+
+        echo "changed=$changed"          >> "$GITHUB_OUTPUT"
+        echo "publish=$publish"          >> "$GITHUB_OUTPUT"
+        echo "version=$version"          >> "$GITHUB_OUTPUT"
+        echo "source_tag=$source_tag"    >> "$GITHUB_OUTPUT"
+        echo "release_tag=$release_tag"  >> "$GITHUB_OUTPUT"
+
+        echo ""
+        echo "[resolved] component=$COMPONENT changed=$changed publish=$publish"
+        echo "[resolved] version=$version source_tag=$source_tag release_tag=$release_tag"

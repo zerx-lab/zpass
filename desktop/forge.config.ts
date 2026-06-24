@@ -93,7 +93,7 @@ const config: ForgeConfig = {
     executableName: "zpass",
     // `icon` is base path; packager appends .png/.ico/.icns per platform.
     icon: "./assets/logo/zpass",
-    extraResource: ["./bin", "./assets/logo"],
+    extraResource: ["./bin", "./assets/logo", "./electron/app-update.yml"],
     // Windows PE VERSIONINFO. Without code signing the UAC "Publisher" line
     // stays "Unknown publisher" — that field reads strictly from the cert
     // Subject CN and cannot be set here. But UAC's large title, Task

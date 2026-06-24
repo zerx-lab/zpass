@@ -41,6 +41,11 @@ on:
         description: "Release 的 tag 名（如 v0.1.0），release=true 时必填"
         required: false
         type: string
+      force:
+        description: "跳过目录变化检测，强制打包发布（手动补发某个版本时用）"
+        required: false
+        default: false
+        type: boolean
   push:
     tags:
       - "v*"
@@ -56,11 +61,46 @@ env:
 
 jobs:
   # ===========================================================================
+  # 变化检测 + 版本解析（解耦核心）
+  # ---------------------------------------------------------------------------
+  # phone 关心 phone/ 自身、共享的 cryptocore/（编 .so）、共享的 assets/（图标）。
+  # 三者在「上一个 vX.Y.Z tag → 当前 tag」之间任一有改动才发布 phone 端 release。
+  # 独立 release tag = phone-vX.Y.Z；展示版本 = X.Y.Z。
+  # ===========================================================================
+  detect:
+    name: Detect phone changes
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.dv.outputs.changed }}
+      publish: ${{ steps.dv.outputs.publish }}
+      version: ${{ steps.dv.outputs.version }}
+      source_tag: ${{ steps.dv.outputs.source_tag }}
+      release_tag: ${{ steps.dv.outputs.release_tag }}
+    steps:
+      - name: Checkout (full history for tag diff)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: dv
+        uses: ./.github/actions/detect-and-version
+        with:
+          component: phone
+          paths: "phone cryptocore assets"
+          ref_type: ${{ github.ref_type }}
+          ref_name: ${{ github.ref_name }}
+          event_name: ${{ github.event_name }}
+          dispatch_tag: ${{ inputs.tag_name }}
+          dispatch_release: ${{ inputs.release }}
+          dispatch_force: ${{ inputs.force }}
+
+  # ===========================================================================
   # Android - arm64-v8a + x86_64 + universal APK
   # ===========================================================================
   build-android:
     name: Android (arm64-v8a / x86_64 / universal)
     runs-on: ubuntu-latest
+    needs: detect
+    if: needs.detect.outputs.changed == 'true'
     permissions:
       contents: write
     defaults:
@@ -71,6 +111,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up JDK ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
@@ -129,38 +171,16 @@ jobs:
       - name: Install dependencies (bun)
         run: bun install --frozen-lockfile
 
-      # 把 release tag 回写到 app.json 的 expo.version，
+      # 版本号由 detect job 从当前 tag 统一解析；回写到 app.json 的 expo.version，
       # 这样下一步 expo prebuild 生成的 android/app/build.gradle versionName
-      # 与 app 内 expo-constants 读到的 version 完全一致.
-      #   - push tag v*                     → github.ref_name 去掉 v 前缀
-      #   - workflow_dispatch + tag_name    → inputs.tag_name 去掉 v 前缀
-      #   - 其它 dispatch（不发 release） → 不改，沿用源码里的 version
-      - name: Sync release tag into app.json version
+      # 与 app 内 expo-constants 读到的 version 完全一致。
+      - name: Sync release version into app.json
         env:
-          DISPATCH_TAG_NAME: ${{ inputs.tag_name }}
+          APP_VERSION: ${{ needs.detect.outputs.version }}
         run: |
           python3 - <<'PY'
-          import json, os, re, pathlib, sys
-
-          ref_type = os.environ.get("GITHUB_REF_TYPE", "")
-          ref_name = os.environ.get("GITHUB_REF_NAME", "")
-          dispatch_tag = os.environ.get("DISPATCH_TAG_NAME", "")
-
-          raw = ""
-          if ref_type == "tag" and ref_name:
-              raw = ref_name
-          elif dispatch_tag:
-              raw = dispatch_tag
-
-          if not raw:
-              print("[skip] no release tag, keep app.json version as-is")
-              sys.exit(0)
-
-          m = re.match(r'^v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.\-]+)?)$', raw)
-          if not m:
-              sys.exit(f"[error] tag {raw!r} is not a valid semver (expected vX.Y.Z)")
-          version = m.group(1)
-
+          import json, os, pathlib
+          version = os.environ["APP_VERSION"]
           p = pathlib.Path("app.json")
           cfg = json.loads(p.read_text())
           old = cfg.get("expo", {}).get("version")
@@ -268,21 +288,14 @@ jobs:
             fi
           done
 
-      - name: Resolve release context
-        id: release_ctx
-        run: |
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
-          elif [[ "${{ github.event_name }}" == "workflow_dispatch" \
-               && "${{ inputs.release }}" == "true" \
-               && -n "${{ inputs.tag_name }}" ]]; then
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-            echo "tag=${{ inputs.tag_name }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-            echo "tag=" >> "$GITHUB_OUTPUT"
-          fi
+      - name: Generate phone release notes (git-cliff)
+        if: needs.detect.outputs.publish == 'true'
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header --include-path "phone/**" --include-path "cryptocore/**" --include-path "assets/**"
+        env:
+          OUTPUT: ${{ github.workspace }}/PHONE_NOTES.md
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
@@ -291,13 +304,14 @@ jobs:
           path: phone/release/*
           if-no-files-found: error
 
-      - name: Publish to GitHub Release
-        if: steps.release_ctx.outputs.publish == 'true'
+      # 发到 phone 端专属 release（phone-vX.Y.Z），与 desktop / extension 互不干扰。
+      - name: Publish to phone GitHub Release
+        if: needs.detect.outputs.publish == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.release_ctx.outputs.tag }}
-          # name / body 由 .github/workflows/release-notes.yml 用 git-cliff
-          # 统一写入，这里只负责把 Android APK 追加到对应 release。
+          tag_name: ${{ needs.detect.outputs.release_tag }}
+          name: ZPass Phone (Android) ${{ needs.detect.outputs.version }}
+          body_path: ${{ github.workspace }}/PHONE_NOTES.md
           generate_release_notes: false
           fail_on_unmatched_files: false
           files: phone/release/*

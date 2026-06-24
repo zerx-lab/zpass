@@ -1,0 +1,8 @@
+# 运行期 electron-updater 的 provider 兜底配置。Windows 上 updater.ts 在每次检查前
+# 会显式 setFeedURL 成 generic provider(指向 desktop-vX.Y.Z release 的 download 目录),
+# 覆盖此处;保留本文件只为让 electron-updater 在 setFeedURL 之前能解析出一个合法 provider,
+# 不再依赖 electron-builder --prepackaged 注入(它会跳过 app pack 阶段不写此文件)。
+owner: zerx-lab
+repo: zpass
+provider: github
+updaterCacheDirName: zpass-updater

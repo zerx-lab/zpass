@@ -929,6 +929,18 @@ export const en = {
   settings_about_version: "Version",
   settings_about_build: "Build",
   settings_about_source: "Source code",
+  settings_about_update: "Updates",
+  update_check: "Check for updates",
+  update_checking: "Checking…",
+  update_latest: "Up to date",
+  update_failed: "Check failed",
+  update_new_version: "New version {{version}}",
+  update_downloading: "Downloading {{percent}}%",
+  update_ready: "Update ready",
+  update_restart: "Restart & install",
+  update_open_page: "Go to download",
+  update_ready_toast: "Update {{version}} is ready to install",
+  update_available_toast: "New version {{version}} available",
 
   // Tweaks / Settings
   tw_title: "Appearance",

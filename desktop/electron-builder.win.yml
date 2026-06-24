@@ -47,10 +47,15 @@ nsis:
   installerIcon: assets/logo/zpass.ico
   uninstallerIcon: assets/logo/zpass.ico
   installerHeaderIcon: assets/logo/zpass.ico
-  # 文件名带版本号便于本地辨认; CI 会再复制成无版本号的稳定 release 资产名。
-  artifactName: ZPass-Setup-${version}.${ext}
-  # 不做差分包 / 不配 publish: 当前没有接入 electron-builder 的自动更新通道,
-  # 关掉以免它去生成/索要 latest.yml 之类的更新元数据。
+  # 文件名固定为无版本号的稳定 release 资产名: 既是用户/网站直链下载名
+  # (https://github.com/zerx-lab/zpass/releases/latest/download/ZPass-windows-x64-Setup.exe),
+  # 也让 electron-builder 生成的 latest.yml 里的 `path` 与上传到 Release 的资产名
+  # 天然一致 (electron-updater 按 latest.yml.path 拉取安装包, 不一致即 404)。
+  artifactName: ZPass-windows-x64-Setup.${ext}
+  # 已接入 electron-updater 的 GitHub 自动更新通道 (见下方 publish 段)。
+  # differentialPackage:false → 不生成 .blockmap, 故主进程 updater.ts 里同步设
+  # autoUpdater.disableDifferentialDownload=true, 走干净的全量下载 (否则 updater
+  # 仍会去拉不存在的 .blockmap 报 404 再回退)。安装包 ~90MB, 全量更新可接受。
   differentialPackage: false
   # 自定义 NSIS 钩子: 安装/卸载前 taskkill 常驻的 zpass-native-host.exe /
   # zpass-agent.exe。这两个 helper 由浏览器 / GUI 之外的生命周期驱动, 升级时
@@ -65,3 +70,14 @@ nsis:
 # 同在一个布局正确的归档里, 三处解析路径全部命中, 从根上绕开 legacy 拆包路径 bug。
 toolsets:
   nsis: "1.2.1"
+
+# 自动更新发布通道: electron-updater 据此生成 latest.yml 的 provider 元数据。
+# 打包脚本用 `--publish never` 仅本地生成元数据 (out/make/nsis/latest.yml), 实际上传
+# 由 CI 的 softprops/action-gh-release 负责; 故此处不需要 GH_TOKEN。
+# 注意: 本版 electron-builder(26.15.2) 的 GithubOptions 不支持 tagPrefix; 仓库的
+# 「每端独立 release」(desktop-vX.Y.Z) 由运行期 updater.ts 用 generic provider +
+# 显式 setFeedURL 指向该 release 的 download 目录来适配, 与这里的 provider 无关。
+publish:
+  provider: github
+  owner: zerx-lab
+  repo: zpass
