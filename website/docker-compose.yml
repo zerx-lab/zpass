@@ -5,6 +5,11 @@
 # 如需直接对外暴露，把 HOST_BIND 设为 0.0.0.0。
 # 可通过同目录 .env 覆盖 HOST_BIND / HOST_PORT。
 # ---------------------------------------------------------------------------
+# 固定 project 名，避免 compose 默认取目录名导致 project 漂移：
+# 旧容器属 project "zpass"，若 project 名变成目录名 "website"，
+# `up` 会因 container_name 全局唯一与旧容器撞名而失败。
+name: zpass
+
 services:
   website:
     build:
