@@ -15,7 +15,7 @@
 // ============================================================================
 
 import type { SiteStrings, Locale } from "../i18n/strings";
-import { GITHUB_URL, localizePath, APP_LOGIN_URL, APP_REGISTER_URL } from "../i18n/strings";
+import { GITHUB_URL, localizePath, APP_URL, APP_REGISTER_URL } from "../i18n/strings";
 import ThemeToggle from "./ThemeToggle.astro";
 import Brandmark from "./Brandmark.astro";
 
@@ -135,7 +135,7 @@ const zhPath = localizePath(pathname, "zh");
 				>
 			</div>
 
-			<a href={APP_LOGIN_URL} class="btn nav-cta nav-signin"
+			<a href={APP_URL} class="btn nav-cta nav-signin"
 				>{t.nav_signin}</a
 			>
 			<a href={link("download")} class="btn primary nav-cta"
@@ -171,7 +171,7 @@ const zhPath = localizePath(pathname, "zh");
 			<a href={link("pricing")} class="nav-mobile-link" data-nav-mobile-link>{t.nav_pricing}</a>
 			<a href={link("download")} class="nav-mobile-link" data-nav-mobile-link>{t.nav_download}</a>
 			<a href={link("faq")} class="nav-mobile-link" data-nav-mobile-link>{t.nav_faq}</a>
-			<a href={APP_LOGIN_URL} class="nav-mobile-link" data-nav-mobile-link>{t.nav_signin}</a>
+			<a href={APP_URL} class="nav-mobile-link" data-nav-mobile-link>{t.nav_signin}</a>
 			<a href={APP_REGISTER_URL} class="nav-mobile-link nav-mobile-register" data-nav-mobile-link>{t.nav_register}</a>
 
 			<div class="nav-mobile-divider"></div>

@@ -12,8 +12,6 @@ export const APP_URL = (
 	import.meta.env.APP_URL ?? "https://zpass-app.zerx.dev"
 ).replace(/\/+$/, "");
 
-/** Web Vault 登录页（已有账户） */
-export const APP_LOGIN_URL = `${APP_URL}/login`;
 /** Web Vault 注册页（新建账户） */
 export const APP_REGISTER_URL = `${APP_URL}/register`;
 
