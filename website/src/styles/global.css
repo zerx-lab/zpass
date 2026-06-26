@@ -1719,6 +1719,70 @@ a {
   background-repeat: no-repeat;
 }
 
+/* ----------------------------------------------------------------------------
+ * 套餐对比表（与运营平台同源 plans 真实配置派生）
+ * -------------------------------------------------------------------------- */
+.compare {
+  margin-top: 56px;
+}
+.compare-title {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  text-align: center;
+  margin: 0 0 24px;
+}
+.compare-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  min-width: 640px;
+}
+.compare-table th,
+.compare-table td {
+  padding: 14px 18px;
+  text-align: center;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.compare-table thead th {
+  font-weight: var(--fw-display);
+  color: var(--text);
+  font-size: 15px;
+  border-bottom: 1px solid var(--line);
+}
+.compare-table .compare-dim {
+  text-align: left;
+  color: var(--text-3);
+  font-weight: 400;
+  white-space: normal;
+}
+.compare-table tbody tr:hover td,
+.compare-table tbody tr:hover .compare-dim {
+  background: var(--accent-soft);
+}
+.compare-table th.featured,
+.compare-table td.featured {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.compare-table thead th.featured {
+  color: var(--accent);
+}
+.compare-table .ck {
+  color: var(--accent);
+  font-weight: 700;
+}
+.compare-table .dash {
+  color: var(--text-4);
+}
+
 /* ============================================================================
  * CHANGELOG（保留结构，调色）
  * ============================================================================ */

@@ -10,6 +10,7 @@
 // ============================================================================
 
 import type { SiteStrings } from "../i18n/strings";
+import { APP_REGISTER_URL } from "../i18n/strings";
 import type { PricingTier } from "../lib/pricing-fetcher";
 
 export interface Props {
@@ -23,6 +24,24 @@ export interface Props {
 const { t, tiers, variant = "default" } = Astro.props;
 const sectionClass =
 	variant === "default" ? "section" : `section section--${variant}`;
+
+// 对比表：仅在所有档都带后端结构化 compare 时渲染（降级态 compare 为空对象则隐藏）。
+const COMPARE_ROW_KEYS = [
+	"price_yearly",
+	"max_members",
+	"max_vaults",
+	"max_items",
+	"max_guests",
+	"storage",
+	"trial",
+	"advanced_mfa",
+	"family_sharing",
+	"audit_log",
+	"sso",
+	"scim",
+] as const;
+const showCompare =
+	tiers.length > 0 && tiers.every((tier) => Object.keys(tier.compare).length > 0);
 ---
 
 <section class={sectionClass} id="pricing">
@@ -61,7 +80,7 @@ const sectionClass =
 							</button>
 						) : (
 							<a
-								href="#download"
+								href={APP_REGISTER_URL}
 								class={"btn" + (tier.featured ? " primary" : "")}
 							>
 								{tier.cta} <span class="arrow">→</span>
@@ -71,5 +90,46 @@ const sectionClass =
 				))
 			}
 		</div>
+
+		{showCompare && (
+			<div class="compare reveal">
+				<h3 class="compare-title mono">{t.pricing_compare_title}</h3>
+				<div class="compare-scroll">
+					<table class="compare-table">
+						<thead>
+							<tr>
+								<th class="compare-dim" />
+								{tiers.map((tier) => (
+									<th class={tier.featured ? "featured" : ""}>{tier.name}</th>
+								))}
+							</tr>
+						</thead>
+						<tbody>
+							{COMPARE_ROW_KEYS.map((key) => (
+								<tr>
+									<th scope="row" class="compare-dim">
+										{t.pricing_compare_rows[key]}
+									</th>
+									{tiers.map((tier) => {
+										const cell = tier.compare[key];
+										return (
+											<td class={tier.featured ? "featured" : ""}>
+												{cell === true ? (
+													<span class="ck" aria-label={t.pricing_compare_yes}>✓</span>
+												) : cell === false ? (
+													<span class="dash" aria-hidden="true">—</span>
+												) : (
+													cell
+												)}
+											</td>
+										);
+									})}
+								</tr>
+							))}
+						</tbody>
+					</table>
+				</div>
+			</div>
+		)}
 	</div>
 </section>

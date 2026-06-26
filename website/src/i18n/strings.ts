@@ -198,6 +198,22 @@ export interface SiteStrings {
 	pricing_personal: PriceTier;
 	pricing_family: PriceTier;
 	pricing_team: PriceTier;
+	pricing_compare_title: string;
+	pricing_compare_yes: string;
+	pricing_compare_rows: {
+		price_yearly: string;
+		max_members: string;
+		max_vaults: string;
+		max_items: string;
+		max_guests: string;
+		storage: string;
+		trial: string;
+		advanced_mfa: string;
+		family_sharing: string;
+		audit_log: string;
+		sso: string;
+		scim: string;
+	};
 
 	// changelog
 	section_changelog: string;
@@ -463,7 +479,7 @@ const en: SiteStrings = {
 
 	section_pricing: "Pricing",
 	section_pricing_sub:
-		"Indicative pricing — final numbers will be confirmed at launch. ZPass is shipping soon; reach out if you need details before then.",
+		"Simple, transparent pricing — cheaper than 1Password and Bitwarden. Start free, upgrade anytime. All plans are end-to-end encrypted with zero-knowledge architecture.",
 	pricing_solo: {
 		name: "Free",
 		price: "$0",
@@ -512,6 +528,22 @@ const en: SiteStrings = {
 			"Centralized policy controls",
 		],
 		cta: "Talk to us",
+	},
+	pricing_compare_title: "Compare plans",
+	pricing_compare_yes: "Yes",
+	pricing_compare_rows: {
+		price_yearly: "Yearly price",
+		max_members: "Members",
+		max_vaults: "Vaults",
+		max_items: "Items",
+		max_guests: "Guests",
+		storage: "Encrypted storage",
+		trial: "Free trial",
+		advanced_mfa: "Advanced MFA",
+		family_sharing: "Family sharing",
+		audit_log: "Audit log",
+		sso: "SSO (SAML, OIDC)",
+		scim: "SCIM provisioning",
 	},
 
 	section_changelog: "Latest release",
@@ -771,7 +803,7 @@ const zh: SiteStrings = {
 
 	section_pricing: "价格",
 	section_pricing_sub:
-		"以下为预估价格，最终以正式发布时公布的为准。ZPass 即将发布，如需提前了解请通过页面上的「联系我们」与我们沟通。",
+		"简单透明的定价，比 1Password、Bitwarden 更实惠。免费起步，随时升级。所有套餐均采用端到端加密与零知识架构。",
 	pricing_solo: {
 		name: "免费版",
 		price: "¥0",
@@ -815,6 +847,22 @@ const zh: SiteStrings = {
 			"集中策略管控",
 		],
 		cta: "联系我们",
+	},
+	pricing_compare_title: "套餐对比",
+	pricing_compare_yes: "支持",
+	pricing_compare_rows: {
+		price_yearly: "年付价格",
+		max_members: "成员数",
+		max_vaults: "保险箱",
+		max_items: "条目数",
+		max_guests: "访客数",
+		storage: "加密存储",
+		trial: "免费试用",
+		advanced_mfa: "高级多因子认证",
+		family_sharing: "家庭共享",
+		audit_log: "审计日志",
+		sso: "SSO（SAML、OIDC）",
+		scim: "SCIM 自动配置",
 	},
 
 	section_changelog: "更新日志",

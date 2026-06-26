@@ -29,9 +29,11 @@ import { applyVersion, getStrings } from "../i18n/strings";
 import { getLatestRelease } from "../lib/release-fetcher";
 import { getPricingTiers } from "../lib/pricing-fetcher";
 
-// 走 SSR：每次请求都通过 release-fetcher 取最新版本（命中 24h 缓存时无外网开销），
+// 预渲染（静态）：构建时通过 release-fetcher 取最新版本（命中 24h 内存缓存时无外网开销），
 // 用拿到的版本号把所有 `{version}` 占位符替换成真实值，再交给子组件渲染。
-export const prerender = false;
+// 语言切换（/ ↔ /zh/）因此变成纯静态文件拉取 + ClientRouter SPA，无 SSR 往返开销。
+// 版本/套餐随发布流程的 CI 重新构建部署而更新。
+export const prerender = true;
 
 const locale = "en" as const;
 const release = await getLatestRelease();

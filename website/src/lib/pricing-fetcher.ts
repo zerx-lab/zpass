@@ -62,7 +62,28 @@ interface PublicPlansResponse {
 	plans: PublicPlan[];
 }
 
-/** 映射后产出的定价档：在 PriceTier 基础上补充 featured / contact 渲染标记。 */
+/**
+ * 对比表维度 key（固定有序，与 i18n COMPARE_ROW_LABELS 对应）。
+ * 值来自后端 plans 真实字段：限额 null=不限；功能标志为布尔。
+ */
+export type CompareKey =
+	| "price_yearly"
+	| "max_members"
+	| "max_vaults"
+	| "max_items"
+	| "max_guests"
+	| "storage"
+	| "trial"
+	| "advanced_mfa"
+	| "family_sharing"
+	| "audit_log"
+	| "sso"
+	| "scim";
+
+/** 单元格值：true/false 渲染勾叉，字符串原样渲染。 */
+export type CompareCell = boolean | string;
+
+/** 映射后产出的定价档：在 PriceTier 基础上补充 featured / contact / compare。 */
 export interface PricingTier extends PriceTier {
 	/** 套餐机器名（plans.name），用于 data 属性 / 调试。 */
 	plan: string;
@@ -70,6 +91,8 @@ export interface PricingTier extends PriceTier {
 	featured: boolean;
 	/** 联系销售（企业定制：flat 计费且月价为 0）。 */
 	contact: boolean;
+	/** 对比表单元格：从后端真实配置派生，key 见 CompareKey。 */
+	compare: Record<CompareKey, CompareCell>;
 }
 
 interface CacheEntry {
@@ -258,6 +281,55 @@ function ctaFor(p: PublicPlan, locale: Locale): {
 	return { cta: zh ? "了解发布" : "Get notified", contact: false };
 }
 
+/** 限额数字 → 单元格文案；null = 不限。 */
+function fmtLimit(
+	value: number | null,
+	locale: Locale,
+	unit?: { zh: string; en: string },
+): CompareCell {
+	const zh = locale === "zh";
+	if (value == null) return zh ? "不限" : "Unlimited";
+	if (unit) {
+		const u = zh ? unit.zh : unit.en;
+		return u ? `${value} ${u}` : String(value);
+	}
+	return String(value);
+}
+
+/** 存储配额 MB → GB/MB 文案；null = 不限。 */
+function fmtStorage(mb: number | null, locale: Locale): CompareCell {
+	const zh = locale === "zh";
+	if (mb == null) return zh ? "不限" : "Unlimited";
+	const gb = mb / 1024;
+	if (gb >= 1) return `${Number.isInteger(gb) ? gb : gb.toFixed(1)} GB`;
+	return `${mb} MB`;
+}
+
+/** 从后端真实字段派生对比表单元格。功能标志缺失视作 false。 */
+function buildCompare(p: PublicPlan, locale: Locale): Record<CompareKey, CompareCell> {
+	const zh = locale === "zh";
+	const flag = (k: string): boolean => p.features?.[k] === true;
+	const yearly =
+		p.price_yearly_cents > 0
+			? fmtPrice(p.price_yearly_cents, p.currency) +
+				(p.billing_mode === "per_seat" ? (zh ? "/人" : "/seat") : "")
+			: "—";
+	return {
+		price_yearly: yearly,
+		max_members: fmtLimit(p.max_members, locale, { zh: "人", en: "" }),
+		max_vaults: fmtLimit(p.max_vaults, locale),
+		max_items: fmtLimit(p.max_items, locale),
+		max_guests: fmtLimit(p.max_guests, locale),
+		storage: fmtStorage(p.storage_quota_mb, locale),
+		trial: p.trial_days > 0 ? (zh ? `${p.trial_days} 天` : `${p.trial_days} days`) : false,
+		advanced_mfa: flag("advanced_mfa"),
+		family_sharing: flag("family_sharing"),
+		audit_log: flag("audit_log"),
+		sso: flag("sso"),
+		scim: flag("scim"),
+	};
+}
+
 function toTier(p: PublicPlan, locale: Locale): PricingTier {
 	const mk = parseMarketing(p, locale);
 	const { cta, contact } = ctaFor(p, locale);
@@ -271,6 +343,7 @@ function toTier(p: PublicPlan, locale: Locale): PricingTier {
 		cta: mk.cta ?? cta,
 		featured: mk.featured ?? false, // false/缺失时由 markFeatured 兜底
 		contact: mk.contact ?? contact,
+		compare: buildCompare(p, locale),
 	};
 }
 
@@ -291,11 +364,13 @@ function markFeatured(tiers: PricingTier[], sortedPlans: PublicPlan[]): void {
 // 降级：后端不可达时用内置 i18n 文案，保持页面可渲染。
 // ---------------------------------------------------------------------------
 function buildFallback(t: SiteStrings): PricingTier[] {
+	// 降级态无后端结构化字段，compare 留空对象；组件侧据此隐藏对比表。
+	const empty = {} as Record<CompareKey, CompareCell>;
 	const tiers: PricingTier[] = [
-		{ ...t.pricing_solo, plan: "free", featured: false, contact: false },
-		{ ...t.pricing_personal, plan: "personal", featured: true, contact: false },
-		{ ...t.pricing_family, plan: "families", featured: false, contact: false },
-		{ ...t.pricing_team, plan: "teams", featured: false, contact: true },
+		{ ...t.pricing_solo, plan: "free", featured: false, contact: false, compare: empty },
+		{ ...t.pricing_personal, plan: "personal", featured: true, contact: false, compare: empty },
+		{ ...t.pricing_family, plan: "families", featured: false, contact: false, compare: empty },
+		{ ...t.pricing_team, plan: "teams", featured: false, contact: true, compare: empty },
 	];
 	return tiers;
 }

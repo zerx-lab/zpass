@@ -11,7 +11,7 @@ import ContactDialog from "../../components/ContactDialog.astro";
 import { applyVersion, getStrings } from "../../i18n/strings";
 import { getLatestRelease } from "../../lib/release-fetcher";
 
-export const prerender = false;
+export const prerender = true;
 
 const locale = "zh" as const;
 const release = await getLatestRelease();
@@ -88,13 +88,8 @@ const lastUpdated = "2026-05-26";
 			<section class="legal-section">
 				<h2>4. 本站收集的内容</h2>
 				<p>
-					本站使用自托管的
-					<a href="https://openpanel.dev" target="_blank" rel="noopener">OpenPanel</a>
-					实例（<span class="mono">openpanel-api.zerx.dev</span>）做无 Cookie
-					的隐私友好型分析，仅记录页面访问、语言偏好与外链点击。本站
-					<strong>不</strong>设置广告 Cookie、不进行设备指纹识别、也不与
-					任何第三方共享数据。IP 地址仅用于解析出粗粒度国家位置，原始 IP
-					不会留存。
+					本站<strong>不</strong>使用任何分析、跟踪或遥测，不设置 Cookie，
+					不加载任何第三方跟踪脚本，也不进行设备指纹识别或构建访客画像。
 				</p>
 				<p>
 					字体由 Google Fonts 提供，下载字体样式表时浏览器会不可避免地把你

@@ -12,7 +12,7 @@ import ContactDialog from "../components/ContactDialog.astro";
 import { applyVersion, getStrings } from "../i18n/strings";
 import { getLatestRelease } from "../lib/release-fetcher";
 
-export const prerender = false;
+export const prerender = true;
 
 const locale = "en" as const;
 const release = await getLatestRelease();
@@ -93,14 +93,10 @@ const lastUpdated = "2026-05-26";
 			<section class="legal-section">
 				<h2>4. What this website collects</h2>
 				<p>
-					The website uses a self-hosted instance of
-					<a href="https://openpanel.dev" target="_blank" rel="noopener">OpenPanel</a>
-					(<span class="mono">openpanel-api.zerx.dev</span>) for privacy-friendly,
-					cookie-less analytics. It records page views, language preference and
-					outbound link clicks. It does <strong>not</strong> set advertising
-					cookies, fingerprint your device, or share data with third parties.
-					IP addresses are processed only to derive a coarse country and are
-					not retained in raw form.
+					This website does <strong>not</strong> use any analytics,
+					tracking, or telemetry. It sets no cookies, runs no third-party
+					tracking scripts, and does not fingerprint your device or build
+					any visitor profile.
 				</p>
 				<p>
 					Fonts are loaded from Google Fonts; that request unavoidably exposes

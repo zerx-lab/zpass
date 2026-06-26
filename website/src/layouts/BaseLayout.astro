@@ -261,26 +261,6 @@ const metaColorScheme =
 		 - 默认会拦截所有同源 <a>，含语言切换链接
 		 ==================================================================== -->
 		<ClientRouter fallback="animate" />
-
-		<!-- ====================================================================
-		 OpenPanel 分析（自托管实例，直接内联官方 stub，避免引入第三方依赖）
-		 - op1.js 全局初始化后，window.op() 在后续 SPA 导航中持续可用
-		 - trackScreenViews：监听 history.pushState/popstate，自动捕获
-		   ClientRouter 的视图过渡
-		 - 自托管 apiUrl：https://openpanel-api.zerx.dev
-		 ==================================================================== -->
-		<script is:inline>
-			window.op = window.op || function () { var n = []; return new Proxy(function () { arguments.length && n.push([].slice.call(arguments)) }, { get: function (_t, r) { return "q" === r ? n : function () { n.push([r].concat([].slice.call(arguments))) } }, has: function (_t, r) { return "q" === r } }) }();
-			window.op('init', {
-				apiUrl: 'https://openpanel-api.zerx.dev',
-				clientId: '4fce5f43-6fdf-4b7f-8116-61bc435460e5',
-				trackScreenViews: true,
-				trackOutgoingLinks: true,
-				trackAttributes: true,
-			});
-		</script>
-		<script is:inline src="https://openpanel.dev/op1.js" defer async></script>
-
 		<meta name="color-scheme" content={metaColorScheme} />
 		<meta
 			name="theme-color"
