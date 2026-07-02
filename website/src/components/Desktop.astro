@@ -485,18 +485,31 @@ const platforms: string[] = [
 		min-width: 0;
 	}
 	.desktop-eyebrow {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
 		font-family: var(--font-mono);
 		color: var(--text-3);
 		font-size: 12px;
-		letter-spacing: 0.12em;
+		letter-spacing: var(--ls-mono);
 		text-transform: uppercase;
+		padding: 6px 12px;
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+	}
+	.desktop-eyebrow::before {
+		content: "";
+		width: 8px;
+		height: 8px;
+		flex-shrink: 0;
+		background: currentColor;
 	}
 	.desktop-headline {
 		margin-top: 22px;
 		max-width: 18ch;
 		font-size: clamp(36px, 4.6vw, 56px);
-		letter-spacing: -0.02em;
-		font-weight: var(--fw-display, 300);
+		letter-spacing: var(--ls-display);
+		font-weight: var(--fw-display);
 		line-height: 1.04;
 	}
 	.desktop-body {
@@ -525,7 +538,10 @@ const platforms: string[] = [
 	/* === ink 变体下的文本颜色补偿 ===
 	   :global() 是必要的 — .section--ink 类名是父级应用的，
 	   不在 Astro 托付给 Desktop 的作用域 hash 范围内。 */
-	:global(.section--ink) .desktop-eyebrow,
+	:global(.section--ink) .desktop-eyebrow {
+		color: var(--text-on-ink-3);
+		border-color: var(--line-on-ink);
+	}
 	:global(.section--ink) .desktop-meta {
 		color: var(--text-on-ink-3);
 	}
@@ -547,10 +563,10 @@ const platforms: string[] = [
 		width: 100%;
 		max-width: 880px;
 		border: 1px solid var(--line);
-		border-radius: var(--radius-lg);
+		border-radius: var(--radius-sm);
 		overflow: hidden;
 		background: var(--bg);
-		box-shadow: var(--shadow-soft), var(--shadow-frame);
+		box-shadow: var(--shadow-frame);
 		display: flex;
 		flex-direction: column;
 	}
@@ -606,7 +622,7 @@ const platforms: string[] = [
 		color: var(--text-3);
 		background: var(--bg);
 		border: 1px solid var(--line);
-		border-radius: 5px;
+		border-radius: var(--radius-sm);
 		white-space: nowrap;
 		overflow: hidden;
 	}
@@ -618,7 +634,7 @@ const platforms: string[] = [
 	.dw-search .kbd {
 		padding: 1px 5px;
 		border: 1px solid var(--line);
-		border-radius: 3px;
+		border-radius: var(--radius-sm);
 		font-size: 10px;
 		color: var(--text-2);
 		background: var(--bg-elev);
@@ -630,7 +646,7 @@ const platforms: string[] = [
 		height: 26px;
 		display: inline-flex;
 		align-items: center;
-		border-radius: 5px;
+		border-radius: var(--radius-sm);
 		background: var(--text);
 		color: var(--bg);
 		font-weight: 600;
@@ -685,7 +701,7 @@ const platforms: string[] = [
 		color: var(--text-3);
 		padding: 2px 5px;
 		border: 1px solid var(--line);
-		border-radius: 4px;
+		border-radius: var(--radius-sm);
 	}
 
 	.dw-nav-section {
@@ -693,14 +709,14 @@ const platforms: string[] = [
 		font-size: 9px;
 		color: var(--text-3);
 		text-transform: uppercase;
-		letter-spacing: 0.08em;
+		letter-spacing: var(--ls-mono);
 	}
 	.dw-nav-item {
 		display: flex;
 		align-items: center;
 		gap: 8px;
 		padding: 5px 6px;
-		border-radius: 5px;
+		border-radius: var(--radius-sm);
 		color: var(--text-2);
 		font-size: 12px;
 		white-space: nowrap;
@@ -739,7 +755,7 @@ const platforms: string[] = [
 	.dw-avatar {
 		width: 22px;
 		height: 22px;
-		border-radius: 5px;
+		border-radius: var(--radius-sm);
 		background: var(--bg-elev-2);
 		border: 1px solid var(--line);
 		display: inline-flex;
@@ -793,7 +809,7 @@ const platforms: string[] = [
 		color: var(--text-3);
 		padding: 1px 5px;
 		border: 1px solid var(--line);
-		border-radius: 4px;
+		border-radius: var(--radius-sm);
 	}
 	.dw-list-recent {
 		font-size: 11px;
@@ -810,7 +826,7 @@ const platforms: string[] = [
 	}
 	.dw-chip {
 		padding: 3px 8px;
-		border-radius: 999px;
+		border-radius: var(--radius-sm);
 		border: 1px solid var(--line);
 		background: var(--bg-elev);
 		font-size: 10px;
@@ -855,12 +871,12 @@ const platforms: string[] = [
 		bottom: 6px;
 		width: 2px;
 		background: var(--text);
-		border-radius: 0 2px 2px 0;
+		border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 	}
 	.dw-fav {
 		width: 26px;
 		height: 26px;
-		border-radius: 5px;
+		border-radius: var(--radius-sm);
 		background: var(--bg-elev-2);
 		border: 1px solid var(--line);
 		display: inline-flex;
@@ -874,7 +890,7 @@ const platforms: string[] = [
 	.dw-fav.big {
 		width: 40px;
 		height: 40px;
-		border-radius: 8px;
+		border-radius: var(--radius);
 		font-size: 14px;
 	}
 	.dw-row-meta {
@@ -895,7 +911,7 @@ const platforms: string[] = [
 		font-size: 8.5px;
 		padding: 1px 4px;
 		border: 1px solid var(--line);
-		border-radius: 3px;
+		border-radius: var(--radius-sm);
 		color: var(--text-3);
 		letter-spacing: 0.06em;
 	}
@@ -917,7 +933,7 @@ const platforms: string[] = [
 		font-size: 8.5px;
 		padding: 1px 5px;
 		border: 1px solid var(--line);
-		border-radius: 3px;
+		border-radius: var(--radius-sm);
 		color: var(--text-3);
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
@@ -970,7 +986,7 @@ const platforms: string[] = [
 		font-size: 10px;
 		background: var(--bg-elev-2);
 		border: 1px solid var(--line);
-		border-radius: 4px;
+		border-radius: var(--radius-sm);
 		color: var(--text-2);
 	}
 	.dw-tag .dot {
@@ -993,7 +1009,7 @@ const platforms: string[] = [
 		gap: 5px;
 		padding: 0 9px;
 		height: 24px;
-		border-radius: 5px;
+		border-radius: var(--radius-sm);
 		border: 1px solid var(--line);
 		background: var(--bg-elev);
 		color: var(--text);
@@ -1025,7 +1041,7 @@ const platforms: string[] = [
 		font-size: 10px;
 		color: var(--text-3);
 		text-transform: uppercase;
-		letter-spacing: 0.08em;
+		letter-spacing: var(--ls-mono);
 		display: flex;
 		align-items: center;
 		gap: 10px;
@@ -1081,7 +1097,7 @@ const platforms: string[] = [
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		border-radius: 4px;
+		border-radius: var(--radius-sm);
 	}
 
 	/* —— Strength —— */
@@ -1114,7 +1130,7 @@ const platforms: string[] = [
 		flex: 1;
 		height: 5px;
 		background: var(--line-soft);
-		border-radius: 3px;
+		border-radius: var(--radius-sm);
 		overflow: hidden;
 		position: relative;
 	}
@@ -1124,7 +1140,7 @@ const platforms: string[] = [
 		top: 0;
 		bottom: 0;
 		background: var(--text);
-		border-radius: 3px;
+		border-radius: var(--radius-sm);
 	}
 	.dw-strength-label {
 		font-size: 11px;

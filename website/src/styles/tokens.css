@@ -1,77 +1,78 @@
 /* ============================================================================
- * ZPass 设计系统 — 全局 token（2026 重构版）
+ * ZPass 设计系统 — 全局 token（2026-07 Composio 风格重构版）
  *
- * 设计语言：以浅色为主基调，沿用 1Password 的视觉语法 ——
- *   - 暖白 + 极浅冷灰的主背景
- *   - 巨字号、超轻字重（300）的显示层级
- *   - 鲜亮的蓝色作为主 CTA 与强调色
- *   - 暗深色 navy 作为 Hero / 最终 CTA / 局部强调板块
- *   - 米色顶栏 (ribbon) 承载发布公告
+ * 设计语言：工程感、终端感、直角网格 ——
+ *   - 浅色主题：#f6f6f6 雾灰底 + 纯白卡面 + 近黑 #0f0f0f 墨色板块
+ *   - 深色主题：#0f0f0f 近黑底 + #1a1a1a 卡面
+ *   - 电光蓝 (#0007cd) 作为主强调色；按钮为直角矩形、mono 大写
+ *   - 章节标签 (eyebrow) 一律 mono 大写 + 1px 边框小方框
+ *   - 视觉层级靠 1px 分割线与网格切分，弱化投影（近乎全平）
  *
  * 主题：默认 light，dark 走 [data-theme="dark"] 覆写。
  *   auto 模式（未写 data-theme）由 prefers-color-scheme 决定。
  *
  * 与 ZPass AGENTS.md 的约束：
- *   - 圆角主体仍是 5 / 7 / 10 / 14 px。仅 --radius-pill 是为按钮单开的例外。
- *   - 字体仍只用 Geist / Geist Mono。
+ *   - 圆角只用 5 / 7 / 10 / 14 px。按钮不再是药丸：--radius-pill 已收敛为 5px
+ *     （保留 token 名以兼容存量规则）。
+ *   - 字体仍只用 Geist / Geist Mono（mono 承担 Composio 里 JetBrains Mono 的角色）。
  * ============================================================================ */
 
 :root {
   /* ===== 颜色：背景层级（浅色基调） ===== */
-  --bg: #ffffff;
-  --bg-soft: #f6f8fc; /* 用于"在白上微微下沉"的板块 */
+  --bg: #f6f6f6;
+  --bg-soft: #efefef; /* 用于"微微下沉"的板块 */
   --bg-elev: #ffffff; /* 卡片表面 */
   --bg-elev-2: #ffffff;
-  --bg-hover: #f0f2f8;
-  --bg-active: #e7eaf2;
+  --bg-hover: #ececec;
+  --bg-active: #e2e2e2;
 
-  /* ===== 颜色：极深 navy（Hero / 最终 CTA） ===== */
-  --bg-ink: #1d1d21;
-  --bg-ink-soft: #2a2a30;
+  /* ===== 颜色：近黑墨色（Hero / 最终 CTA / 强调板块） ===== */
+  --bg-ink: #0f0f0f;
+  --bg-ink-soft: #1e1e1e;
 
-  /* ===== 顶栏 ribbon（米色） ===== */
-  --ribbon: #e9d9b8;
-  --ribbon-ink: #1d1d21;
+  /* ===== 顶栏 ribbon（墨色终端条） ===== */
+  --ribbon: #0f0f0f;
+  --ribbon-ink: #f6f6f6;
 
   /* ===== 分割线 ===== */
-  --line: #e3e6ee;
-  --line-soft: #eef0f5;
+  --line: #e2e2e2;
+  --line-soft: #ececec;
   --line-on-ink: rgba(255, 255, 255, 0.12);
 
   /* ===== 文本层级（浅色基调） ===== */
-  --text: #0e1116;
-  --text-2: #303136;
-  --text-3: #5b5e66;
-  --text-4: #8a8e96;
+  --text: #0f0f0f;
+  --text-2: #2c2c2c;
+  --text-3: #5f5f5f;
+  --text-4: #8a8a8a;
   --text-on-ink: #ffffff;
-  --text-on-ink-2: #c7c9cf;
-  --text-on-ink-3: #8a8e96;
+  --text-on-ink-2: #b8b8b8;
+  --text-on-ink-3: #8a8a8a;
 
-  /* ===== 强调色 ===== */
-  --accent: #145fe4; /* 主 CTA / 链接 / 焦点环 */
-  --accent-strong: #0b4ec4;
-  --accent-soft: #e1ecff;
+  /* ===== 强调色：电光蓝 ===== */
+  --accent: #0007cd; /* 主 CTA / 链接 / 焦点环 */
+  --accent-strong: #0006a8;
+  --accent-soft: rgba(0, 7, 205, 0.07);
   --accent-ink: #ffffff;
 
-  /* ===== 二级强调（保留 ZPass 原有的"加密验证"绿） ===== */
-  --lime: #8ab10f;
-  --lime-on-dark: #d4ff3a;
+  /* ===== 二级强调（"加密验证"绿，终端 ok 色） ===== */
+  --lime: #178745;
+  --lime-on-dark: #2ee27a;
 
   /* ===== 状态色 ===== */
-  --danger: #e55a4a;
-  --ok: #2e8a55;
-  --info: #2c79d8;
+  --danger: #d8382e;
+  --ok: #1e9e3e;
+  --info: #0007cd;
 
   /* ===== 网格背景 ===== */
-  --grid: rgba(14, 17, 22, 0.04);
-  --grid-on-ink: rgba(255, 255, 255, 0.05);
+  --grid: rgba(15, 15, 15, 0.05);
+  --grid-on-ink: rgba(255, 255, 255, 0.06);
 
-  /* ===== 阴影 ===== */
+  /* ===== 阴影（近乎全平，层级靠 1px 线） ===== */
   --shadow-soft: 0 0 0 1px var(--line-soft);
-  --shadow-card: 0 12px 32px rgba(20, 24, 36, 0.06);
-  --shadow-card-hover: 0 18px 44px rgba(20, 24, 36, 0.09);
-  --shadow-strong: 0 30px 60px rgba(20, 24, 36, 0.12);
-  --shadow-frame: 0 24px 56px rgba(20, 24, 36, 0.1);
+  --shadow-card: 0 1px 2px rgba(15, 15, 15, 0.04);
+  --shadow-card-hover: 0 2px 8px rgba(15, 15, 15, 0.08);
+  --shadow-strong: 0 16px 40px rgba(15, 15, 15, 0.14);
+  --shadow-frame: 0 12px 32px rgba(15, 15, 15, 0.12);
 
   /* ===== 装饰性元素 ===== */
   --browser-dot: #c8c8c2;
@@ -83,8 +84,8 @@
   --radius-md: 10px;
   --radius-lg: 14px;
 
-  /* 例外：仅按钮使用药丸（pill）—— 1Password 视觉的核心特征 */
-  --radius-pill: 999px;
+  /* 兼容 token：按钮已收敛为直角风（Composio 语法），不再是药丸 */
+  --radius-pill: 5px;
 
   /* ===== 字体 ===== */
   --font-sans:
@@ -92,11 +93,15 @@
   --font-mono:
     "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
-  /* ===== 字重（显示层级用超轻字重 = 1Password 标志特征） ===== */
-  --fw-display: 300;
+  /* ===== 字重（显示层级 400 常规字重 + 紧字距 = Composio 标志特征） ===== */
+  --fw-display: 400;
   --fw-body: 400;
   --fw-strong: 500;
   --fw-bold: 600;
+
+  /* ===== 字距（显示层级用紧字距） ===== */
+  --ls-display: -0.025em;
+  --ls-mono: 0.08em; /* mono 大写标签的宽字距 */
 
   /* ===== 布局 ===== */
   --max-w: 1280px;
@@ -106,52 +111,52 @@
 
 /* ============================================================================
  * Dark 主题覆写
- * 主结构沿用 1Password "深 navy" 模式：暗区做主色背景，浅区翻成"近黑卡面"。
+ * Composio 同款近黑基调：#0f0f0f 底 + #1a1a1a 卡面 + 白字。
  * ============================================================================ */
 [data-theme="dark"] {
-  --bg: #0e1116;
-  --bg-soft: #14171d;
-  --bg-elev: #181b22;
-  --bg-elev-2: #1f232b;
-  --bg-hover: #1f232b;
-  --bg-active: #262b34;
+  --bg: #0f0f0f;
+  --bg-soft: #141414;
+  --bg-elev: #1a1a1a;
+  --bg-elev-2: #1e1e1e;
+  --bg-hover: #1e1e1e;
+  --bg-active: #2a2a2a;
 
-  --bg-ink: #0a0c10;
-  --bg-ink-soft: #14171d;
+  --bg-ink: #0a0a0a;
+  --bg-ink-soft: #161616;
 
-  --ribbon: #2a2417;
-  --ribbon-ink: #e9d9b8;
+  --ribbon: #1a1a1a;
+  --ribbon-ink: #f6f6f6;
 
-  --line: #2a2f38;
-  --line-soft: #1d2128;
+  --line: #2c2c2c;
+  --line-soft: #222222;
   --line-on-ink: rgba(255, 255, 255, 0.12);
 
-  --text: #ececec;
-  --text-2: #c3c5cb;
-  --text-3: #8a8e96;
-  --text-4: #5b5e66;
+  --text: #f6f6f6;
+  --text-2: #d0d0d0;
+  --text-3: #8f8f8f;
+  --text-4: #5f5f5f;
   --text-on-ink: #ffffff;
-  --text-on-ink-2: #c7c9cf;
-  --text-on-ink-3: #8a8e96;
+  --text-on-ink-2: #b8b8b8;
+  --text-on-ink-3: #8a8a8a;
 
-  --accent: #3e80ff;
-  --accent-strong: #5a96ff;
-  --accent-soft: rgba(62, 128, 255, 0.16);
-  --accent-ink: #0e1116;
+  --accent: #4a5bff;
+  --accent-strong: #6d7bff;
+  --accent-soft: rgba(74, 91, 255, 0.16);
+  --accent-ink: #ffffff;
 
-  --lime: #d4ff3a;
-  --lime-on-dark: #d4ff3a;
+  --lime: #2ee27a;
+  --lime-on-dark: #2ee27a;
 
   --grid: rgba(255, 255, 255, 0.05);
-  --grid-on-ink: rgba(255, 255, 255, 0.05);
+  --grid-on-ink: rgba(255, 255, 255, 0.06);
 
   --shadow-soft: 0 0 0 1px var(--line-soft);
-  --shadow-card: 0 12px 32px rgba(0, 0, 0, 0.35);
-  --shadow-card-hover: 0 18px 44px rgba(0, 0, 0, 0.45);
-  --shadow-strong: 0 30px 60px rgba(0, 0, 0, 0.55);
-  --shadow-frame: 0 24px 56px rgba(0, 0, 0, 0.5);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-card-hover: 0 2px 10px rgba(0, 0, 0, 0.4);
+  --shadow-strong: 0 16px 40px rgba(0, 0, 0, 0.5);
+  --shadow-frame: 0 12px 32px rgba(0, 0, 0, 0.45);
 
-  --browser-dot: #3a3a3f;
+  --browser-dot: #3a3a3a;
   --phone-notch: #000000;
 }
 
@@ -161,44 +166,44 @@
  * ============================================================================ */
 @media (prefers-color-scheme: dark) {
   html:not([data-theme]) {
-    --bg: #0e1116;
-    --bg-soft: #14171d;
-    --bg-elev: #181b22;
-    --bg-elev-2: #1f232b;
-    --bg-hover: #1f232b;
-    --bg-active: #262b34;
+    --bg: #0f0f0f;
+    --bg-soft: #141414;
+    --bg-elev: #1a1a1a;
+    --bg-elev-2: #1e1e1e;
+    --bg-hover: #1e1e1e;
+    --bg-active: #2a2a2a;
 
-    --bg-ink: #0a0c10;
-    --bg-ink-soft: #14171d;
+    --bg-ink: #0a0a0a;
+    --bg-ink-soft: #161616;
 
-    --ribbon: #2a2417;
-    --ribbon-ink: #e9d9b8;
+    --ribbon: #1a1a1a;
+    --ribbon-ink: #f6f6f6;
 
-    --line: #2a2f38;
-    --line-soft: #1d2128;
+    --line: #2c2c2c;
+    --line-soft: #222222;
     --line-on-ink: rgba(255, 255, 255, 0.12);
 
-    --text: #ececec;
-    --text-2: #c3c5cb;
-    --text-3: #8a8e96;
-    --text-4: #5b5e66;
+    --text: #f6f6f6;
+    --text-2: #d0d0d0;
+    --text-3: #8f8f8f;
+    --text-4: #5f5f5f;
 
-    --accent: #3e80ff;
-    --accent-strong: #5a96ff;
-    --accent-soft: rgba(62, 128, 255, 0.16);
-    --accent-ink: #0e1116;
+    --accent: #4a5bff;
+    --accent-strong: #6d7bff;
+    --accent-soft: rgba(74, 91, 255, 0.16);
+    --accent-ink: #ffffff;
 
-    --lime: #d4ff3a;
+    --lime: #2ee27a;
 
     --grid: rgba(255, 255, 255, 0.05);
 
     --shadow-soft: 0 0 0 1px var(--line-soft);
-    --shadow-card: 0 12px 32px rgba(0, 0, 0, 0.35);
-    --shadow-card-hover: 0 18px 44px rgba(0, 0, 0, 0.45);
-    --shadow-strong: 0 30px 60px rgba(0, 0, 0, 0.55);
-    --shadow-frame: 0 24px 56px rgba(0, 0, 0, 0.5);
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-card-hover: 0 2px 10px rgba(0, 0, 0, 0.4);
+    --shadow-strong: 0 16px 40px rgba(0, 0, 0, 0.5);
+    --shadow-frame: 0 12px 32px rgba(0, 0, 0, 0.45);
 
-    --browser-dot: #3a3a3f;
+    --browser-dot: #3a3a3a;
     --phone-notch: #000000;
   }
 }

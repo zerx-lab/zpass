@@ -128,7 +128,7 @@ const labelAuto = t?.theme_auto ?? "Auto";
 	.theme-toggle {
 		display: inline-flex;
 		border: 1px solid var(--line);
-		border-radius: var(--radius);
+		border-radius: var(--radius-sm);
 		background: var(--bg-elev);
 		overflow: hidden;
 	}
@@ -143,6 +143,8 @@ const labelAuto = t?.theme_auto ?? "Auto";
 		min-width: 32px;
 		font-family: var(--font-mono);
 		font-size: 11px;
+		text-transform: uppercase;
+		letter-spacing: var(--ls-mono);
 		color: var(--text-3);
 		border-right: 1px solid var(--line);
 		background: transparent;
@@ -169,7 +171,7 @@ const labelAuto = t?.theme_auto ?? "Auto";
 
 	.theme-btn .lbl {
 		font-size: 11px;
-		letter-spacing: 0.02em;
+		letter-spacing: var(--ls-mono);
 	}
 
 	/* 紧凑模式下进一步收紧内边距 */

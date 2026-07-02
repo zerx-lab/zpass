@@ -42,9 +42,9 @@ const t = applyVersion(getStrings(locale), release.version);
 // 套餐档与运营平台同源（公开端点拉取，失败降级内置文案）。
 const pricingTiers = await getPricingTiers(locale, t);
 
-const pageTitle = "ZPass — 一款不打扰你的密码管理器";
+const pageTitle = "ZPass — 零知识密码管理器";
 const pageDesc =
-	"ZPass 是一款开源（AGPL-3.0）、基于零知识架构的跨平台密码管理器。端到端加密、支持自托管、即将发布。macOS · Windows · Linux · iOS · Android · 浏览器扩展。";
+	"ZPass 是一款开源（AGPL-3.0）、零知识架构的密码管理器：Argon2id、XChaCha20-Poly1305 与 SRP-6a 端到端加密，支持通行密钥、SSH Agent 与局域网同步。覆盖 Windows、Linux、macOS（预览版）、HarmonyOS NEXT 与浏览器扩展。";
 ---
 
 <BaseLayout

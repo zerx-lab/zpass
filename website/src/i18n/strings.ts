@@ -305,14 +305,14 @@ const en: SiteStrings = {
 	nav_how: "How it works",
 	nav_faq: "FAQ",
 
-	hero_eyebrow: "End-to-end encrypted · Open protocol · Local-first",
-	hero_title_1: "Every password, every device.",
+	hero_eyebrow: "End-to-end encrypted · Zero-knowledge · Open source (AGPL-3.0)",
+	hero_title_1: "One vault. Every device.",
 	hero_title_2: "Only you hold the key.",
 	hero_sub:
-		"ZPass keeps your logins, passkeys and 2FA codes encrypted on your own devices. We never see them in plain text — not in transit, not at rest, not anywhere on our servers. Native apps for every platform you use.",
+		"ZPass encrypts everything — logins, passkeys, SSH keys, 2FA codes — on your device before it ever touches a network. Argon2id, XChaCha20-Poly1305 and SRP-6a do the work; the server only ever sees ciphertext.",
 	hero_cta_primary: "Download {version}",
 	hero_availability:
-		"Windows · macOS · Linux · Android · Chrome / Firefox · iOS & HarmonyOS soon",
+		"Windows · Linux · macOS (preview) · Android · HarmonyOS NEXT · Chrome / Edge / Firefox",
 
 	release_eyebrow: "AVAILABLE NOW · {version}",
 	release_title: "Download ZPass",
@@ -329,9 +329,9 @@ const en: SiteStrings = {
 	download_ios_note:
 		"TestFlight beta is in preparation. Reach out through Contact if you'd like early access — or watch this page for the public link.",
 	download_harmony_title: "HarmonyOS",
-	download_harmony_subtitle: "HarmonyOS NEXT · phone",
+	download_harmony_subtitle: "HarmonyOS NEXT · phone · tablet",
 	download_harmony_note:
-		"HarmonyOS NEXT client in development. Reach out through Contact for early access.",
+		"HarmonyOS NEXT build is feature-complete, including cloud sync — still pending verification on physical devices. Reach out through Contact for early access.",
 	download_harmony_tag: "in dev",
 	download_verify_hint: "Verify SHA-256 before installing",
 
@@ -339,50 +339,50 @@ const en: SiteStrings = {
 	section_features_sub:
 		"Everything you need. Nothing you don't. And no shady defaults.",
 
-	f1_title: "End-to-end encrypted",
+	f1_title: "Passkeys, not just passwords",
 	f1_body:
-		"Your master password never leaves your device. Every item is sealed with modern authenticated encryption (XChaCha20-Poly1305, Argon2id) before it syncs — so even we can't read what's inside.",
-	f2_title: "2FA codes, right where you need them",
+		"Create and store WebAuthn/FIDO2 passkeys, import existing ones from a Bitwarden export, and sign in through the browser extension without typing a password.",
+	f2_title: "TOTP, HOTP and Steam Guard",
 	f2_body:
-		"TOTP codes live next to the account they unlock, with a big, readable countdown and one-tap copy. Works offline, so a missing signal never locks you out.",
-	f3_title: "Passkeys and hardware keys",
+		"All three one-time-code formats live next to the account they unlock, with a readable countdown and one-tap copy — no separate authenticator app required.",
+	f3_title: "A real SSH agent",
 	f3_body:
-		"First-class support for passkeys and FIDO2 security keys. Sign in without typing a password at all — or pair a YubiKey as a second factor on the accounts that matter most.",
-	f4_title: "Share with family and teammates",
+		"ZPass manages your SSH keys and runs as a system-level agent — Ed25519 by default, with a UI prompt to approve every signing request.",
+	f4_title: "LAN sync, no cloud required",
 	f4_body:
-		"Give the right people access to the right folders, with permissions you can revoke in one click. Sharing is end-to-end encrypted — the server never handles the keys.",
-	f5_title: "Breach alerts, without the leaks",
+		"Pair two devices on the same network with SPAKE2 and sync directly, peer to peer — a second channel that works independently of any server.",
+	f5_title: "Breach checks that leak nothing",
 	f5_body:
-		"ZPass watches the public breach databases for you and warns you the moment one of your accounts shows up. Your passwords never leave your device during the check.",
-	f6_title: "At home on every platform",
+		"ZPass checks your passwords against known breaches using HIBP's k-Anonymity protocol — only the first 5 characters of a SHA-1 hash ever leave your device.",
+	f6_title: "Spaces keep things separate",
 	f6_body:
-		"Native apps for macOS, Windows, Linux, iOS and Android. System-level autofill on mobile, browser extensions for Chrome, Firefox and Safari. One vault, wherever you're signed in.",
+		"Split personal, work and shared credentials into isolated Spaces. Each one is its own boundary — nothing crosses over by accident.",
 
 	section_how: "How it works",
 	section_how_sub:
-		"Three steps between your master password and the server — and only the first one runs on your device.",
+		"Three steps between your master password and the network — derivation and encryption both happen on your device; only ciphertext is ever sent.",
 	how_1_title: "Derive",
 	how_1_body:
-		"Your master password is combined with a per-user salt and stretched with Argon2id into two separate keys — one to unlock the app, one to decrypt your vault. The unlock key is hashed again before it's ever allowed near the network.",
+		"Your master password is stretched with Argon2id (64 MiB, t=3, p=4) and combined with a locally generated Secret Key via HKDF — this 2SKD scheme means the account key exists only if both pieces are present, and neither ever leaves your device.",
 	how_2_title: "Encrypt",
 	how_2_body:
-		"Every item — and its metadata, folder, icon, timestamps — is sealed individually with XChaCha20-Poly1305. What reaches the server is a string of ciphertext that means nothing without your key.",
+		"Every item — and its metadata, folder, timestamps — is sealed individually with XChaCha20-Poly1305. What reaches the server is ciphertext that means nothing without your key.",
 	how_3_title: "Sync",
 	how_3_body:
-		"Edits merge through a CRDT, so you can update items offline on your phone and your laptop at the same time without conflicts. Sync is incremental, authenticated end-to-end, and never blocks you.",
+		"Encrypted changes push to your other devices over an authenticated channel, or sync directly over the local network via SPAKE2 pairing with no server involved at all. Either way, only ciphertext ever crosses the wire.",
 	how_kicker: "STEP",
 
 	section_mobile: "ZPass on mobile",
 	section_mobile_sub:
-		"Your full vault, one hand, no compromises. iOS and Android share the exact same encrypted core as the desktop app.",
-	mobile_eyebrow: "IOS · ANDROID · FACE ID · AUTOFILL",
+		"HarmonyOS NEXT shares the exact same Rust encryption core as the desktop app — phone, tablet and 2-in-1.",
+	mobile_eyebrow: "HARMONYOS NEXT · PHONE · TABLET · 2-IN-1",
 	mobile_headline: "Your vault, in your thumb.",
 	mobile_body:
-		"Sign in to apps and websites with a single tap through the iOS and Android system keyboard. 2FA codes surface on the lock screen when you're about to use them — and stay out of sight the rest of the time.",
-	mobile_status_ios: "iOS · in development",
-	mobile_status_android: "Android · {version} available",
+		"Unlock with biometrics backed by HUKS, and keep working: 2FA codes, passkeys and the full vault sync end-to-end encrypted across every HarmonyOS device you sign into.",
+	mobile_status_ios: "iOS · planned",
+	mobile_status_android: "Android · sideload APK",
 	mobile_status_harmony: "HarmonyOS NEXT · in development",
-	mobile_status_autofill: "system autofill",
+	mobile_status_autofill: "biometric unlock (HUKS)",
 	mobile_phone_kicker: "VAULT · 412 ITEMS",
 	mobile_phone_greeting: "Good evening, Alex",
 
@@ -390,12 +390,12 @@ const en: SiteStrings = {
 
 	section_desktop: "ZPass on desktop",
 	section_desktop_sub:
-		"A focused three-pane workspace that gets out of your way. Native windows on macOS, Windows and Linux — all reading the same end-to-end encrypted vault as the mobile apps.",
-	desktop_eyebrow: "MACOS · WINDOWS · LINUX · ⌘K · OFFLINE FIRST",
+		"A focused three-pane workspace that gets out of your way. Native windows on Windows, Linux and macOS (preview) — reading the same end-to-end encrypted vault as HarmonyOS and the browser extension.",
+	desktop_eyebrow: "WINDOWS · LINUX · MACOS (PREVIEW) · ⌘K · OFFLINE FIRST",
 	desktop_headline: "Your whole vault, one keystroke away.",
 	desktop_body:
-		"Everything is decrypted locally. ⌘K opens the command palette, ⌘L locks the app instantly, and the full vault stays usable with no network at all. Same encrypted core as the mobile app — just with more room to breathe.",
-	desktop_status_macos: "macOS · arm64 · {version}",
+		"Everything is decrypted locally. ⌘K opens the command palette, ⌘L locks the app instantly, and the full vault stays usable with no network at all. Same Rust encryption core as HarmonyOS — just with more room to breathe.",
+	desktop_status_macos: "macOS · preview · {version}",
 	desktop_status_windows: "Windows · {version} available",
 	desktop_status_linux: "Linux · {version} available",
 	desktop_status_extra: "⌘K command palette · offline-first",
@@ -448,32 +448,33 @@ const en: SiteStrings = {
 
 	section_security: "Security architecture",
 	section_security_sub:
-		"Every claim on this page is meant to be checked. The protocol will be documented, reproducible builds are on the roadmap, and the server is designed so there's nothing worth stealing.",
+		"Every claim on this page is meant to be checked. The client is AGPL-3.0 open source, the cryptography is a single shared Rust crate, and the server is designed so there's nothing worth stealing.",
 	sec_1_k: "Threat model",
 	sec_1_v:
-		"Server compromise · TLS interception · malicious update · cold-boot recovery on a lost device. We design against all four.",
-	sec_2_k: "Cryptography",
+		"Server compromise · TLS interception · malicious update · cold-boot recovery on a lost device. We design against all four, and the server never sees your master password or plaintext.",
+	sec_2_k: "Key derivation (2SKD)",
 	sec_2_v:
-		"Argon2id (m=64MiB, t=3, p=4) · XChaCha20-Poly1305 · X25519 ECDH · Ed25519 · HKDF-SHA512.",
-	sec_3_k: "Audits",
+		"Your account key is Argon2id(master password) XOR HKDF(Secret Key) — a locally generated, ~128-bit Secret Key that never leaves your device or gets uploaded anywhere.",
+	sec_3_k: "Encryption",
 	sec_3_v:
-		"An independent third-party audit is scheduled before public release. The threat model and protocol spec will be published for external review well ahead of launch.",
-	sec_4_k: "Reproducible builds",
+		"XChaCha20-Poly1305 seals every item with a 24-byte nonce. Sensitive memory is forced to zero the moment it's no longer needed.",
+	sec_4_k: "Zero-knowledge auth",
 	sec_4_v:
-		"Deterministic, reproducible builds are on the roadmap before public release — so you'll be able to rebuild from a tagged commit and bit-for-bit compare against the binary you downloaded.",
-	sec_5_k: "Openly documented",
+		"SRP-6a (RFC 5054, 2048-bit group) proves you know your master password without ever sending it. Key exchange to new devices uses X25519 sealed-box (ECDH + HKDF-SHA256).",
+	sec_5_k: "One crate, every platform",
 	sec_5_v:
-		"The protocol spec and threat model will be published before public release. Every algorithm choice and every data flow is being written down — nothing in the path between you and your data should be hand-waved.",
+		"Desktop, HarmonyOS and the browser extension all call the same Rust cryptocore — byte-for-byte identical behavior, with no per-platform reimplementation to drift or break.",
 	sec_6_k: "Trusted algorithms",
 	sec_6_v:
 		"We don't roll our own crypto. Every algorithm in ZPass is a well-studied standard, used the way its designers recommend.",
-	audits_label: "PLANNED",
-	audit_1_firm: "Threat model",
-	audit_1_meta: "Vault path · sync protocol · in progress",
-	audit_2_firm: "Cryptographic review",
-	audit_2_meta: "Pre-launch external review · planned",
-	audit_3_firm: "Independent audit",
-	audit_3_meta: "Full client + protocol audit · before public release",
+	audits_label: "VERIFIABLE",
+	audit_1_firm: "Open source",
+	audit_1_meta: "AGPL-3.0 · desktop, HarmonyOS, extension, cryptocore and this website",
+	audit_2_firm: "Auditable cryptocore",
+	audit_2_meta:
+		"Every primitive lives in one public Rust crate, shared across all clients",
+	audit_3_firm: "Build it yourself",
+	audit_3_meta: "Clone a tagged release and compile with your own toolchain",
 
 	section_pricing: "Pricing",
 	section_pricing_sub:
@@ -553,19 +554,19 @@ const en: SiteStrings = {
 	section_faq: "FAQ",
 	faq_1_q: "What happens if I forget my master password?",
 	faq_1_a:
-		"Without your master password, nobody — including us — can decrypt your vault. That's the whole point of zero-knowledge. To cover that case, ZPass gives you three safety nets: a trusted emergency contact, a printable recovery kit you can store offline, and the option to enroll a hardware key as a second unlock factor.",
-	faq_2_q: "When will ZPass be available?",
+		"Nobody can decrypt your vault without your master password — not you, not us. ZPass derives your account key from your master password and a locally stored Secret Key (2SKD); lose either one and there's no reset, no backdoor, and no recovery. That's the price of zero-knowledge — keep both safe.",
+	faq_2_q: "Is ZPass available now?",
 	faq_2_a:
-		"It's here. Desktop and Android are publicly available, and the browser extension is live on the Chrome Web Store. iOS and HarmonyOS are in their final QA pass. If you need an exact timeline for a partnership or integration, reach out through the contact form.",
-	faq_3_q: "Can I import from 1Password, Bitwarden or LastPass?",
+		"Yes. Desktop builds for Windows and Linux are stable, macOS is in preview, and the browser extension supports Chrome, Edge and Firefox. Android ships as a sideload APK. The HarmonyOS NEXT client is feature-complete and in internal testing. iOS isn't in active development yet.",
+	faq_3_q: "Can I import from other password managers?",
 	faq_3_a:
-		"Yes. The importer supports 1PUX, Bitwarden JSON, LastPass CSV, Chrome / Firefox / Safari browser exports, and KeePass KDBX. Everything runs locally on your device — nothing is uploaded during the migration.",
+		"Yes, from Bitwarden — JSON export, including passkeys. Import runs entirely on your device; nothing is uploaded during the migration. Support for other formats isn't available yet.",
 	faq_4_q: "Do you support passkeys?",
 	faq_4_a:
-		"Yes. ZPass stores WebAuthn passkeys and syncs them across your devices, encrypted end-to-end. You can also use a hardware security key as your unlock factor if you want an extra layer.",
-	faq_5_q: "Where is my data stored on the hosted plan?",
+		"Yes. ZPass creates and stores WebAuthn/FIDO2 passkeys, encrypted end-to-end, and the browser extension bridges them into your sign-in flow. You can also import existing passkeys from a Bitwarden export.",
+	faq_5_q: "Where is my data stored?",
 	faq_5_a:
-		"We run regional clusters and route you to the closest one automatically, for low latency and local compliance. Either way, the server only ever sees ciphertext — we never hold the keys that can open it.",
+		"By default, nowhere but your own devices. If you turn on cloud sync, the server only ever stores your SRP verifier, public keys and encrypted ciphertext blobs — never your master password, your Secret Key, or plaintext. Prefer to skip the cloud entirely? LAN sync pairs devices directly over your local network.",
 
 	footer_tagline: "Trusted algorithms. Obsessive details.",
 	footer_version: "in active development",
@@ -577,14 +578,14 @@ const en: SiteStrings = {
 	demo_local_hint_left: "click a row · everything runs locally",
 	demo_local_hint_right: "↑ no data leaves your browser",
 
-	hero_stat_1_n: "zero",
-	hero_stat_1_l: "bytes of plaintext on our servers",
-	hero_stat_2_n: "< 80ms",
-	hero_stat_2_l: "to unlock on a 5-year-old phone",
-	hero_stat_3_n: "XChaCha20",
-	hero_stat_3_l: "authenticated encryption, the standard way",
-	hero_stat_4_n: "2026",
-	hero_stat_4_l: "first public release this year",
+	hero_stat_1_n: "AGPL-3.0",
+	hero_stat_1_l: "open source, every line auditable",
+	hero_stat_2_n: "XChaCha20",
+	hero_stat_2_l: "authenticated encryption on every item",
+	hero_stat_3_n: "128-bit",
+	hero_stat_3_l: "Secret Key entropy, generated locally",
+	hero_stat_4_n: "3",
+	hero_stat_4_l: "browser extensions — Chrome, Edge, Firefox",
 
 	live_section_label: "LIVE DEMO",
 	changelog_section_label: "CHANGELOG",
@@ -631,14 +632,14 @@ const zh: SiteStrings = {
 	nav_how: "工作原理",
 	nav_faq: "常见问题",
 
-	hero_eyebrow: "端到端加密 · 开放协议 · 本地优先",
-	hero_title_1: "你的所有密码，所有设备。",
-	hero_title_2: "只有你拿得到钥匙。",
+	hero_eyebrow: "端到端加密 · 零知识 · 开源（AGPL-3.0）",
+	hero_title_1: "一个密码库，所有设备。",
+	hero_title_2: "钥匙只在你手里。",
 	hero_sub:
-		"ZPass 把你的登录信息、通行密钥和两步验证码统一加密存放在本地设备。未经加密的明文不会进入网络、不会落到磁盘、也不会出现在我们的服务器上——我们看不到，任何第三方也看不到。覆盖你日常使用的每一个平台。",
+		"登录信息、通行密钥、SSH 密钥、两步验证码——ZPass 会在数据离开设备之前全部加密。Argon2id、XChaCha20-Poly1305 与 SRP-6a 负责这一切，服务器永远只能看到密文。",
 	hero_cta_primary: "下载 {version}",
 	hero_availability:
-		"Windows · macOS · Linux · Android · Chrome / Firefox · iOS 与 HarmonyOS 即将到来",
+		"Windows · Linux · macOS（预览版）· Android · HarmonyOS NEXT · Chrome / Edge / Firefox",
 
 	release_eyebrow: "现已发布 · {version}",
 	release_title: "下载 ZPass",
@@ -655,58 +656,59 @@ const zh: SiteStrings = {
 	download_ios_note:
 		"TestFlight 测试通道筹备中。如需提前体验，欢迎通过页面右上角「联系我们」与我们联系，或关注本页等待公开链接。",
 	download_harmony_title: "鸿蒙",
-	download_harmony_subtitle: "HarmonyOS NEXT · 手机",
-	download_harmony_note: "HarmonyOS NEXT 客户端开发中，可通过「联系我们」获取内测渠道。",
+	download_harmony_subtitle: "HarmonyOS NEXT · 手机 · 平板",
+	download_harmony_note:
+		"HarmonyOS NEXT 客户端功能已开发完成，含云同步，目前仍在等待真机验证。可通过「联系我们」获取内测渠道。",
 	download_harmony_tag: "开发中",
 	download_verify_hint: "安装前可校验 SHA-256",
 
 	section_features: "功能",
 	section_features_sub: "该有的都有，多余的一样没有，默认设置不玩套路。",
 
-	f1_title: "端到端加密",
+	f1_title: "通行密钥，不止密码",
 	f1_body:
-		"主密码全程不离开你的设备。每一条记录都会在同步前用业界主流的认证加密算法（XChaCha20-Poly1305 与 Argon2id）单独封装——所以连我们也看不到你存了什么。",
-	f2_title: "两步验证码，用的时候就在手边",
+		"创建并保存 WebAuthn/FIDO2 通行密钥，可从 Bitwarden 导出文件导入已有的通行密钥，并通过浏览器扩展免密登录。",
+	f2_title: "TOTP、HOTP 与 Steam 令牌",
 	f2_body:
-		"TOTP 验证码就显示在对应账号旁边，倒计时看得清、一键即可复制。离线也能用，没网络的地方不会把你锁在门外。",
-	f3_title: "通行密钥与硬件密钥",
+		"三种一次性验证码格式都会显示在对应账号旁边，倒计时清晰可见、一键复制——不需要另外安装验证器 App。",
+	f3_title: "真正的 SSH Agent",
 	f3_body:
-		"原生支持 Passkey 与 FIDO2 安全密钥。你可以完全不用输入密码登录，也可以给重要账号额外配上一把 YubiKey 作为二次保障。",
-	f4_title: "与家人、同事安全共享",
+		"ZPass 管理你的 SSH 密钥，并作为系统级 Agent 运行——默认 Ed25519，每一次签名请求都会弹出界面等你批准。",
+	f4_title: "局域网同步，无需云端",
 	f4_body:
-		"按文件夹精细授权，权限可以随时一键收回。整个共享流程端到端加密，服务器全程接触不到任何密钥。",
-	f5_title: "泄露预警，但不会泄露你的密码",
+		"同一局域网内的两台设备通过 SPAKE2 配对后直接点对点同步——这是独立于云同步的第二条通道，完全不依赖服务器。",
+	f5_title: "泄露检测，密码不外泄",
 	f5_body:
-		"ZPass 会持续比对公开的泄露数据库，一旦你的账号出现在其中立刻提醒你。查询全程在本地完成，你的密码不会被发送到任何地方。",
-	f6_title: "每一个平台都像原生应用",
+		"ZPass 用 HIBP 的 k-匿名协议检测密码是否出现在已知泄露库中——离开设备的只有 SHA-1 哈希的前 5 位。",
+	f6_title: "空间隔离，互不干扰",
 	f6_body:
-		"macOS、Windows、Linux、iOS、Android 全部提供原生应用。移动端接入系统级自动填充，桌面端提供 Chrome、Firefox、Safari 扩展。一个密码库，所有登录都能用上。",
+		"把个人、工作与共享的凭据拆分到互相隔离的空间（Space）中。每个空间都是独立边界，不会意外混在一起。",
 
 	section_how: "工作原理",
 	section_how_sub:
-		"从你输入主密码到数据抵达服务器，中间只有三步，而且仅第一步会在你的设备上完成。",
+		"从主密码到网络，中间只有三步——派生与加密都在你的设备本地完成，离开设备的只有密文。",
 	how_1_title: "派生",
 	how_1_body:
-		"主密码与每个用户独有的盐混合后，通过 Argon2id 拉伸为两把独立的密钥：一把用于解锁应用，另一把用于解密密码库。解锁密钥在离开设备之前还会再做一次哈希，网络上永远看不到它的原始形态。",
+		"主密码会用 Argon2id（64 MiB、t=3、p=4）拉伸，再通过 HKDF 与本地生成的 Secret Key 结合——这套 2SKD 方案意味着账户密钥只在两者同时具备时才存在，且两者都不会离开你的设备。",
 	how_2_title: "加密",
 	how_2_body:
-		"每一条记录，连同它的元数据——所属文件夹、图标、时间戳——都会用 XChaCha20-Poly1305 单独封装。到达服务器的只是一串密文，没有你的密钥，它什么都不是。",
+		"每一条记录，连同它的元数据——文件夹、时间戳——都会用 XChaCha20-Poly1305 单独封装。到达服务器的只是一串密文，没有你的密钥，它什么都不是。",
 	how_3_title: "同步",
 	how_3_body:
-		"变更通过 CRDT 合并，所以你可以在手机和电脑上同时离线编辑，再也不会出现版本冲突。同步按增量推送、全程端到端认证，也不会因此卡住你的操作。",
+		"加密后的变更通过认证通道推送到你的其他设备；也可以完全跳过服务器，通过 SPAKE2 配对在局域网内直接同步。无论哪种方式，在网络上传输的永远只有密文。",
 	how_kicker: "步骤",
 
 	section_mobile: "ZPass 移动端",
 	section_mobile_sub:
-		"完整功能，单手可用，毫不妥协。iOS 与 Android 共用一套与桌面端完全一致的加密内核。",
-	mobile_eyebrow: "IOS · ANDROID · FACE ID · 自动填充",
+		"HarmonyOS NEXT 与桌面端共用同一套 Rust 加密内核——覆盖手机、平板与二合一设备。",
+	mobile_eyebrow: "HARMONYOS NEXT · 手机 · 平板 · 二合一",
 	mobile_headline: "你的密码库，握在指尖。",
 	mobile_body:
-		"通过 iOS 与 Android 系统级键盘，在 App 和网页里一键完成登录。两步验证码只在你将要使用时浮现在锁屏上，其余时间安静待在密码库里。",
-	mobile_status_ios: "iOS · 开发中",
-	mobile_status_android: "Android · 已发布 {version}",
+		"通过 HUKS 支持的生物识别解锁，两步验证码、通行密钥与完整密码库会在你登录的每一台 HarmonyOS 设备间端到端加密同步。",
+	mobile_status_ios: "iOS · 计划中",
+	mobile_status_android: "Android · 直装 APK",
 	mobile_status_harmony: "鸿蒙 HarmonyOS NEXT · 开发中",
-	mobile_status_autofill: "系统自动填充",
+	mobile_status_autofill: "生物识别解锁（HUKS）",
 	mobile_phone_kicker: "密码库 · 412 项",
 	mobile_phone_greeting: "晚上好，Alex",
 
@@ -714,12 +716,12 @@ const zh: SiteStrings = {
 
 	section_desktop: "ZPass 桌面端",
 	section_desktop_sub:
-		"专注的三栏式工作区，用的时候在，不用的时候不打扰。macOS、Windows、Linux 均为原生窗口，读取的密码库与移动端完全一致。",
-	desktop_eyebrow: "MACOS · WINDOWS · LINUX · ⌘K · 离线优先",
+		"专注的三栏式工作区，用的时候在，不用的时候不打扰。Windows、Linux 与 macOS（预览版）均为原生窗口，读取的密码库与 HarmonyOS、浏览器扩展完全一致。",
+	desktop_eyebrow: "WINDOWS · LINUX · MACOS（预览版）· ⌘K · 离线优先",
 	desktop_headline: "整个密码库，一次按键就能召唤。",
 	desktop_body:
-		"所有解密都在本地完成。⌘K 唤出命令面板，⌘L 一键锁定，完全离线也能正常使用整个密码库。与移动端共用同一套加密内核——只是屏幕更大、呼吸更从容。",
-	desktop_status_macos: "macOS · arm64 · 已发布 {version}",
+		"所有解密都在本地完成。⌘K 唤出命令面板，⌘L 一键锁定，完全离线也能正常使用整个密码库。与 HarmonyOS 共用同一套 Rust 加密内核——只是屏幕更大、呼吸更从容。",
+	desktop_status_macos: "macOS · 预览版 · {version}",
 	desktop_status_windows: "Windows · 已发布 {version}",
 	desktop_status_linux: "Linux · 已发布 {version}",
 	desktop_status_extra: "⌘K 命令面板 · 离线优先",
@@ -772,32 +774,32 @@ const zh: SiteStrings = {
 
 	section_security: "安全架构",
 	section_security_sub:
-		"本页每一条结论都欢迎你亲自核对：协议会有公开文档、客户端可复现构建已列入路线图、服务器从设计上就拿不出任何有价值的东西。",
+		"本页每一条结论都欢迎你亲自核对：客户端以 AGPL-3.0 开源，加密实现集中在同一个 Rust crate 里，服务器从设计上就拿不出任何有价值的东西。",
 	sec_1_k: "威胁模型",
 	sec_1_v:
-		"服务器被攻破 · TLS 中间人 · 带毒更新 · 设备丢失后的冷启动取证——这四种场景是我们从第一天起就在防的。",
-	sec_2_k: "所用算法",
+		"服务器被攻破 · TLS 中间人 · 带毒更新 · 设备丢失后的冷启动取证——这四种场景是我们从第一天起就在防的，服务器永远看不到你的主密码或明文。",
+	sec_2_k: "密钥派生（2SKD）",
 	sec_2_v:
-		"Argon2id (m=64MiB, t=3, p=4) · XChaCha20-Poly1305 · X25519 ECDH · Ed25519 · HKDF-SHA512。",
-	sec_3_k: "第三方审计",
+		"账户密钥 = Argon2id(主密码) XOR HKDF(Secret Key)——Secret Key 本地生成，约 128 位熵，不会离开设备，更不会上传。",
+	sec_3_k: "加密",
 	sec_3_v:
-		"公开发布前会完成独立的第三方安全审计。威胁模型与协议规范也会提前公开，供外部研究者评审。",
-	sec_4_k: "可复现构建",
+		"XChaCha20-Poly1305 用 24 字节 nonce 封装每一条记录。敏感内存在不再需要的瞬间就会被强制清零。",
+	sec_4_k: "零知识认证",
 	sec_4_v:
-		"可复现构建已列入公开发布前的路线图——届时你可以用同一个 tag 自行编译，与官方下载的二进制逐字节比对。",
-	sec_5_k: "公开文档",
+		"SRP-6a（RFC 5054，2048 位群）证明你知道主密码，却从不传输它。新设备的密钥分发使用 X25519 sealed-box（ECDH + HKDF-SHA256）。",
+	sec_5_k: "一套内核，多端复用",
 	sec_5_v:
-		"协议规范与威胁模型会在公开发布前一并放出。每一个算法选择、每一条数据流转路径都在写明——你和密码之间不该有任何「黑盒环节」。",
+		"桌面端、HarmonyOS 与浏览器扩展全部调用同一个 Rust cryptocore——字节级一致的行为，不存在各端分别实现、逐渐漂移的风险。",
 	sec_6_k: "只用经典算法",
 	sec_6_v:
 		"我们不自造密码学轮子。ZPass 用到的每一个算法都是业界长期审查过的标准方案，并严格按其作者推荐的方式使用。",
-	audits_label: "已规划",
-	audit_1_firm: "威胁模型",
-	audit_1_meta: "密码库路径 · 同步协议 · 进行中",
-	audit_2_firm: "密码学评审",
-	audit_2_meta: "上线前外部评审 · 已计划",
-	audit_3_firm: "独立审计",
-	audit_3_meta: "完整客户端 + 协议审计 · 公开发布前完成",
+	audits_label: "可验证",
+	audit_1_firm: "开源",
+	audit_1_meta: "AGPL-3.0 · 桌面端、HarmonyOS、浏览器扩展、cryptocore 与本网站",
+	audit_2_firm: "可审计的加密内核",
+	audit_2_meta: "所有加密原语集中在同一个公开的 Rust crate 中，全端复用",
+	audit_3_firm: "自行编译验证",
+	audit_3_meta: "克隆某个发布 tag，用你自己的工具链编译",
 
 	section_pricing: "价格",
 	section_pricing_sub:
@@ -872,19 +874,19 @@ const zh: SiteStrings = {
 	section_faq: "常见问题",
 	faq_1_q: "如果忘记主密码怎么办？",
 	faq_1_a:
-		"没有主密码，任何人——包括我们——都无法解密你的密码库，这正是零知识架构的代价，也是它存在的意义。为此 ZPass 提供了三道保险：指定一位可信联系人作为应急联系人、导出一份可离线打印保存的恢复套件、或把硬件密钥注册为第二解锁因素。",
-	faq_2_q: "ZPass 什么时候发布？",
+		"没有主密码，任何人——包括我们——都无法解密你的密码库。ZPass 的账户密钥由主密码与本地保存的 Secret Key 共同派生（2SKD）：丢失任何一个都没有重置入口、没有后门、也无法恢复。这就是零知识架构的代价——请把两者都妥善保存好。",
+	faq_2_q: "ZPass 现在能用吗？",
 	faq_2_a:
-		"已经发布了。桌面端与 Android 已公开可用，浏览器扩展也已上架 Chrome 应用商店；iOS 与 HarmonyOS 正在进行发布前的最后一轮 QA。如果你是合作者或集成方，需要一个准确的时间表，欢迎通过页面上的「联系我们」表单联系我们。",
-	faq_3_q: "可以从 1Password、Bitwarden、LastPass 迁移过来吗？",
+		"可以。Windows 与 Linux 桌面端已经稳定发布，macOS 处于预览阶段，浏览器扩展支持 Chrome、Edge 与 Firefox。Android 提供直装 APK。HarmonyOS NEXT 客户端功能已开发完成，正在内部测试。iOS 尚未进入开发阶段。",
+	faq_3_q: "可以从其他密码管理器迁移过来吗？",
 	faq_3_a:
-		"可以。导入器支持 1PUX、Bitwarden JSON、LastPass CSV、Chrome / Firefox / Safari 浏览器导出以及 KeePass KDBX 等常见格式。整个导入过程都在你的设备上完成，迁移期间不会有任何数据被上传。",
+		"可以，支持从 Bitwarden 导出的 JSON 文件导入，包含其中的通行密钥。整个导入过程都在你的设备上完成，迁移期间不会上传任何数据。暂不支持其他格式的导入。",
 	faq_4_q: "支持通行密钥（Passkey）吗？",
 	faq_4_a:
-		"支持。ZPass 会保存你的 WebAuthn 通行密钥，并以端到端加密的方式同步到你的所有设备。如果你希望再加一层保险，也可以把硬件安全密钥作为解锁因素。",
-	faq_5_q: "使用云同步时，我的数据存在哪里？",
+		"支持。ZPass 会创建并保存 WebAuthn/FIDO2 通行密钥，端到端加密，浏览器扩展会把它们桥接进你的登录流程。你也可以从 Bitwarden 导出文件中导入已有的通行密钥。",
+	faq_5_q: "我的数据存在哪里？",
 	faq_5_a:
-		"我们在多个区域部署了就近接入的节点，会根据你的位置自动路由到延迟最低、合规要求匹配的那一个。无论接入哪个节点，服务端看到的都只有加密后的密文——能打开它的那把钥匙，从不在我们手里。",
+		"默认情况下只存在你自己的设备上。如果开启云同步，服务器只会保存 SRP 验证器、公钥和加密后的密文——永远看不到你的主密码、Secret Key 或任何明文。不想用云同步？也可以通过局域网直接在设备间同步。",
 
 	footer_tagline: "用经典密码学，抠每一个细节。",
 	footer_version: "开发中",
@@ -896,14 +898,14 @@ const zh: SiteStrings = {
 	demo_local_hint_left: "点击任一行 · 全部本地运行",
 	demo_local_hint_right: "↑ 无数据离开浏览器",
 
-	hero_stat_1_n: "零",
-	hero_stat_1_l: "字节明文进入我们的服务器",
-	hero_stat_2_n: "< 80 毫秒",
-	hero_stat_2_l: "在五年前的旧手机上完成解锁",
-	hero_stat_3_n: "XChaCha20",
-	hero_stat_3_l: "严格按标准使用的认证加密算法",
-	hero_stat_4_n: "2026",
-	hero_stat_4_l: "年内首个公开版本发布",
+	hero_stat_1_n: "AGPL-3.0",
+	hero_stat_1_l: "开源协议，每一行代码都能审查",
+	hero_stat_2_n: "XChaCha20",
+	hero_stat_2_l: "每一条记录都用它做认证加密",
+	hero_stat_3_n: "128 位",
+	hero_stat_3_l: "Secret Key 熵值，本地生成",
+	hero_stat_4_n: "3",
+	hero_stat_4_l: "款浏览器扩展 —— Chrome、Edge、Firefox",
 
 	live_section_label: "实时演示",
 	changelog_section_label: "更新日志",

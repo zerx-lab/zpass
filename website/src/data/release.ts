@@ -20,8 +20,10 @@ export type PlatformId =
 	| "extension";
 
 export interface ReleaseAsset {
-	/** 下方"主下载按钮"使用的标签（去掉冗余的产品名）—— 例如 "Installer (.exe)" */
-	label: string;
+	/** 下方"主下载按钮"使用的标签（zh，去掉冗余的产品名）—— 例如 "安装程序 (.exe)" */
+	labelZh: string;
+	/** 下方"主下载按钮"使用的标签（en）—— 例如 "Installer (.exe)" */
+	labelEn: string;
 	/** 架构 / 平台短标签，渲染为 mono 字体的彩色 tag —— 例如 "x64"、"arm64-v8a" */
 	arch: string;
 	/** 安装包格式短名（不带点），渲染在小标签里 —— 例如 "exe"、"deb"、"AppImage" */
@@ -80,7 +82,8 @@ const PLATFORM_METAS: PlatformMeta[] = [
 		subtitleEn: "Apple Silicon · macOS 11 and above",
 		assets: [
 			{
-				label: "安装包 (.dmg)",
+				labelZh: "安装包 (.dmg)",
+				labelEn: "Installer (.dmg)",
 				arch: "arm64",
 				format: "dmg",
 				filename: "ZPass-darwin-arm64.dmg",
@@ -89,7 +92,8 @@ const PLATFORM_METAS: PlatformMeta[] = [
 				noteEn: "Recommended · drag into Applications to install",
 			},
 			{
-				label: "压缩包 (.zip)",
+				labelZh: "压缩包 (.zip)",
+				labelEn: "Archive (.zip)",
 				arch: "arm64",
 				format: "zip",
 				filename: "ZPass-darwin-arm64.zip",
@@ -106,7 +110,8 @@ const PLATFORM_METAS: PlatformMeta[] = [
 		subtitleEn: "Windows 10 and above · x64",
 		assets: [
 			{
-				label: "安装程序 (.exe)",
+				labelZh: "安装程序 (.exe)",
+				labelEn: "Installer (.exe)",
 				arch: "x64",
 				format: "exe",
 				filename: "ZPass-windows-x64-Setup.exe",
@@ -115,7 +120,8 @@ const PLATFORM_METAS: PlatformMeta[] = [
 				noteEn: "Recommended · with auto-update",
 			},
 			{
-				label: "免安装压缩包 (.zip)",
+				labelZh: "免安装压缩包 (.zip)",
+				labelEn: "Portable (.zip)",
 				arch: "x64",
 				format: "zip",
 				filename: "ZPass-windows-x64.zip",
@@ -132,7 +138,8 @@ const PLATFORM_METAS: PlatformMeta[] = [
 		subtitleEn: "x86_64 · covering all major distributions",
 		assets: [
 			{
-				label: "AppImage",
+				labelZh: "AppImage",
+				labelEn: "AppImage",
 				arch: "x64",
 				format: "AppImage",
 				filename: "ZPass-linux-x64.AppImage",
@@ -141,7 +148,8 @@ const PLATFORM_METAS: PlatformMeta[] = [
 				noteEn: "Universal · runs on any distro",
 			},
 			{
-				label: "Debian / Ubuntu",
+				labelZh: "Debian / Ubuntu",
+				labelEn: "Debian / Ubuntu",
 				arch: "x64",
 				format: "deb",
 				filename: "ZPass-linux-x64.deb",
@@ -149,7 +157,8 @@ const PLATFORM_METAS: PlatformMeta[] = [
 				noteEn: "For Debian, Ubuntu, Mint and derivatives",
 			},
 			{
-				label: "Fedora / RHEL",
+				labelZh: "Fedora / RHEL",
+				labelEn: "Fedora / RHEL",
 				arch: "x64",
 				format: "rpm",
 				filename: "ZPass-linux-x64.rpm",
@@ -157,7 +166,8 @@ const PLATFORM_METAS: PlatformMeta[] = [
 				noteEn: "For Fedora, RHEL, openSUSE and derivatives",
 			},
 			{
-				label: "Arch / CachyOS",
+				labelZh: "Arch / CachyOS",
+				labelEn: "Arch / CachyOS",
 				arch: "x64",
 				format: "pkg.tar.zst",
 				filename: "ZPass-linux-x64.pkg.tar.zst",
@@ -165,7 +175,8 @@ const PLATFORM_METAS: PlatformMeta[] = [
 				noteEn: "For Arch, Manjaro, CachyOS and derivatives",
 			},
 			{
-				label: "压缩包",
+				labelZh: "压缩包",
+				labelEn: "Archive (.zip)",
 				arch: "x64",
 				format: "zip",
 				filename: "ZPass-linux-x64.zip",
@@ -182,7 +193,8 @@ const PLATFORM_METAS: PlatformMeta[] = [
 		subtitleEn: "Android 8 and above · sideload APK",
 		assets: [
 			{
-				label: "ARM64 (arm64-v8a)",
+				labelZh: "ARM64 (arm64-v8a)",
+				labelEn: "ARM64 (arm64-v8a)",
 				arch: "arm64",
 				format: "apk",
 				filename: "ZPass-android-arm64-v8a.apk",
@@ -191,7 +203,8 @@ const PLATFORM_METAS: PlatformMeta[] = [
 				noteEn: "Recommended · for nearly all modern phones",
 			},
 			{
-				label: "x86_64",
+				labelZh: "x86_64",
+				labelEn: "x86_64",
 				arch: "x86_64",
 				format: "apk",
 				filename: "ZPass-android-x86_64.apk",
@@ -199,7 +212,8 @@ const PLATFORM_METAS: PlatformMeta[] = [
 				noteEn: "For x86 tablets and emulators",
 			},
 			{
-				label: "Universal",
+				labelZh: "Universal",
+				labelEn: "Universal",
 				arch: "all",
 				format: "apk",
 				filename: "ZPass-android-universal.apk",
@@ -216,7 +230,8 @@ const PLATFORM_METAS: PlatformMeta[] = [
 		subtitleEn: "One-click from the Chrome Web Store · or side-load locally",
 		assets: [
 			{
-				label: "Chrome 应用商店",
+				labelZh: "Chrome 应用商店",
+				labelEn: "Chrome Web Store",
 				arch: "chromium",
 				format: "store",
 				filename: "chrome-web-store",
@@ -228,7 +243,8 @@ const PLATFORM_METAS: PlatformMeta[] = [
 					"Install from the Chrome Web Store, auto-updates with your browser (Chrome / Edge / Brave)",
 			},
 			{
-				label: "Chrome 手动加载 (.zip)",
+				labelZh: "Chrome 手动加载 (.zip)",
+				labelEn: "Chrome manual load (.zip)",
 				arch: "chromium",
 				format: "zip",
 				filename: "ZPass-extension-chrome-selfhost.zip",
@@ -237,7 +253,8 @@ const PLATFORM_METAS: PlatformMeta[] = [
 					"Unpack and load via developer mode · fixed extension ID, connects to desktop out of the box",
 			},
 			{
-				label: "Firefox",
+				labelZh: "Firefox",
+				labelEn: "Firefox",
 				arch: "firefox",
 				format: "zip",
 				filename: "ZPass-extension-firefox.zip",
@@ -245,7 +262,8 @@ const PLATFORM_METAS: PlatformMeta[] = [
 				noteEn: "Load temporarily via about:debugging",
 			},
 			{
-				label: "扩展源码",
+				labelZh: "扩展源码",
+				labelEn: "Extension sources",
 				arch: "sources",
 				format: "zip",
 				filename: "ZPass-extension-sources.zip",

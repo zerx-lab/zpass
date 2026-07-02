@@ -52,10 +52,11 @@ interface Resolved {
 	title: string;
 	subtitle: string;
 	primary: ReleaseAsset;
+	primaryLabel: string;
 	primaryNote: string;
 	/** 主资产是否为应用商店链接（决定主按钮文案 / 是否新标签页打开 / 是否显示体积） */
 	isStore: boolean;
-	others: Array<{ asset: ReleaseAsset; note: string }>;
+	others: Array<{ asset: ReleaseAsset; label: string; note: string }>;
 }
 
 // 把 PlatformGroup 解析成当前 locale 下的渲染数据
@@ -65,6 +66,7 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 		.filter((a) => a !== primary)
 		.map((a) => ({
 			asset: a,
+			label: isZh ? a.labelZh : a.labelEn,
 			note: (isZh ? a.noteZh : a.noteEn) ?? "",
 		}));
 	return {
@@ -72,6 +74,7 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 		title: isZh ? p.titleZh : p.titleEn,
 		subtitle: isZh ? p.subtitleZh : p.subtitleEn,
 		primary,
+		primaryLabel: isZh ? primary.labelZh : primary.labelEn,
 		primaryNote: (isZh ? primary.noteZh : primary.noteEn) ?? "",
 		isStore: Boolean(primary.storeUrl),
 		others,
@@ -292,7 +295,7 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 											? isZh
 												? "前往 Chrome 应用商店安装"
 												: "Get it on the Chrome Web Store"
-											: p.primary.label}
+											: p.primaryLabel}
 									</span>
 								</a>
 								{p.primaryNote && (
@@ -324,7 +327,7 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 									</summary>
 
 									<ul class="dl-others-list">
-										{p.others.map(({ asset, note }) => (
+										{p.others.map(({ asset, label, note }) => (
 											<li class="dl-other">
 												<a
 													class="dl-other-link"
@@ -338,7 +341,7 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 												>
 													<div class="dl-other-top">
 														<span class="dl-other-label">
-															{asset.label}
+															{label}
 														</span>
 														<span class="dl-other-meta mono">
 															<span class="dl-format">{asset.format}</span>
@@ -509,9 +512,9 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 		text-align: center;
 		gap: 16px;
 		padding: 56px 32px;
-		border: 1px solid var(--line-soft);
-		border-radius: 16px;
-		background: var(--surface, rgba(127, 127, 127, 0.04));
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+		background: var(--bg-elev);
 	}
 	.dl-degraded-icon {
 		display: flex;
@@ -554,7 +557,7 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 	.download-head .index {
 		font-size: 11px;
 		color: var(--text-3);
-		letter-spacing: 0.08em;
+		letter-spacing: var(--ls-mono);
 		padding-top: 6px;
 	}
 	.download-head .index b {
@@ -582,26 +585,28 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 		display: inline-flex;
 		align-items: center;
 		gap: 8px;
-		font-size: 11px;
-		letter-spacing: 0.08em;
+		font-family: var(--font-mono);
+		font-size: 12px;
+		letter-spacing: var(--ls-mono);
+		text-transform: uppercase;
 		color: var(--text-2);
-		padding: 4px 10px;
+		padding: 6px 12px;
 		border: 1px solid var(--line);
-		border-radius: 999px;
+		border-radius: var(--radius-sm);
 		background: var(--bg-elev);
 	}
 	.download-eyebrow .dot {
-		width: 6px;
-		height: 6px;
-		border-radius: 50%;
+		width: 8px;
+		height: 8px;
+		flex-shrink: 0;
 		background: var(--accent);
-		box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
 	}
 	.download-title {
 		margin: 14px 0 0;
 		font-size: clamp(28px, 4vw, 42px);
 		line-height: 1.1;
-		letter-spacing: -0.02em;
+		letter-spacing: var(--ls-display);
+		font-weight: var(--fw-display);
 	}
 	.download-sub {
 		margin: 14px 0 0;
@@ -645,67 +650,55 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 		color: var(--text-3);
 		padding: 3px 8px;
 		border: 1px solid var(--line);
-		border-radius: 4px;
+		border-radius: var(--radius-sm);
 		background: var(--bg-elev);
 	}
 
 	/* ============== 卡片网格 ============== */
+	/* 固定列数（4/2/1）保证 7 张卡 + 1 个 ::after 填充格永远整行排满。
+	   每张卡用 subgrid 切成三条跨卡对齐的横带：
+	     row 1  卡片头（图标 + 标题）
+	     row 2  推荐主下载块
+	     row 3  其他版本（details）
+	   内容在每条横带内从上到下自然排列,同行各卡的段落起点因此全部对齐;
+	   某张卡展开 details 时只撑高第三条横带,邻卡同带跟随、白底填满,
+	   不会出现参差或露出容器灰底。 */
 	.download-grid {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-		gap: 18px;
-		/* 让卡片高度各自独立：展开 details 时不会把同行其他卡片一起撑高 */
-		align-items: start;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 1px;
+		background: var(--line);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+		overflow: hidden;
+	}
+	/* 第 8 格填充：7 张卡在 4 列 (2×4) 与 2 列 (4×2) 下都恰好差 1 格 */
+	.download-grid::after {
+		content: "";
+		background: var(--bg);
+		order: 99;
+		grid-row: span 3;
 	}
 
 	.dl-card {
-		display: flex;
-		flex-direction: column;
-		border: 1px solid var(--line);
-		border-radius: var(--radius-lg);
+		display: grid;
+		grid-template-rows: subgrid;
+		grid-row: span 3;
+		align-content: start; /* 无 subgrid 支持时的降级：内容顶对齐 */
 		background: var(--bg-elev);
-		overflow: hidden;
 		position: relative;
-		transition:
-			border-color 0.2s,
-			transform 0.2s;
-	}
-	.dl-card::before {
-		content: "";
-		position: absolute;
-		left: 0;
-		right: 0;
-		top: 0;
-		height: 2px;
-		background: linear-gradient(
-			90deg,
-			color-mix(in srgb, var(--accent) 0%, transparent),
-			color-mix(in srgb, var(--accent) 60%, transparent),
-			color-mix(in srgb, var(--accent) 0%, transparent)
-		);
-		opacity: 0;
-		transition: opacity 0.2s;
+		transition: background 0.2s;
 	}
 	.dl-card:hover {
-		border-color: var(--text-4);
-	}
-	.dl-card:hover::before {
-		opacity: 1;
+		background: var(--bg-hover);
 	}
 	.dl-card--ios,
 	.dl-card--harmony {
 		background: var(--bg);
-		/* 给两张占位卡统一最小高度，让它们自身互相对齐；不用 align-self: stretch
-		   是为了避免被同行扩展卡 details 展开后撑高（grid 行高度由 items 决定）。 */
-		min-height: 290px;
 	}
 	.dl-card--ios:hover,
 	.dl-card--harmony:hover {
-		border-color: var(--line);
-	}
-	.dl-card--ios:hover::before,
-	.dl-card--harmony:hover::before {
-		opacity: 0;
+		background: var(--bg);
 	}
 
 	/* —— 卡片头 —— */
@@ -720,7 +713,7 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 		width: 36px;
 		height: 36px;
 		flex-shrink: 0;
-		border-radius: 8px;
+		border-radius: var(--radius);
 		background: var(--bg-elev-2);
 		border: 1px solid var(--line);
 		display: inline-flex;
@@ -734,9 +727,10 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 	}
 	.dl-card-title {
 		margin: 0;
+		font-family: var(--font-mono);
 		font-size: 16px;
 		font-weight: 600;
-		letter-spacing: -0.01em;
+		letter-spacing: 0;
 	}
 	.dl-card-sub {
 		margin: 4px 0 0;
@@ -755,7 +749,7 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 		height: 22px;
 		padding: 0 8px;
 		line-height: 1;
-		border-radius: 4px;
+		border-radius: var(--radius-sm);
 		white-space: nowrap;
 	}
 
@@ -771,13 +765,14 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 		color: var(--text-3);
 	}
 
-	/* —— 卡片主体 —— */
+	/* —— 卡片主体 ——
+	   display: contents 让 .dl-primary / .dl-others 直接成为卡片 subgrid 的
+	   第 2 / 3 行网格项,跨卡横带对齐;内边距下放到两条横带自身。 */
 	.dl-card-body {
-		padding: 18px;
-		display: flex;
-		flex-direction: column;
-		gap: 14px;
-		flex: 1;
+		display: contents;
+	}
+	.dl-primary {
+		padding: 18px 18px 16px;
 	}
 
 	/* —— 推荐下载块 —— */
@@ -812,7 +807,6 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 		justify-content: center;
 		height: 40px;
 		font-size: 13px;
-		font-weight: 500;
 	}
 	.dl-arrow {
 		flex-shrink: 0;
@@ -829,11 +823,13 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 		line-height: 1.55;
 	}
 
-	/* —— 其他版本（details/summary）—— */
+	/* —— 其他版本（details/summary）——
+	   作为卡片 subgrid 第 3 行的网格项,与同行各卡的"其他版本"带对齐;
+	   内容从上到下自然排列,顶部 1px 线与主下载块分隔。 */
 	.dl-others {
 		border-top: 1px solid var(--line-soft);
-		padding-top: 14px;
-		margin-top: 2px;
+		padding: 14px 18px 18px;
+		align-self: start;
 	}
 	.dl-others summary {
 		list-style: none;
@@ -856,7 +852,7 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 		font-size: 10px;
 		padding: 1px 6px;
 		border: 1px solid var(--line);
-		border-radius: 3px;
+		border-radius: var(--radius-sm);
 		color: var(--text-3);
 		background: var(--bg);
 	}
@@ -933,8 +929,15 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 		line-height: 1.5;
 	}
 
-	/* —— iOS 占位 —— */
+	/* —— iOS / 鸿蒙 占位卡 ——
+	   占位卡无三段结构,主体作为单个 flex 块跨第 2、3 两行横带,
+	   CONTACT 按钮压到底部。 */
 	.dl-card-body--pending {
+		display: flex;
+		flex-direction: column;
+		gap: 14px;
+		grid-row: span 2;
+		padding: 18px;
 		justify-content: space-between;
 	}
 	.dl-ios-note {
@@ -968,6 +971,22 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 	}
 	.download-foot .sep {
 		color: var(--text-4);
+	}
+
+	/* ============== 网格断点：4 → 2 → 1 列 ============== */
+	@media (max-width: 1100px) {
+		.download-grid {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
+	@media (max-width: 640px) {
+		.download-grid {
+			grid-template-columns: minmax(0, 1fr);
+		}
+		/* 单列下无空格子，填充格反而会多出一行 1px 灰缝 */
+		.download-grid::after {
+			display: none;
+		}
 	}
 
 	/* ============== 响应式 ============== */

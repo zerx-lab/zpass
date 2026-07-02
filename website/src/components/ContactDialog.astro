@@ -160,7 +160,7 @@ const { t, endpoint = "/api/contact" } = Astro.props;
   .cd-panel {
     background: var(--bg-elev);
     border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-sm);
     width: 100%;
     max-width: 560px;
     max-height: calc(100dvh - 48px);
@@ -235,10 +235,12 @@ const { t, endpoint = "/api/contact" } = Astro.props;
   }
 
   .cd-label {
+    font-family: var(--font-mono);
     font-size: 12px;
     font-weight: 500;
+    text-transform: uppercase;
     color: var(--text-2);
-    letter-spacing: 0.01em;
+    letter-spacing: var(--ls-mono);
   }
 
   /* 输入框 / 下拉 / 文本域共用基础样式 */
@@ -247,7 +249,7 @@ const { t, endpoint = "/api/contact" } = Astro.props;
   .cd-textarea {
     background: var(--bg);
     border: 1px solid var(--line);
-    border-radius: var(--radius);
+    border-radius: var(--radius-sm);
     color: var(--text);
     font-family: var(--font-sans);
     font-size: 13px;
@@ -263,11 +265,15 @@ const { t, endpoint = "/api/contact" } = Astro.props;
   }
 
   .cd-select {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%236e6e73' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%235f5f5f' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 12px center;
     padding-right: 32px;
     cursor: pointer;
+  }
+
+  [data-theme="dark"] .cd-select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238f8f8f' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   }
 
   .cd-textarea {
@@ -284,15 +290,15 @@ const { t, endpoint = "/api/contact" } = Astro.props;
   .cd-input:focus,
   .cd-select:focus,
   .cd-textarea:focus {
-    border-color: var(--text-3);
-    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.04);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
   }
 
   /* 错误态 */
   .cd-input.invalid,
   .cd-textarea.invalid {
     border-color: var(--danger);
-    box-shadow: 0 0 0 3px rgba(229, 90, 74, 0.12);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 14%, transparent);
   }
 
   .cd-err {
@@ -331,19 +337,6 @@ const { t, endpoint = "/api/contact" } = Astro.props;
     display: none;
   }
 
-  /* light 主题适配 */
-  [data-theme="light"] .cd-input,
-  [data-theme="light"] .cd-select,
-  [data-theme="light"] .cd-textarea {
-    background: #fff;
-    border-color: #d8d8dc;
-  }
-
-  [data-theme="light"] .cd-input:focus,
-  [data-theme="light"] .cd-select:focus,
-  [data-theme="light"] .cd-textarea:focus {
-    box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.06);
-  }
 </style>
 
 <script

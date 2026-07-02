@@ -237,6 +237,8 @@ const zhPath = localizePath(pathname, "zh");
 		justify-content: center;
 		text-decoration: none;
 		white-space: nowrap;
+		text-transform: uppercase;
+		letter-spacing: var(--ls-mono);
 	}
 	.lang-toggle {
 		flex-shrink: 0;
@@ -272,7 +274,8 @@ const zhPath = localizePath(pathname, "zh");
 		font-size: 11px;
 		color: var(--text-3);
 		cursor: pointer;
-		letter-spacing: 0.02em;
+		text-transform: uppercase;
+		letter-spacing: var(--ls-mono);
 		transition: color 0.15s, border-color 0.15s, background 0.15s;
 		white-space: nowrap;
 	}
@@ -297,12 +300,16 @@ const zhPath = localizePath(pathname, "zh");
 		cursor: pointer;
 		flex-shrink: 0;
 	}
+	.nav-burger:hover {
+		border-color: var(--text-3);
+		background: var(--bg-hover);
+	}
 	.burger-bar {
 		display: block;
 		width: 100%;
 		height: 1.5px;
 		background: var(--text-2);
-		border-radius: 2px;
+		border-radius: var(--radius-sm);
 		transition: transform 0.2s ease, opacity 0.2s ease;
 		transform-origin: center;
 	}
@@ -322,7 +329,9 @@ const zhPath = localizePath(pathname, "zh");
 		overflow: hidden;
 		max-height: 0;
 		transition: max-height 0.28s cubic-bezier(0.4, 0, 0.2, 1);
-		border-bottom: 1px solid var(--line-soft);
+		background: var(--bg-elev);
+		border-top: 1px solid var(--line);
+		border-bottom: 1px solid var(--line);
 	}
 	.nav-mobile-menu[aria-hidden="false"] {
 		max-height: 400px;
@@ -379,7 +388,8 @@ const zhPath = localizePath(pathname, "zh");
 		font-size: 11px;
 		color: var(--text-3);
 		cursor: pointer;
-		letter-spacing: 0.02em;
+		text-transform: uppercase;
+		letter-spacing: var(--ls-mono);
 		transition: color 0.15s, border-color 0.15s, background 0.15s;
 	}
 	.nav-mobile-contact:hover {

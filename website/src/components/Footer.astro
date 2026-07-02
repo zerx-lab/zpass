@@ -1,10 +1,11 @@
 ---
 // ============================================================================
-// Footer — 站点页脚（精简版）
-// 早期开发阶段，无真实可跳转目标，因此移除 Product/Resources/Company/Legal
-// 四列死链与重复的构建标识，仅保留：
-//   - 品牌 + 一句话 tagline
-//   - 一行版权 + 开发状态
+// Footer — 站点页脚（Composio 风多列布局）
+// 早期开发阶段，无真实可跳转目标，因此不造 Product/Resources/Company/Legal
+// 四列死链，仅用真实内容组织三列：
+//   - 品牌列：Logo + 一句话 tagline
+//   - Community 列：GitHub + 联系我们（mono 大写列标题）
+//   - Status 列：构建状态 / 开源协议 / 版本 / 隐私协议
 // ============================================================================
 
 import type { Locale, SiteStrings } from "../i18n/strings";
@@ -18,12 +19,16 @@ export interface Props {
 
 const { t, locale = "en" } = Astro.props;
 const privacyHref = localizePath("/privacy", locale);
+
+// 列标题：mono 大写标签，随 locale 切换（无独立 i18n key，纯展示性分类词）
+const colCommunity = locale === "zh" ? "社区" : "Community";
+const colStatus = locale === "zh" ? "状态" : "Status";
 ---
 
-<footer class="foot foot--lite section--soft">
+<footer class="foot foot--lite">
 	<div class="wrap">
-		<div class="foot-lite">
-			<div class="foot-lite-brand">
+		<div class="foot-grid">
+			<div class="foot-col foot-col--brand">
 				<div class="brand">
 					<span class="logo"><Brandmark size={22} /></span>
 					<span>ZPass</span>
@@ -31,10 +36,11 @@ const privacyHref = localizePath("/privacy", locale);
 				<div class="foot-tagline">{t.footer_tagline}</div>
 			</div>
 
-			<div class="foot-lite-right">
-				<div class="foot-actions">
+			<div class="foot-col">
+				<div class="foot-col-head mono">{colCommunity}</div>
+				<div class="foot-links">
 					<a
-						class="foot-github"
+						class="foot-link"
 						href={GITHUB_URL}
 						target="_blank"
 						rel="noopener"
@@ -54,20 +60,21 @@ const privacyHref = localizePath("/privacy", locale);
 								d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.57.1.78-.25.78-.55v-1.94c-3.2.7-3.88-1.54-3.88-1.54-.52-1.34-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.27-5.24-5.65 0-1.25.45-2.28 1.18-3.08-.12-.29-.51-1.46.11-3.04 0 0 .96-.31 3.14 1.17.91-.25 1.89-.38 2.86-.39.97 0 1.95.13 2.86.39 2.18-1.48 3.14-1.17 3.14-1.17.62 1.58.23 2.75.11 3.04.73.8 1.18 1.83 1.18 3.08 0 4.39-2.7 5.36-5.27 5.64.41.36.78 1.05.78 2.12v3.14c0 .31.2.66.79.55C20.21 21.38 23.5 17.08 23.5 12 23.5 5.65 18.35.5 12 .5z"
 							/>
 						</svg>
-						<span class="mono">GitHub</span>
+						<span>GitHub</span>
 					</a>
-					<button class="foot-contact mono" data-contact-open>
+					<button class="foot-link foot-link--btn" data-contact-open>
 						{t.contact_trigger}
 					</button>
 				</div>
-				<div class="foot-lite-meta mono">
+			</div>
+
+			<div class="foot-col">
+				<div class="foot-col-head mono">{colStatus}</div>
+				<div class="foot-meta mono">
 					<span>{t.footer_built}</span>
-					<span aria-hidden="true">·</span>
 					<span>{t.footer_oss}</span>
-					<span aria-hidden="true">·</span>
 					<span>{t.footer_version}</span>
-					<span aria-hidden="true">·</span>
-					<a class="foot-privacy" href={privacyHref}>{t.footer_privacy}</a>
+					<a class="foot-link foot-privacy" href={privacyHref}>{t.footer_privacy}</a>
 				</div>
 			</div>
 		</div>
@@ -75,106 +82,94 @@ const privacyHref = localizePath("/privacy", locale);
 </footer>
 
 <style>
+	/* ============================================================================
+	 * Footer — Composio 式多列布局
+	 *   左列：品牌 + tagline
+	 *   中列：Community（GitHub / 联系我们）
+	 *   右列：Status（构建状态 / 开源协议 / 版本 / 隐私协议）
+	 * 列标题为 mono 大写标签，链接为普通文本链接（hover 变 --accent）。
+	 * ============================================================================ */
 	.foot--lite {
-		padding: 64px 0 56px;
-		background: var(--bg-soft);
-		border-top: 1px solid var(--line-soft);
+		padding: 64px 0 48px;
+		background: var(--bg);
+		border-top: 1px solid var(--line);
 	}
 
-	.foot-lite {
-		display: flex;
-		align-items: flex-end;
-		justify-content: space-between;
-		gap: 32px;
-		flex-wrap: wrap;
+	.foot-grid {
+		display: grid;
+		grid-template-columns: 1.6fr 1fr 1fr;
+		gap: 40px;
 	}
 
-	.foot-lite-brand .foot-tagline {
+	.foot-col--brand .foot-tagline {
 		margin-top: 10px;
 	}
 
-	.foot-lite-right {
+	.foot-col-head {
+		font-size: 12px;
+		text-transform: uppercase;
+		letter-spacing: var(--ls-mono);
+		color: var(--text-4);
+		margin-bottom: 14px;
+	}
+
+	.foot-links,
+	.foot-meta {
 		display: flex;
 		flex-direction: column;
-		align-items: flex-end;
-		gap: 8px;
-	}
-
-	.foot-lite-meta {
-		display: inline-flex;
-		align-items: center;
+		align-items: flex-start;
 		gap: 10px;
-		font-size: 11px;
-		color: var(--text-3);
-		flex-wrap: wrap;
 	}
 
-	.foot-privacy {
-		color: var(--text-3);
-		text-decoration: none;
-		transition: color 0.15s;
-	}
-	.foot-privacy:hover {
-		color: var(--text);
-	}
-
-	.foot-actions {
-		display: inline-flex;
-		align-items: center;
-		gap: 8px;
-	}
-
-	.foot-contact {
-		background: var(--bg);
-		border: 1px solid var(--line);
-		border-radius: var(--radius-pill);
-		padding: 5px 14px;
+	.foot-meta {
 		font-size: 12px;
-		color: var(--text-2);
-		cursor: pointer;
-		transition: color 0.15s, border-color 0.15s, background 0.15s;
-		letter-spacing: 0.02em;
+		color: var(--text-3);
 	}
 
-	.foot-contact:hover {
-		color: var(--text);
-		border-color: var(--text-3);
-		background: var(--bg-hover);
-	}
-
-	.foot-github {
+	.foot-link {
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
-		padding: 5px 14px;
-		font-size: 12px;
+		font-size: 14px;
 		color: var(--text-2);
-		border: 1px solid var(--line);
-		border-radius: var(--radius-pill);
-		background: var(--bg);
 		text-decoration: none;
-		letter-spacing: 0.02em;
-		transition: color 0.15s, border-color 0.15s, background 0.15s;
+		transition: color 0.15s;
+	}
+	.foot-link:hover {
+		color: var(--accent);
 	}
 
-	.foot-github:hover {
-		color: var(--text);
-		border-color: var(--text-3);
-		background: var(--bg-hover);
+	/* 联系我们按钮：视觉与普通链接一致（重置原生 button 样式） */
+	.foot-link--btn {
+		background: none;
+		border: none;
+		padding: 0;
+		font-family: inherit;
+		cursor: pointer;
+		text-align: left;
 	}
 
-	.foot-github svg {
+	.foot-link svg {
 		flex-shrink: 0;
 	}
 
-	@media (max-width: 640px) {
-		.foot-lite {
-			flex-direction: column;
-			align-items: flex-start;
+	@media (max-width: 860px) {
+		.foot-grid {
+			grid-template-columns: 1fr 1fr;
+			row-gap: 36px;
 		}
+		.foot-col--brand {
+			grid-column: 1 / -1;
+		}
+	}
 
-		.foot-lite-right {
-			align-items: flex-start;
+	@media (max-width: 480px) {
+		.foot-grid {
+			grid-template-columns: 1fr;
+			row-gap: 32px;
+		}
+		.foot-col--brand {
+			grid-column: auto;
 		}
 	}
 </style>

@@ -1,13 +1,13 @@
 ---
 // ============================================================================
-// Hero — 主视觉（1Password 风格）
+// Hero — 主视觉（Composio 工程风）
 //
 // 设计语言：
-//   - 居中布局，巨型轻字重标题（H1 ~96px，font-weight 300）
-//   - 米色 eyebrow tag（不再用蓝点 + mono）
-//   - 双 CTA：主蓝色实底 + 描边
-//   - 4 列统计行，超轻字重数字
-//   - 默认 ink 暗色背景，搭配底部蓝色渐变
+//   - 居中布局，大字号常规字重（400）+ 紧字距标题，clamp 到 ~64px
+//   - mono 方框 eyebrow（1px 边框 + ::before 实心方块）
+//   - 双 CTA：主按钮实底反色 + 次按钮 1px 边框
+//   - 4 列统计行：mono 数字 + 1px 竖线分隔（表格式网格）
+//   - 墨色 hero 背景 + 网格背景 + 两侧像素马赛克装饰（纯 CSS 画）
 //
 // 注：保留原有的 hero-stats 数据契约（4 项），保留 hero_eyebrow / hero_title_1
 // / hero_title_2 / hero_sub / hero_cta_primary / hero_availability 等 i18n
@@ -36,10 +36,14 @@ const stats = [
 
 <section class="hero hero--ink" id="top">
 	<div class="hero-grid-bg"></div>
+	<div class="hero-mosaic hero-mosaic--left" aria-hidden="true">
+		<i></i><i></i><i></i><i></i><i></i><i></i>
+	</div>
+	<div class="hero-mosaic hero-mosaic--right" aria-hidden="true">
+		<i></i><i></i><i></i><i></i><i></i><i></i>
+	</div>
 	<div class="wrap">
-		<div class="eyebrow">
-			<span class="dot"></span>{t.hero_eyebrow}
-		</div>
+		<div class="eyebrow">{t.hero_eyebrow}</div>
 
 		<h1>
 			<span>{t.hero_title_1}</span>
