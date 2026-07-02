@@ -56,14 +56,26 @@ interface Resolved {
 	primaryNote: string;
 	/** 主资产是否为应用商店链接（决定主按钮文案 / 是否新标签页打开 / 是否显示体积） */
 	isStore: boolean;
+	/** 非主按钮的商店链接（如 Edge），与主按钮并列展示在卡面 */
+	surfaceStores: Array<{ asset: ReleaseAsset; btnText: string; note: string }>;
 	others: Array<{ asset: ReleaseAsset; label: string; note: string }>;
 }
 
 // 把 PlatformGroup 解析成当前 locale 下的渲染数据
 const resolved: Resolved[] = PLATFORMS.map((p) => {
 	const primary = p.assets.find((a) => a.recommended) ?? p.assets[0];
+	// 商店链接型资产全部上卡面（主按钮 + 次级按钮），只有文件下载进折叠列表
+	const surfaceStores = p.assets
+		.filter((a) => a !== primary && a.storeUrl)
+		.map((a) => ({
+			asset: a,
+			btnText: isZh
+				? `前往 ${a.labelZh}安装`
+				: `Get it on ${a.labelEn}`,
+			note: (isZh ? a.noteZh : a.noteEn) ?? "",
+		}));
 	const others = p.assets
-		.filter((a) => a !== primary)
+		.filter((a) => a !== primary && !a.storeUrl)
 		.map((a) => ({
 			asset: a,
 			label: isZh ? a.labelZh : a.labelEn,
@@ -77,6 +89,7 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 		primaryLabel: isZh ? primary.labelZh : primary.labelEn,
 		primaryNote: (isZh ? primary.noteZh : primary.noteEn) ?? "",
 		isStore: Boolean(primary.storeUrl),
+		surfaceStores,
 		others,
 	};
 });
@@ -301,6 +314,34 @@ const resolved: Resolved[] = PLATFORMS.map((p) => {
 								{p.primaryNote && (
 									<p class="dl-primary-note">{p.primaryNote}</p>
 								)}
+								{p.surfaceStores.map(({ asset, btnText, note }) => (
+									<>
+										<a
+											class="btn dl-primary-btn dl-store-btn"
+											href={asset.url}
+											rel="noopener"
+											target="_blank"
+										>
+											<svg
+												class="dl-arrow"
+												viewBox="0 0 24 24"
+												width="14"
+												height="14"
+												fill="none"
+												stroke="currentColor"
+												stroke-width="2"
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												aria-hidden="true"
+											>
+												<path d="M7 17L17 7" />
+												<path d="M8 7h9v9" />
+											</svg>
+											<span class="dl-btn-text">{btnText}</span>
+										</a>
+										{note && <p class="dl-primary-note">{note}</p>}
+									</>
+								))}
 							</div>
 
 							{p.others.length > 0 && (

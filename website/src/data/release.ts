@@ -226,8 +226,8 @@ const PLATFORM_METAS: PlatformMeta[] = [
 		id: "extension",
 		titleZh: "浏览器扩展",
 		titleEn: "Browser extension",
-		subtitleZh: "Chrome 应用商店一键安装 · 或本地解压加载",
-		subtitleEn: "One-click from the Chrome Web Store · or side-load locally",
+		subtitleZh: "Chrome / Edge 商店一键安装 · 或本地解压加载",
+		subtitleEn: "One-click from the Chrome or Edge store · or side-load locally",
 		assets: [
 			{
 				labelZh: "Chrome 应用商店",
@@ -238,9 +238,21 @@ const PLATFORM_METAS: PlatformMeta[] = [
 				storeUrl:
 					"https://chromewebstore.google.com/detail/zpass/dafhkofilckgmnlclnkciddccogpfcdm",
 				recommended: true,
-				noteZh: "从 Chrome 应用商店安装，随浏览器自动更新（支持 Chrome / Edge / Brave）",
+				noteZh: "从 Chrome 应用商店安装，随浏览器自动更新（支持 Chrome / Brave）",
 				noteEn:
-					"Install from the Chrome Web Store, auto-updates with your browser (Chrome / Edge / Brave)",
+					"Install from the Chrome Web Store, auto-updates with your browser (Chrome / Brave)",
+			},
+			{
+				labelZh: "Edge 应用商店",
+				labelEn: "Microsoft Edge Add-ons",
+				arch: "chromium",
+				format: "store",
+				filename: "edge-addons",
+				storeUrl:
+					"https://microsoftedge.microsoft.com/addons/detail/lgbdeddnnbcpadgmkanfofbanbmabfdp",
+				noteZh: "从 Edge 应用商店安装，随浏览器自动更新",
+				noteEn:
+					"Install from Microsoft Edge Add-ons, auto-updates with your browser",
 			},
 			{
 				labelZh: "Chrome 手动加载 (.zip)",
