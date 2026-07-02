@@ -5,6 +5,7 @@ name: Build Extension
 # 目标:
 #   - Chrome (MV3) 上架包 zip（无 key，商店重签）
 #   - Chrome (MV3) 自托管包 zip（带 key，固定 id nlnkem...）
+#   - Edge (MV3) 上架包 zip（无 key，Edge Add-ons 商店重签）
 #   - Firefox (MV2) zip + sources.zip（AMO 审核需提交源码，扩展用了 minify）
 #
 # 为什么独立成一个 workflow（而不是塞进 desktop-build.yml）:
@@ -84,7 +85,7 @@ jobs:
   # Browser Extension - Chrome MV3 + Firefox MV2 (+ sources.zip for AMO)
   # ===========================================================================
   build-extension:
-    name: Browser Extension (Chrome + Firefox)
+    name: Browser Extension (Chrome + Edge + Firefox)
     runs-on: ubuntu-latest
     needs: detect
     if: needs.detect.outputs.changed == 'true'
@@ -136,6 +137,12 @@ jobs:
       - name: Build Firefox MV2 zip
         run: npx wxt zip -b firefox
 
+      # Edge Add-ons 上架包(无 key):WXT 内置 edge 目标,Chromium MV3。
+      # 与 chrome 上架包同理不注入 key,商店维护自己的 ID/公钥。
+      # 产物名 .output/<pkg>-<version>-edge.zip。
+      - name: Build Edge MV3 zip (store, no key)
+        run: npx wxt zip -b edge
+
       # WXT 默认命名:
       #   .output/<pkg-name>-<version>-chrome.zip
       #   .output/<pkg-name>-<version>-firefox.zip
@@ -154,6 +161,9 @@ jobs:
           done
           for f in .output/*-firefox.zip; do
             cp "$f" "release/ZPass-extension-firefox.zip"
+          done
+          for f in .output/*-edge.zip; do
+            cp "$f" "release/ZPass-extension-edge.zip"
           done
           for f in .output/*-sources.zip; do
             cp "$f" "release/ZPass-extension-sources.zip"
@@ -221,3 +231,29 @@ jobs:
           client-secret: ${{ secrets.CWS_CLIENT_SECRET }}
           refresh-token: ${{ secrets.CWS_REFRESH_TOKEN }}
           publish: true
+
+      # 自动发布到 Microsoft Edge Add-ons。上传的是上架包 ZPass-extension-edge.zip
+      # (无 key,商店重签,product id = 1c9c3592-dc97-4533-9da7-a59834f688c8)。
+      # 走 Edge Publish API(ApiKey 认证,合作伙伴中心「发布 API」页生成),3 个 Secret:
+      #   - EDGE_PRODUCT_ID  合作伙伴中心产品 ID
+      #   - EDGE_CLIENT_ID   发布 API 客户端 ID
+      #   - EDGE_API_KEY     发布 API 密钥(会到期,失效后在 Partner Center 重新生成并更新 Secret)
+      # upload-only: false → 上传新包后直接提交审核,审核通过自动上线;想停在草稿
+      # 由人工提交,改为 true。版本号递增约束与 CWS 相同,由 tag 版本回写保证。
+      - name: Publish to Microsoft Edge Add-ons
+        if: >-
+          needs.detect.outputs.publish == 'true' &&
+          env.EDGE_PRODUCT_ID != '' &&
+          env.EDGE_CLIENT_ID != '' &&
+          env.EDGE_API_KEY != ''
+        env:
+          EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
+          EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
+          EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
+        uses: wdzeng/edge-addon@v2
+        with:
+          product-id: ${{ secrets.EDGE_PRODUCT_ID }}
+          client-id: ${{ secrets.EDGE_CLIENT_ID }}
+          api-key: ${{ secrets.EDGE_API_KEY }}
+          zip-path: extension/release/ZPass-extension-edge.zip
+          upload-only: false
