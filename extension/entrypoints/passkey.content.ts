@@ -51,7 +51,16 @@ interface BridgeResponse<T> {
   error?: string;
 }
 
-const REQUEST_TIMEOUT_MS = 15000;
+// 桥接超时:list 无用户交互给短超时;choose/create/sign 都含用户交互
+// (页面选择对话框 / 创建确认 / 桌面端解锁与审批),15s 会在用户犹豫时
+// 超时回退浏览器原生弹窗,与 ZPass 对话框双 UI 叠加 —— 对齐 WebAuthn
+// 惯例给 5 分钟。
+const REQUEST_TIMEOUT_MS: Record<PasskeyBridgeType, number> = {
+  "zpass.passkeyList": 15000,
+  "zpass.passkeyChoose": 300000,
+  "zpass.passkeyCreate": 300000,
+  "zpass.passkeySign": 300000
+};
 const PASSKEY_ALG_ES256 = -7;
 
 function installPasskeyProxy(): void {
@@ -75,6 +84,13 @@ function installPasskeyProxy(): void {
 
   const getProxy: CredentialsContainer["get"] = async (options) => {
     if (!options?.publicKey) return originalGet(options);
+    // conditional mediation(如 Google 首页加载即发起的静默 autofill 请求)
+    // 语义是「挂起等用户从浏览器 autofill UI 主动选择」。ZPass 桥目前只有
+    // 模态流程:拦截会导致页面一加载就弹选择框/自动签名;失败(桌面端锁定/
+    // 用户取消)还会 reject 掉页面的 conditional 请求,杀死整页 passkey
+    // 通道 —— 表现为「必须手输用户名点继续才能再触发 passkey」。放行给
+    // 浏览器原生实现。
+    if (options.mediation === "conditional") return originalGet(options);
     try {
       const credential = await getZPassCredential(options.publicKey, options.signal);
       return credential ?? originalGet(options);
@@ -235,7 +251,7 @@ function sendBridge<T>(type: PasskeyBridgeType, payload: unknown): Promise<T> {
     const timer = window.setTimeout(() => {
       cleanup();
       reject(webAuthnError("NotAllowedError", "ZPass Desktop did not respond."));
-    }, REQUEST_TIMEOUT_MS);
+    }, REQUEST_TIMEOUT_MS[type]);
 
     const cleanup = () => {
       window.clearTimeout(timer);

@@ -771,7 +771,10 @@ async function handleMessage(
         itemId: req.itemId,
       });
       let filled = false;
-      if (secret.password) {
+      // username-only 条目(identifier-first 页的账号 / passkey 账户)也
+      // 放行,与内联菜单路径(inline-menu-bridge fillLogin)的判定一致;
+      // fillLoginForm 对空 password 有守卫,不会用空串清掉已有输入。
+      if (secret.password || secret.username) {
         const fillResponse = await browser.tabs.sendMessage(tab.id, {
           type: "zpass.fillLogin",
           secret,

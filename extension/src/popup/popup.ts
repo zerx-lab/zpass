@@ -715,16 +715,23 @@ async function handleRowClick(item: LoginSummary): Promise<void> {
     return;
   }
 
-  // 独立 TOTP 条目（或仅存 TOTP 没存密码的 login）→ 复制验证码，不关闭 popup
+  // 无密码条目分流:
+  //   - 有 TOTP → 复制验证码,不关闭 popup(独立 TOTP 条目,原行为);
+  //   - 只有用户名(identifier-first 页的账号 / passkey 账户)→ 仍走填充,
+  //     background 只填 username;
+  //   - 全空 → 提示。
   if (!item.hasPassword) {
-    if (!item.hasTotp) {
+    if (item.hasTotp) {
+      await copyTotpToClipboard(item);
+      return;
+    }
+    if (!item.username) {
       showInlineToast("该条目为空。");
       return;
     }
-    await copyTotpToClipboard(item);
-    return;
   }
-  // 有密码 → 填账密；如同时有 TOTP 则自动复制到剪贴板（Bitwarden 默认行为）
+  // 有密码 → 填账密;如同时有 TOTP 则自动复制到剪贴板(Bitwarden 默认行为)。
+  // 无密码有用户名 → 只填用户名。
   await fillActiveTab(item);
 }
 
@@ -955,7 +962,8 @@ function getRpId(url: string): string | null {
  * 在 popup 关闭前同步复制到剪贴板——这是 Bitwarden enableAutoTotpCopy=true
  * 默认行为。Toast 在复制后短暂提示 600ms 再关 popup，让用户看到反馈。
  *
- * 与原状区别：仅能处理 hasPassword 场景（handleRowClick 已提前准出）。
+ * 与原状区别:处理 hasPassword 与 username-only 场景(TOTP-only / 全空
+ * 已被 handleRowClick 提前准出)。
  */
 async function fillActiveTab(item: LoginSummary): Promise<void> {
   const response = (await browser.runtime.sendMessage({

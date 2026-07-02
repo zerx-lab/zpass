@@ -18,6 +18,7 @@
 
 import { isLoginCandidate, findLoginFormForInput } from "./forms";
 import { isTotpCandidate, isTotpField } from "./totp-fields";
+import { rememberLoginInput } from "./focus-registry";
 import { isTrustedEvent } from "../shared/event-security";
 import { InlineMenuInjector } from "./inline-menu-injector";
 import {
@@ -28,6 +29,15 @@ import {
   type InlineMenuRemoteOpenRequest,
 } from "../shared/inline-menu-enums";
 import { getHttpOrigin } from "../shared/messages";
+
+/**
+ * 事件真实目标:open shadow root 内的事件冒到 document 层会被 retarget
+ * 成 host 元素,composedPath()[0] 才是真正的 input。
+ */
+function deepEventTarget(event: Event): EventTarget | null {
+  const path = event.composedPath();
+  return path[0] ?? event.target;
+}
 
 /**
  * 判定 input 的 inline-menu 触发性质。
@@ -141,10 +151,11 @@ export class InlineMenuController {
       // 合成事件 —— 静默(高频)。
       return;
     }
-    const target = event.target;
+    const target = deepEventTarget(event);
     if (!(target instanceof HTMLInputElement)) return;
     const kind = inputKindFor(target);
     if (kind === null) return;
+    if (kind === "login") rememberLoginInput(target);
     this.focusedInput = target;
     this.focusedKind = kind;
     this.clearBlurCloseTimer();
@@ -155,10 +166,11 @@ export class InlineMenuController {
 
   private handleClick = (event: Event): void => {
     if (!isTrustedEvent(event)) return;
-    const target = event.target;
+    const target = deepEventTarget(event);
     if (!(target instanceof HTMLInputElement)) return;
     const kind = inputKindFor(target);
     if (kind === null) return;
+    if (kind === "login") rememberLoginInput(target);
     this.focusedInput = target;
     this.focusedKind = kind;
     this.clearBlurCloseTimer();
@@ -167,7 +179,7 @@ export class InlineMenuController {
 
   private handleFocusOut = (event: Event): void => {
     if (!isTrustedEvent(event)) return;
-    const target = event.target;
+    const target = deepEventTarget(event);
     if (target !== this.focusedInput) return;
     // 焦点的去向:
     //   - 落在自家 overlay shell(用户点击/Tab 进列表) → 不关菜单
@@ -183,7 +195,7 @@ export class InlineMenuController {
 
   private handleInput = (event: Event): void => {
     if (!isTrustedEvent(event)) return;
-    const target = event.target;
+    const target = deepEventTarget(event);
     if (!(target instanceof HTMLInputElement)) return;
     if (target !== this.focusedInput) return;
     // 用户开始打字 → 关菜单, 让出键盘。

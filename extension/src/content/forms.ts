@@ -11,9 +11,16 @@ export interface LoginForm {
 const USERNAME_TYPES = new Set(["", "text", "email", "tel", "url"]);
 
 export function findLoginForms(root: ParentNode): LoginForm[] {
-  const passwords = Array.from(
+  let passwords = Array.from(
     root.querySelectorAll<HTMLInputElement>('input[type="password"]'),
   );
+  if (passwords.length === 0) {
+    // 光 DOM 没有密码框才做 open shadow root 深度遍历(成本控制:常规页面
+    // 走快路径;Lit/Stencil 等 web-component SPA 的登录框在 shadow 内)。
+    passwords = queryInputsDeep(root).filter(
+      (input) => input.type === "password",
+    );
+  }
   return passwords
     .filter((input) => !input.disabled && !input.readOnly && isVisible(input))
     .map((password) => ({ password, username: findUsernameInput(password) }));
@@ -42,6 +49,26 @@ export function fillLoginForm(form: LoginForm, secret: LoginSecret): void {
  */
 export function fillTotpInput(input: HTMLInputElement, code: string): void {
   simulateUserFill(input, code);
+}
+
+/** 单独填充用户名框(passkey 选择账户后的提示性回填等)。 */
+export function fillUsernameInput(
+  input: HTMLInputElement,
+  value: string,
+): void {
+  simulateUserFill(input, value);
+}
+
+/**
+ * document.activeElement 穿透 open shadow root:焦点在 shadow 内部时
+ * activeElement 停在 host 上,逐层下钻拿真实焦点元素。
+ */
+export function deepActiveElement(): Element | null {
+  let active = document.activeElement;
+  while (active?.shadowRoot?.activeElement) {
+    active = active.shadowRoot.activeElement;
+  }
+  return active;
 }
 
 export function findLoginFormForInput(
@@ -75,9 +102,8 @@ export function findLoginFormForInput(
  * 的候选框 —— 该页第一步没有可见 password 框,只有 email/账号框。
  *
  * 思路对齐 Bitwarden inline-menu-field-qualification.service.ts 的
- * isUsernameFieldForLoginForm:先排除明显不是 username 的场景(密码框、附近就有
- * 密码框 → 走标准带密码路径、搜索框),再用 autocomplete 与字段名词法正向识别。
- * 只在「确实找不到密码框」的兜底分支里调用,所以这里对「有密码框」一律否决。
+ * isUsernameFieldForLoginForm:先排除明显不是 username 的场景(密码框、页内
+ * 存在可见密码框 → 走标准带密码路径),再用 autocomplete 与字段名词法正向识别。
  */
 export function isUsernameOnlyCandidate(input: HTMLInputElement): boolean {
   // 先复用既有 login 候选门槛(可见、未禁用、非 TOTP、type 合法等)。
@@ -85,20 +111,30 @@ export function isUsernameOnlyCandidate(input: HTMLInputElement): boolean {
   // password 框本身永远走标准路径,不是「只填用户名」的第一页候选。
   if ((input.getAttribute("type") ?? "").toLowerCase() === "password")
     return false;
-  // 只要 input 同 form / 邻近作用域里存在可见 password 框,就一律走标准带密码
-  // 路径(有密码框 → 不是 identifier-first 第一页)。
-  if (findPasswordNear(input)) return false;
-  const scope = input.form ?? nearestContainer(input) ?? document;
-  if (scope.querySelector('input[type="password"]')) return false;
+  // 整个 document(含 open shadow root)存在可见 password 框 → 不是
+  // identifier-first 第一页,一律走标准带密码路径。旧实现只查最近容器,
+  // formless SPA(每个字段被独立 div 包装)会被误判成 identifier-first,
+  // 导致「只填用户名、密码框留空」。
+  if (visiblePasswordIn(input.ownerDocument)) return false;
+  return looksLikeUsername(input);
+}
 
-  // autocomplete 明确声明为用户名/邮箱/webauthn → 直接判定为 username 候选。
-  const autocomplete = (input.getAttribute("autocomplete") ?? "")
+/**
+ * 词法判定 input 是否「像用户名框」。
+ *
+ * autocomplete 是空格分隔的 token 列表(如 Google 的 "username webauthn"),
+ * 必须按 token 判而非整串等号比较;词法兜底前先否决搜索框
+ * (Bitwarden 同样先排搜索)。
+ */
+function looksLikeUsername(input: HTMLInputElement): boolean {
+  const tokens = (input.getAttribute("autocomplete") ?? "")
     .toLowerCase()
-    .trim();
+    .split(/\s+/)
+    .filter(Boolean);
   if (
-    autocomplete === "username" ||
-    autocomplete === "email" ||
-    autocomplete === "webauthn"
+    tokens.includes("username") ||
+    tokens.includes("email") ||
+    tokens.includes("webauthn")
   ) {
     return true;
   }
@@ -114,10 +150,10 @@ export function isUsernameOnlyCandidate(input: HTMLInputElement): boolean {
     .join(" ")
     .toLowerCase();
 
-  // 先排除搜索框(防止把站内搜索/查询框误当登录用户名,Bitwarden 同样先排搜索)。
   if (/search|q\b|搜索|query/.test(haystack)) return false;
-  // 正向命中常见用户名/账号/邮箱/手机号语义词 → username 候选。
-  return /user|email|account|login|账号|邮箱|手机|phone|tel/.test(haystack);
+  return /user|email|account|login|identifier|账号|邮箱|手机|phone|tel/.test(
+    haystack,
+  );
 }
 
 export function isLoginCandidate(
@@ -141,42 +177,131 @@ export function isLoginCandidate(
 function findUsernameInput(
   password: HTMLInputElement,
 ): HTMLInputElement | null {
-  const scope = password.form ?? nearestContainer(password) ?? document;
-  const candidates = Array.from(
-    scope.querySelectorAll<HTMLInputElement>("input"),
-  ).filter((input) => {
-    const type = (input.getAttribute("type") ?? "").toLowerCase();
-    return (
-      input !== password &&
-      USERNAME_TYPES.has(type) &&
-      !input.disabled &&
-      !input.readOnly &&
-      isVisible(input)
+  // 作用域链由内向外,取第一层有候选的 scope。document 级属「远距配对」,
+  // 要求候选通过 looksLikeUsername 词法门槛,防止把搜索框等误配成用户名。
+  for (const { scope, distant } of scopeChain(password)) {
+    const candidates = inputsIn(scope).filter((input) => {
+      const type = (input.getAttribute("type") ?? "").toLowerCase();
+      return (
+        input !== password &&
+        USERNAME_TYPES.has(type) &&
+        !input.disabled &&
+        !input.readOnly &&
+        isVisible(input) &&
+        (!distant || looksLikeUsername(input))
+      );
+    });
+    if (candidates.length === 0) continue;
+    const beforePassword = candidates.filter(
+      (input) =>
+        input.compareDocumentPosition(password) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
     );
-  });
-  const beforePassword = candidates.filter(
-    (input) =>
-      input.compareDocumentPosition(password) &
-      Node.DOCUMENT_POSITION_FOLLOWING,
-  );
-  return beforePassword.at(-1) ?? candidates[0] ?? null;
+    return beforePassword.at(-1) ?? candidates[0] ?? null;
+  }
+  return null;
 }
 
 function findPasswordNear(input: HTMLInputElement): HTMLInputElement | null {
   if ((input.getAttribute("type") ?? "").toLowerCase() === "password")
     return input;
-  const scope = input.form ?? nearestContainer(input) ?? document;
-  const passwords = Array.from(
-    scope.querySelectorAll<HTMLInputElement>('input[type="password"]'),
-  ).filter(
-    (candidate) =>
-      !candidate.disabled && !candidate.readOnly && isVisible(candidate),
-  );
-  return passwords[0] ?? null;
+  for (const { scope, distant } of scopeChain(input)) {
+    const password = visiblePasswordIn(scope);
+    if (!password) continue;
+    // 远距配对(document 级)要求 input 本身词法上像用户名,否则宁可不配:
+    // 页面角落的登录表单不该把页头搜索框吸成 username 槽位。
+    if (distant && !looksLikeUsername(input)) return null;
+    return password;
+  }
+  return null;
 }
 
-function nearestContainer(input: HTMLInputElement): ParentNode | null {
-  return input.closest("form, [role='form'], main, section, div");
+interface ScopeCandidate {
+  scope: ParentNode;
+  /** document 级远距配对 —— 调用方需对候选加词法门槛。 */
+  distant: boolean;
+}
+
+/**
+ * input 的配对作用域链,由内向外:
+ *   1. 所属 <form>(含 form 属性关联);
+ *   2. 最近的通用容器(含 div,保持旧行为的最小作用域);
+ *   3. 最近的语义分区(跳过逐层 div —— formless SPA 里每个字段常被独立
+ *      div 包装,旧实现停在 div 一层导致账密永远配不上);
+ *   4. 整个 document(distant,兜住跨大区块布局与跨 shadow root)。
+ * closest 不穿 shadow boundary,逐级用 root.host 续走。
+ */
+function scopeChain(input: HTMLInputElement): ScopeCandidate[] {
+  const chain: ScopeCandidate[] = [];
+  const push = (scope: ParentNode | null, distant: boolean): void => {
+    if (scope && !chain.some((entry) => entry.scope === scope)) {
+      chain.push({ scope, distant });
+    }
+  };
+  push(input.form, false);
+  push(
+    closestThroughShadow(input, "form, [role='form'], main, section, div"),
+    false,
+  );
+  push(
+    closestThroughShadow(
+      input,
+      "form, [role='form'], fieldset, article, section, main",
+    ),
+    false,
+  );
+  push(input.ownerDocument, true);
+  return chain;
+}
+
+function closestThroughShadow(
+  start: Element,
+  selector: string,
+): Element | null {
+  let element: Element | null = start;
+  while (element) {
+    const hit = element.closest(selector);
+    if (hit) return hit;
+    const root = element.getRootNode();
+    element = root instanceof ShadowRoot ? root.host : null;
+  }
+  return null;
+}
+
+function inputsIn(scope: ParentNode): HTMLInputElement[] {
+  // 同一 shadow tree 内部的 scope 查询就是普通 DOM;跨 root 的深度遍历
+  // 只在 document 级兜底做。
+  if (scope instanceof Document) return queryInputsDeep(scope);
+  return Array.from(scope.querySelectorAll<HTMLInputElement>("input"));
+}
+
+function visiblePasswordIn(scope: ParentNode): HTMLInputElement | null {
+  const usable = (input: HTMLInputElement): boolean =>
+    !input.disabled && !input.readOnly && isVisible(input);
+  const light = Array.from(
+    scope.querySelectorAll<HTMLInputElement>('input[type="password"]'),
+  ).find(usable);
+  if (light) return light;
+  if (!(scope instanceof Document)) return null;
+  return (
+    queryInputsDeep(scope).find(
+      (input) => input.type === "password" && usable(input),
+    ) ?? null
+  );
+}
+
+/** open shadow root 递归收集 input。深度上限防御病态嵌套。 */
+const MAX_SHADOW_DEPTH = 4;
+
+function queryInputsDeep(root: ParentNode, depth = 0): HTMLInputElement[] {
+  const out = Array.from(root.querySelectorAll<HTMLInputElement>("input"));
+  if (depth >= MAX_SHADOW_DEPTH) return out;
+  for (const element of Array.from(root.querySelectorAll("*"))) {
+    if (element.shadowRoot) {
+      out.push(...queryInputsDeep(element.shadowRoot, depth + 1));
+    }
+  }
+  return out;
 }
 
 function simulateUserFill(input: HTMLInputElement, value: string): void {

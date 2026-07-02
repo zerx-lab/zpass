@@ -9,11 +9,16 @@ import {
   showPageToast,
 } from "../src/content/ui";
 import {
+  deepActiveElement,
   fillLoginForm,
   fillTotpInput,
+  fillUsernameInput,
   findLoginFormForInput,
   findLoginForms,
+  isLoginCandidate,
+  isUsernameOnlyCandidate,
 } from "../src/content/forms";
+import { recallLoginInput } from "../src/content/focus-registry";
 import { installLoginCapture } from "../src/content/capture-login";
 import { isTotpField } from "../src/content/totp-fields";
 import { InlineMenuController } from "../src/content/inline-menu-controller";
@@ -184,16 +189,29 @@ export default defineContentScript({
       const msg = message as { type?: string; secret?: LoginSecret };
       if (msg.type !== "zpass.fillLogin" || !msg.secret) return undefined;
       try {
-        // 仅当焦点真的在 input 上时,才用「找焦点所在 form」路径。
-        // 否则 document.activeElement 通常是 <body>,会被 findLoginFormForInput
-        // 误当作 username 槽位返回,导致后续 simulateUserFill 对非 input 节点
-        // 调 valueSetter 抛 Illegal invocation,表现为「没聚焦就填不上」。
-        const active = document.activeElement;
-        const activeForm =
+        // 目标表单优先级:
+        //   1. 真实焦点(deepActiveElement 穿透 open shadow root)所在
+        //      form —— 仅当焦点真的在 input 上;否则 activeElement 通常是
+        //      <body>,会被 findLoginFormForInput 误当 username 槽位,导致
+        //      simulateUserFill 对非 input 节点抛 Illegal invocation;
+        //   2. 最后聚焦的 login input:用户点击内联菜单时焦点已移入浮层
+        //      shell,activeElement 不再是 input;identifier-first 页(如
+        //      Google 第一步)没有 password 框,findLoginForms 兜底两手
+        //      空空 —— 即「选择账户不会填充」的根因;
+        //   3. findLoginForms(document)[0] 兜底(popup 等无焦点场景,
+        //      activeElement 跨窗口失焦后仍保留,通常已被 1 覆盖)。
+        const active = deepActiveElement();
+        let form =
           active instanceof HTMLInputElement
             ? findLoginFormForInput(active)
             : null;
-        const form = activeForm ?? findLoginForms(document)[0];
+        if (!form) {
+          const remembered = recallLoginInput();
+          if (remembered && isLoginCandidate(remembered)) {
+            form = findLoginFormForInput(remembered);
+          }
+        }
+        form ??= findLoginForms(document)[0] ?? null;
         if (!form) {
           // 本 frame 无可填表单 —— 不应答，allFrames:true 下交给其他 frame。
           return undefined;
@@ -488,7 +506,53 @@ async function handlePasskeyChoose(message: PageBridgeRequest): Promise<void> {
     );
     return;
   }
+  // 提示性回填:把选中的账户名写进页面的用户名/邮箱框。签名成功时站点直接
+  // 用 assertion 的 userHandle 登录,这只是锦上添花;但签名失败/超时/回退
+  // 浏览器原生流程时,用户至少看到「选中的账户已填入」,页面停在可继续状态。
+  if (selected.userName) fillUsernameHint(selected.userName);
   postPasskeyResponse(message.id, true, selected);
+}
+
+/**
+ * 尽力把 passkey 选中账户的用户名回填到页面的用户名/邮箱框。
+ * 纯提示性,任何一步失败都静默放弃,不影响 passkey 主流程。
+ */
+function fillUsernameHint(userName: string): void {
+  try {
+    const active = deepActiveElement();
+    if (
+      active instanceof HTMLInputElement &&
+      isLoginCandidate(active) &&
+      (active.getAttribute("type") ?? "").toLowerCase() !== "password"
+    ) {
+      fillUsernameInput(active, userName);
+      return;
+    }
+    const remembered = recallLoginInput();
+    if (
+      remembered &&
+      isLoginCandidate(remembered) &&
+      (remembered.getAttribute("type") ?? "").toLowerCase() !== "password"
+    ) {
+      fillUsernameInput(remembered, userName);
+      return;
+    }
+    const form = findLoginForms(document)[0];
+    if (form?.username) {
+      fillUsernameInput(form.username, userName);
+      return;
+    }
+    for (const input of Array.from(
+      document.querySelectorAll<HTMLInputElement>("input"),
+    )) {
+      if (isUsernameOnlyCandidate(input)) {
+        fillUsernameInput(input, userName);
+        return;
+      }
+    }
+  } catch {
+    // 回填失败不影响 passkey 主流程。
+  }
 }
 
 function sendExtensionRequest<T = unknown>(message: {
